@@ -2,6 +2,7 @@ import 'package:campusconnect/services/auth/auth_exceptions.dart';
 import 'package:campusconnect/services/auth/auth_provider.dart';
 import 'package:campusconnect/services/auth/auth_user.dart';
 import 'package:flutter_test/flutter_test.dart';
+
 void main() {
   group('Mock Authentication', () {
     final provider = MockAuthProvider();
@@ -36,18 +37,12 @@ void main() {
 
     test('Create user should delegate to logIn function', () async {
       expect(
-        provider.createUser(
-          email: 'foo@bar.com',
-          password: 'anypassword',
-        ),
+        provider.createUser(email: 'foo@bar.com', password: 'anypassword'),
         throwsA(const TypeMatcher<UserNotFoundAuthException>()),
       );
 
       expect(
-        provider.createUser(
-          email: 'someone@bar.com',
-          password: 'foobar',
-        ),
+        provider.createUser(email: 'someone@bar.com', password: 'foobar'),
         throwsA(const TypeMatcher<WrongPasswordAuthException>()),
       );
 
@@ -102,7 +97,11 @@ class MockAuthProvider implements AuthProvider {
     if (!isInitialized) throw NotInitializedException();
     if (email == 'foo@bar.com') throw UserNotFoundAuthException();
     if (password == 'foobar') throw WrongPasswordAuthException();
-    const user = AuthUser(isEmailVerified: false);
+    const user = AuthUser(
+      id: 'test-user-id',
+      email: 'test@example.com',
+      isEmailVerified: false,
+    );
     _user = user;
     return Future.value(user);
   }
@@ -120,7 +119,11 @@ class MockAuthProvider implements AuthProvider {
     if (!isInitialized) throw NotInitializedException();
     final user = _user;
     if (user == null) throw UserNotFoundAuthException();
-    const newUser = AuthUser(isEmailVerified: true);
+    const newUser = AuthUser(
+      id: 'test-user-id',
+      email: 'test@example.com',
+      isEmailVerified: true,
+    );
     _user = newUser;
   }
 }

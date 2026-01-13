@@ -7,6 +7,7 @@ import 'package:campusconnect/services/firestore/notes_service.dart';
 import 'package:campusconnect/services/firestore/placements_service.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class NotesView extends StatefulWidget {
   const NotesView({super.key});
@@ -30,6 +31,7 @@ class _NotesViewState extends State<NotesView> {
           _buildNotesScreen(),
           _buildPlacementsScreen(),
           _buildChatScreen(),
+          _buildProfileScreen(),
         ],
       ),
       bottomNavigationBar: BottomNavigationBar(
@@ -43,6 +45,7 @@ class _NotesViewState extends State<NotesView> {
             label: 'Placements',
           ),
           BottomNavigationBarItem(icon: Icon(Icons.chat), label: 'AI Chat'),
+          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
         ],
         onTap: (index) {
           setState(() {
@@ -293,12 +296,8 @@ class _NotesViewState extends State<NotesView> {
             if (note.downloadUrl != null) ...[
               const SizedBox(height: 12),
               ElevatedButton.icon(
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Download functionality coming soon'),
-                    ),
-                  );
+                onPressed: () async {
+                  await _handleNoteDownload(note.downloadUrl!);
                 },
                 icon: const Icon(Icons.download),
                 label: const Text('Download'),
@@ -424,22 +423,83 @@ class _NotesViewState extends State<NotesView> {
                   ],
                 ),
                 if (!placement.isDeadlinePassed)
-                  ElevatedButton(
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Apply functionality coming soon'),
-                        ),
-                      );
-                    },
-                    child: const Text('Apply'),
-                  ),
+                  _buildApplyButton(placement.id),
               ],
             ),
           ],
         ),
       ),
     );
+  }
+
+  Widget _buildApplyButton(String placementId) {
+    final userId = AuthService.firebase().currentUser?.id;
+    if (userId == null) return const SizedBox.shrink();
+
+    return FutureBuilder<bool>(
+      future: _placementsService.hasUserApplied(
+        userId: userId,
+        placementId: placementId,
+      ),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return SizedBox(
+            width: 40,
+            height: 40,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.blue.shade400),
+            ),
+          );
+        }
+
+        final hasApplied = snapshot.data ?? false;
+
+        if (hasApplied) {
+          return Chip(
+            label: const Text('Applied'),
+            backgroundColor: Colors.blue.shade100,
+            labelStyle: TextStyle(color: Colors.blue.shade700),
+          );
+        }
+
+        return ElevatedButton(
+          onPressed: () => _showApplyDialog(placementId),
+          child: const Text('Apply'),
+        );
+      },
+    );
+  }
+
+  void _showApplyDialog(String placementId) {
+    showDialog(
+      context: context,
+      builder: (context) => _ApplyDialogWidget(
+        placementId: placementId,
+        placementsService: _placementsService,
+      ),
+    );
+  }
+
+  Future<void> _handleNoteDownload(String downloadUrl) async {
+    try {
+      final uri = Uri.parse(downloadUrl);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not open the link')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Error opening note')));
+      }
+    }
   }
 
   Widget _buildChatScreen() {
@@ -518,6 +578,141 @@ class _NotesViewState extends State<NotesView> {
     );
   }
 
+  Widget _buildProfileScreen() {
+    final user = AuthService.firebase().currentUser;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Profile'),
+        backgroundColor: Colors.blue.shade400,
+        elevation: 0,
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Profile Header
+            Center(
+              child: Column(
+                children: [
+                  Container(
+                    width: 80,
+                    height: 80,
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade400,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.person,
+                      size: 40,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Student',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 32),
+
+            // Account Information
+            Text(
+              'Account Information',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 16),
+            _buildProfileInfoCard(
+              label: 'Email',
+              value: user?.email ?? 'Not available',
+            ),
+            _buildProfileInfoCard(label: 'App Version', value: 'v2.0.0'),
+            const SizedBox(height: 32),
+
+            // Settings Section
+            Text('Settings', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: const Icon(Icons.lock_outline),
+              title: const Text('Change Password'),
+              subtitle: const Text('Update your password'),
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Change password coming in a future update'),
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.notifications_none),
+              title: const Text('Notifications'),
+              subtitle: const Text('Manage your notifications'),
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Notification settings coming soon'),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 32),
+
+            // Logout Button
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () => _handleProfileLogout(),
+                icon: const Icon(Icons.logout),
+                label: const Text('Logout'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red.shade400,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProfileInfoCard({required String label, required String value}) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: Colors.grey),
+            ),
+            const SizedBox(height: 8),
+            Text(value, style: Theme.of(context).textTheme.bodyLarge),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _handleProfileLogout() async {
+    final shouldLogout = await _showLogOutDialog();
+    if (shouldLogout && mounted) {
+      await AuthService.firebase().logOut();
+      if (!mounted) return;
+      Navigator.of(context).pushNamedAndRemoveUntil(loginRoute, (_) => false);
+    }
+  }
+
   Future<bool> _showLogOutDialog() {
     return showDialog<bool>(
       context: context,
@@ -542,5 +737,129 @@ class _NotesViewState extends State<NotesView> {
         );
       },
     ).then((value) => value ?? false);
+  }
+}
+
+class _ApplyDialogWidget extends StatefulWidget {
+  final String placementId;
+  final PlacementsService placementsService;
+
+  const _ApplyDialogWidget({
+    required this.placementId,
+    required this.placementsService,
+  });
+
+  @override
+  State<_ApplyDialogWidget> createState() => _ApplyDialogWidgetState();
+}
+
+class _ApplyDialogWidgetState extends State<_ApplyDialogWidget> {
+  late final TextEditingController _resumeController;
+  bool _isLoading = false;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _resumeController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _resumeController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Apply for Placement'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _resumeController,
+              maxLines: 4,
+              decoration: InputDecoration(
+                hintText: 'Paste your resume or brief background...',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
+            if (_errorMessage != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                _errorMessage!,
+                style: TextStyle(color: Colors.red.shade600),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isLoading ? null : () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: _isLoading ? null : _submitApplication,
+          child: _isLoading
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Submit'),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _submitApplication() async {
+    final resume = _resumeController.text.trim();
+    if (resume.isEmpty) {
+      setState(() {
+        _errorMessage = 'Please provide your resume or background information.';
+      });
+      return;
+    }
+
+    final userId = AuthService.firebase().currentUser?.id;
+    if (userId == null) {
+      setState(() => _errorMessage = 'User not authenticated');
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await widget.placementsService.applyForPlacement(
+        userId: userId,
+        placementId: widget.placementId,
+        resume: resume,
+      );
+
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Application submitted successfully!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Error submitting application. Please try again.';
+          _isLoading = false;
+        });
+      }
+    }
   }
 }
