@@ -1,7 +1,9 @@
 import 'package:campusconnect/constants/routes.dart';
 import 'package:campusconnect/enums/menu_action.dart';
+import 'package:campusconnect/models/chat_message.dart';
 import 'package:campusconnect/models/note.dart';
 import 'package:campusconnect/models/placement.dart';
+import 'package:campusconnect/services/ai/ai_service.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/services/firestore/notes_service.dart';
 import 'package:campusconnect/services/firestore/placements_service.dart';
@@ -20,6 +22,20 @@ class _NotesViewState extends State<NotesView> {
   int _selectedIndex = 0;
   final NotesService _notesService = NotesService.instance();
   final PlacementsService _placementsService = PlacementsService.instance();
+  final AIService _aiService = AIService.instance();
+
+  // Chat state
+  final List<ChatMessage> _chatMessages = [];
+  final TextEditingController _chatController = TextEditingController();
+  final ScrollController _chatScrollController = ScrollController();
+  bool _isLoadingAIResponse = false;
+
+  @override
+  void dispose() {
+    _chatController.dispose();
+    _chatScrollController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -512,70 +528,240 @@ class _NotesViewState extends State<NotesView> {
       body: Column(
         children: [
           Expanded(
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Column(
-                      children: [
-                        Icon(
-                          Icons.smart_toy,
-                          size: 64,
-                          color: Colors.blue.shade400,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'CampusConnect AI',
-                          style: Theme.of(context).textTheme.headlineSmall,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Your personal AI mentor for academics and career guidance',
-                          textAlign: TextAlign.center,
-                          style: Theme.of(
-                            context,
-                          ).textTheme.bodyMedium?.copyWith(color: Colors.grey),
-                        ),
-                      ],
-                    ),
+            child: _chatMessages.isEmpty
+                ? _buildEmptyChatState()
+                : ListView.builder(
+                    controller: _chatScrollController,
+                    padding: const EdgeInsets.all(16),
+                    itemCount: _chatMessages.length,
+                    itemBuilder: (context, index) {
+                      return _buildChatBubble(_chatMessages[index]);
+                    },
                   ),
-                ),
+          ),
+          if (_isLoadingAIResponse) _buildLoadingIndicator(),
+          _buildChatInput(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyChatState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.smart_toy, size: 64, color: Colors.blue.shade400),
+            const SizedBox(height: 16),
+            Text(
+              'CampusConnect AI',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Your personal AI mentor for academics and career guidance',
+              textAlign: TextAlign.center,
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: Colors.grey),
+            ),
+            const SizedBox(height: 24),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.center,
+              children: [
+                _buildSuggestionChip('How to prepare for placements?'),
+                _buildSuggestionChip('Study tips for exams'),
+                _buildSuggestionChip('Career guidance'),
+                _buildSuggestionChip('Resume help'),
               ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSuggestionChip(String text) {
+    return ActionChip(
+      label: Text(text),
+      onPressed: () => _handleSendMessage(text),
+    );
+  }
+
+  Widget _buildChatBubble(ChatMessage message) {
+    return Align(
+      alignment: message.isUserMessage
+          ? Alignment.centerRight
+          : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.75,
+        ),
+        decoration: BoxDecoration(
+          color: message.isUserMessage
+              ? Colors.blue.shade400
+              : Colors.grey.shade200,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              message.content,
+              style: TextStyle(
+                color: message.isUserMessage ? Colors.white : Colors.black87,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              DateFormat('HH:mm').format(message.timestamp),
+              style: TextStyle(
+                fontSize: 10,
+                color: message.isUserMessage
+                    ? Colors.white.withOpacity(0.7)
+                    : Colors.grey,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLoadingIndicator() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.blue.shade400),
             ),
           ),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              border: Border(top: BorderSide(color: Colors.grey.shade300)),
-            ),
-            child: Column(
-              children: [
-                TextField(
-                  decoration: InputDecoration(
-                    hintText: 'Ask me anything...',
-                    suffixIcon: IconButton(
-                      icon: const Icon(Icons.send),
-                      onPressed: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Chat functionality coming soon'),
-                          ),
-                        );
-                      },
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(24),
-                    ),
-                  ),
+          const SizedBox(width: 12),
+          Text(
+            'AI is thinking...',
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: Colors.grey),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChatInput() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: Colors.grey.shade300)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _chatController,
+              maxLines: null,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: InputDecoration(
+                hintText: 'Ask me anything...',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(24),
                 ),
-              ],
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+              ),
+              onSubmitted: (_) => _handleSendMessage(_chatController.text),
+            ),
+          ),
+          const SizedBox(width: 8),
+          IconButton(
+            onPressed: _isLoadingAIResponse
+                ? null
+                : () => _handleSendMessage(_chatController.text),
+            icon: Icon(
+              Icons.send,
+              color: _isLoadingAIResponse ? Colors.grey : Colors.blue.shade400,
             ),
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _handleSendMessage(String text) async {
+    final message = text.trim();
+    if (message.isEmpty || _isLoadingAIResponse) return;
+
+    final userId = AuthService.firebase().currentUser?.id;
+    if (userId == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('User not authenticated')));
+      return;
+    }
+
+    // Clear input
+    _chatController.clear();
+
+    // Add user message
+    setState(() {
+      _chatMessages.add(ChatMessage.user(message));
+      _isLoadingAIResponse = true;
+    });
+
+    // Scroll to bottom
+    _scrollToBottom();
+
+    try {
+      // Call AI service
+      final aiResponse = await _aiService.sendMessage(
+        userId: userId,
+        message: message,
+      );
+
+      // Add AI response
+      setState(() {
+        _chatMessages.add(ChatMessage.ai(aiResponse));
+        _isLoadingAIResponse = false;
+      });
+
+      // Scroll to bottom
+      _scrollToBottom();
+    } catch (e) {
+      setState(() {
+        _chatMessages.add(
+          ChatMessage.ai(
+            'Sorry, I encountered an error. Please try again.\n\nError: $e',
+          ),
+        );
+        _isLoadingAIResponse = false;
+      });
+      _scrollToBottom();
+    }
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_chatScrollController.hasClients) {
+        _chatScrollController.animateTo(
+          _chatScrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
   }
 
   Widget _buildProfileScreen() {
