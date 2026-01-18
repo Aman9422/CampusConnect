@@ -725,7 +725,7 @@ class _NotesViewState extends State<NotesView> {
     _scrollToBottom();
 
     try {
-      // Call AI service
+      // Call AI service (VERSION 4: Returns AIResponse with metadata)
       final aiResponse = await _aiService.sendMessage(
         userId: userId,
         message: message,
@@ -733,9 +733,24 @@ class _NotesViewState extends State<NotesView> {
 
       // Add AI response
       setState(() {
-        _chatMessages.add(ChatMessage.ai(aiResponse));
+        _chatMessages.add(ChatMessage.ai(aiResponse.message));
         _isLoadingAIResponse = false;
       });
+
+      // VERSION 4: Show trial info if trial is expiring soon
+      if (aiResponse.trial != null &&
+          aiResponse.trial!.isActive &&
+          aiResponse.trial!.daysRemaining <= 2) {
+        _showTrialWarning(aiResponse.trial!.daysRemaining);
+      }
+
+      // VERSION 4: Show usage warning if near limit
+      if (aiResponse.usage != null && aiResponse.usage!.isNearLimit) {
+        _showUsageWarning(
+          aiResponse.usage!.dailyCount,
+          aiResponse.usage!.dailyLimit,
+        );
+      }
 
       // Scroll to bottom
       _scrollToBottom();
@@ -762,6 +777,34 @@ class _NotesViewState extends State<NotesView> {
         );
       }
     });
+  }
+
+  // VERSION 4: Show trial expiration warning
+  void _showTrialWarning(int daysRemaining) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          daysRemaining == 1
+              ? 'Your AI trial expires tomorrow! '
+              : 'Your AI trial expires in $daysRemaining days.',
+        ),
+        backgroundColor: Colors.orange,
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+
+  // VERSION 4: Show usage limit warning
+  void _showUsageWarning(int current, int limit) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('You\'ve used $current of $limit daily AI messages.'),
+        backgroundColor: Colors.orange.shade700,
+        duration: const Duration(seconds: 3),
+      ),
+    );
   }
 
   Widget _buildProfileScreen() {
