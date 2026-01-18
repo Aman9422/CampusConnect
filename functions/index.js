@@ -1,4 +1,4 @@
-const {onRequest} = require("firebase-functions/v2/https");
+const {onRequest, onCall} = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 
 admin.initializeApp();
@@ -670,38 +670,118 @@ exports.logPlacementView = onRequest(
 );
 
 /**
- * Log placement application event (VERSION 4)
- * Call this from placement application logic
+ * Log placement application event and create application record (VERSION 4)
+ * 
+ * This is an HTTPS Callable Cloud Function (onCall) that:
+ * 1. Extracts uid from Firebase Auth context (cannot be spoofed)
+ * 2. Creates application record in top-level `applications` collection
+ * 3. Mirrors to `placements/{placementId}/applications/{userId}` for compatibility
+ * 4. Logs placement_applied analytics event
+ * 5. Returns success/error via callable response
+ * 
+ * Security: uid comes from Firebase Auth, not from client input
  */
-exports.logPlacementApplication = onRequest(
-    {cors: true},
-    async (request, response) => {
-      if (request.method !== "POST") {
-        return response.status(405).json({error: "Method not allowed"});
+exports.logPlacementApplication = onCall(
+    {cors: false},
+    async (request) => {
+      // Extract uid from Firebase Auth context (automatically validated)
+      const uid = request.auth?.uid;
+      
+      if (!uid) {
+        throw new admin.functions.https.HttpsError(
+            'unauthenticated',
+            'User must be logged in to apply'
+        );
       }
 
       try {
-        const {userId, placementId, company} = request.body;
+        // Extract data from request.data (HTTPS Callable payload)
+        const {placementId, resumeUrl, company} = request.data;
 
-        if (!userId || !placementId) {
-          return response.status(400).json({
-            error: "Missing required fields",
-          });
+        // Validate required fields
+        if (!placementId) {
+          throw new admin.functions.https.HttpsError(
+              'invalid-argument',
+              'Missing required field: placementId'
+          );
         }
 
+        // VERSION 4: Create application in top-level collection
+        const applicationId = `${uid}_${placementId}`;
+        
+        await admin.firestore().runTransaction(async (transaction) => {
+          // Check if already applied (prevent duplicates)
+          const existingApp = await transaction.get(
+              admin.firestore()
+                  .collection("applications")
+                  .doc(applicationId)
+          );
+
+          if (existingApp.exists) {
+            // User already applied - return success (idempotent)
+            return;
+          }
+
+          // Create application in top-level collection (V4)
+          transaction.set(
+              admin.firestore()
+                  .collection("applications")
+                  .doc(applicationId),
+              {
+                userId: uid,
+                placementId,
+                resumeUrl: resumeUrl || "",
+                appliedAt: admin.firestore.FieldValue.serverTimestamp(),
+                status: "applied",
+              }
+          );
+
+          // Mirror to old structure for backward compatibility
+          transaction.set(
+              admin.firestore()
+                  .collection("placements")
+                  .doc(placementId)
+                  .collection("applications")
+                  .doc(uid),
+              {
+                userId: uid,
+                placementId,
+                resume: resumeUrl || "",
+                appliedAt: admin.firestore.FieldValue.serverTimestamp(),
+                status: "pending",
+              }
+          );
+        });
+
+        // Log analytics event
         await logAnalyticsEvent({
           eventType: "placement_applied",
-          userId,
+          userId: uid,
           metadata: {
             placementId,
-            company,
+            company: company || "Unknown",
           },
         });
 
-        return response.status(200).json({success: true});
+        // Return success to Flutter
+        return {
+          success: true,
+          message: "Application submitted successfully",
+          applicationId,
+        };
       } catch (error) {
-        console.error("Error logging placement application:", error);
-        return response.status(500).json({error: "Internal server error"});
+        console.error("Error in logPlacementApplication:", error);
+        
+        // If it's already an HttpsError, rethrow it
+        if (error instanceof admin.functions.https.HttpsError) {
+          throw error;
+        }
+        
+        // Otherwise, throw a generic error
+        throw new admin.functions.https.HttpsError(
+            'internal',
+            'Failed to submit application: ' + error.message
+        );
       }
     }
 );

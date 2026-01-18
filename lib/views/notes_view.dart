@@ -30,6 +30,47 @@ class _NotesViewState extends State<NotesView> {
   final ScrollController _chatScrollController = ScrollController();
   bool _isLoadingAIResponse = false;
 
+  // Track applied placements for UI state
+  final Set<String> _appliedPlacementIds = {};
+  bool _isLoadingApplications = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserApplications();
+  }
+
+  Future<void> _loadUserApplications() async {
+    final userId = AuthService.firebase().currentUser?.id;
+    if (userId == null) {
+      setState(() => _isLoadingApplications = false);
+      return;
+    }
+
+    try {
+      final applicationsStream = _placementsService.getUserApplications(userId);
+      applicationsStream.listen((placementIds) {
+        if (mounted) {
+          setState(() {
+            _appliedPlacementIds.clear();
+            _appliedPlacementIds.addAll(placementIds);
+            _isLoadingApplications = false;
+          });
+        }
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoadingApplications = false);
+      }
+    }
+  }
+
+  void _markAsApplied(String placementId) {
+    setState(() {
+      _appliedPlacementIds.add(placementId);
+    });
+  }
+
   @override
   void dispose() {
     _chatController.dispose();
@@ -439,7 +480,7 @@ class _NotesViewState extends State<NotesView> {
                   ],
                 ),
                 if (!placement.isDeadlinePassed)
-                  _buildApplyButton(placement.id),
+                  _buildApplyButton(placement.id, placement.company),
               ],
             ),
           ],
@@ -448,51 +489,45 @@ class _NotesViewState extends State<NotesView> {
     );
   }
 
-  Widget _buildApplyButton(String placementId) {
+  Widget _buildApplyButton(String placementId, String company) {
     final userId = AuthService.firebase().currentUser?.id;
     if (userId == null) return const SizedBox.shrink();
 
-    return FutureBuilder<bool>(
-      future: _placementsService.hasUserApplied(
-        userId: userId,
-        placementId: placementId,
-      ),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return SizedBox(
-            width: 40,
-            height: 40,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              valueColor: AlwaysStoppedAnimation<Color>(Colors.blue.shade400),
-            ),
-          );
-        }
+    if (_isLoadingApplications) {
+      return SizedBox(
+        width: 40,
+        height: 40,
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+          valueColor: AlwaysStoppedAnimation<Color>(Colors.blue.shade400),
+        ),
+      );
+    }
 
-        final hasApplied = snapshot.data ?? false;
+    final hasApplied = _appliedPlacementIds.contains(placementId);
 
-        if (hasApplied) {
-          return Chip(
-            label: const Text('Applied'),
-            backgroundColor: Colors.blue.shade100,
-            labelStyle: TextStyle(color: Colors.blue.shade700),
-          );
-        }
+    if (hasApplied) {
+      return Chip(
+        label: const Text('Applied'),
+        backgroundColor: Colors.blue.shade100,
+        labelStyle: TextStyle(color: Colors.blue.shade700),
+      );
+    }
 
-        return ElevatedButton(
-          onPressed: () => _showApplyDialog(placementId),
-          child: const Text('Apply'),
-        );
-      },
+    return ElevatedButton(
+      onPressed: () => _showApplyDialog(placementId, company),
+      child: const Text('Apply'),
     );
   }
 
-  void _showApplyDialog(String placementId) {
+  void _showApplyDialog(String placementId, String company) {
     showDialog(
       context: context,
       builder: (context) => _ApplyDialogWidget(
         placementId: placementId,
+        company: company,
         placementsService: _placementsService,
+        onApplicationSuccess: () => _markAsApplied(placementId),
       ),
     );
   }
@@ -971,11 +1006,15 @@ class _NotesViewState extends State<NotesView> {
 
 class _ApplyDialogWidget extends StatefulWidget {
   final String placementId;
+  final String company;
   final PlacementsService placementsService;
+  final VoidCallback onApplicationSuccess;
 
   const _ApplyDialogWidget({
     required this.placementId,
+    required this.company,
     required this.placementsService,
+    required this.onApplicationSuccess,
   });
 
   @override
@@ -1071,9 +1110,11 @@ class _ApplyDialogWidgetState extends State<_ApplyDialogWidget> {
         userId: userId,
         placementId: widget.placementId,
         resume: resume,
+        company: widget.company,
       );
 
       if (mounted) {
+        widget.onApplicationSuccess();
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(

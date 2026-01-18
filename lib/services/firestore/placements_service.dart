@@ -1,5 +1,6 @@
 import 'package:campusconnect/models/placement.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
 class PlacementsService {
   final FirebaseFirestore _firestore;
@@ -55,40 +56,58 @@ class PlacementsService {
     }
   }
 
-  // Apply for a placement (VERSION 4: Improved application tracking)
+  // Apply for a placement (VERSION 4: Uses Cloud Function for security)
   Future<void> applyForPlacement({
     required String userId,
     required String placementId,
     required String resume,
+    String? company,
   }) async {
     try {
-      // VERSION 4: Store application in a top-level collection
-      // This preserves applications even if placement is deleted/closed
-      final applicationId = '${userId}_$placementId';
+      // VERSION 4: Use Cloud Function callable via HTTP
+      // This ensures:
+      // 1. Application record is created server-side (not blocked by security rules)
+      // 2. Duplicate applications are prevented via transaction
+      // 3. Both new and old data structures are populated
+      // 4. Analytics events are logged
 
-      await _firestore.collection('applications').doc(applicationId).set({
-        'userId': userId,
-        'placementId': placementId,
-        'resumeUrl': resume,
-        'appliedAt': FieldValue.serverTimestamp(),
-        'status': 'applied', // applied | shortlisted | rejected
-      });
+      // Use HTTPS Callable (secure auth context)
+      final callable = FirebaseFunctions.instance.httpsCallable(
+        'logPlacementApplication',
+      );
 
-      // VERSION 4: Also update the old structure for backward compatibility
-      // This maintains existing functionality while adding new structure
-      await _firestore
-          .collection('placements')
-          .doc(placementId)
-          .collection('applications')
-          .doc(userId)
-          .set({
-            'userId': userId,
+      final result = await callable
+          .call({
             'placementId': placementId,
-            'resume': resume,
-            'appliedAt': FieldValue.serverTimestamp(),
-            'status': 'pending',
-          });
+            'resumeUrl': resume,
+            'company': company ?? 'Unknown',
+          })
+          .timeout(
+            const Duration(seconds: 30),
+            onTimeout: () {
+              throw Exception('Request timed out. Please try again.');
+            },
+          );
+
+      // Handle response from HTTPS Callable
+      if (result.data is! Map<String, dynamic>) {
+        throw Exception('Unexpected response from Cloud Function');
+      }
+
+      final data = result.data as Map<String, dynamic>;
+      final success = data['success'] as bool? ?? false;
+
+      if (!success) {
+        throw Exception(data['message'] ?? 'Failed to submit application');
+      }
+
+      // Success - application created on backend
     } catch (e) {
+      // Cloud Functions returns FirebaseFunctionsException for auth/network errors
+      if (e is FirebaseFunctionsException) {
+        throw Exception(e.message ?? 'Failed to submit application');
+      }
+      // Re-throw other exceptions
       rethrow;
     }
   }
