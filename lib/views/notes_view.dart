@@ -3,12 +3,15 @@ import 'package:campusconnect/enums/menu_action.dart';
 import 'package:campusconnect/models/chat_message.dart';
 import 'package:campusconnect/models/note.dart';
 import 'package:campusconnect/models/placement.dart';
+import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/services/ai/ai_service.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/services/firestore/notes_service.dart';
-import 'package:campusconnect/services/firestore/placements_service.dart';
+import 'package:campusconnect/widgets/empty_state.dart';
+import 'package:campusconnect/widgets/skeleton_loader.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class NotesView extends StatefulWidget {
@@ -21,7 +24,6 @@ class NotesView extends StatefulWidget {
 class _NotesViewState extends State<NotesView> {
   int _selectedIndex = 0;
   final NotesService _notesService = NotesService.instance();
-  final PlacementsService _placementsService = PlacementsService.instance();
   final AIService _aiService = AIService.instance();
 
   // Chat state
@@ -29,47 +31,6 @@ class _NotesViewState extends State<NotesView> {
   final TextEditingController _chatController = TextEditingController();
   final ScrollController _chatScrollController = ScrollController();
   bool _isLoadingAIResponse = false;
-
-  // Track applied placements for UI state
-  final Set<String> _appliedPlacementIds = {};
-  bool _isLoadingApplications = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadUserApplications();
-  }
-
-  Future<void> _loadUserApplications() async {
-    final userId = AuthService.firebase().currentUser?.id;
-    if (userId == null) {
-      setState(() => _isLoadingApplications = false);
-      return;
-    }
-
-    try {
-      final applicationsStream = _placementsService.getUserApplications(userId);
-      applicationsStream.listen((placementIds) {
-        if (mounted) {
-          setState(() {
-            _appliedPlacementIds.clear();
-            _appliedPlacementIds.addAll(placementIds);
-            _isLoadingApplications = false;
-          });
-        }
-      });
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isLoadingApplications = false);
-      }
-    }
-  }
-
-  void _markAsApplied(String placementId) {
-    setState(() {
-      _appliedPlacementIds.add(placementId);
-    });
-  }
 
   @override
   void dispose() {
@@ -200,18 +161,17 @@ class _NotesViewState extends State<NotesView> {
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 12),
-            StreamBuilder<List<Placement>>(
-              stream: _placementsService.getAllPlacements(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
+            Consumer<PlacementsProvider>(
+              builder: (context, provider, child) {
+                if (provider.isLoading && !provider.isInitialized) {
                   return const Center(child: CircularProgressIndicator());
                 }
 
-                if (snapshot.hasError) {
-                  return Center(child: Text('Error: ${snapshot.error}'));
+                if (provider.error != null) {
+                  return Center(child: Text('Error: ${provider.error}'));
                 }
 
-                final placements = snapshot.data ?? [];
+                final placements = provider.placements;
                 if (placements.isEmpty) {
                   return const Center(
                     child: Padding(
@@ -372,39 +332,61 @@ class _NotesViewState extends State<NotesView> {
         title: const Text('Placements'),
         backgroundColor: Colors.blue.shade400,
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () {
+              context.read<PlacementsProvider>().refresh();
+            },
+          ),
+        ],
       ),
-      body: StreamBuilder<List<Placement>>(
-        stream: _placementsService.getAllPlacements(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
+      body: Consumer<PlacementsProvider>(
+        builder: (context, provider, child) {
+          // Show skeleton loaders while initializing
+          if (provider.isLoading && !provider.isInitialized) {
+            return ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: 3,
+              itemBuilder: (context, index) => const PlacementCardSkeleton(),
+            );
           }
 
-          if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}'));
-          }
-
-          final placements = snapshot.data ?? [];
-          if (placements.isEmpty) {
-            return const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.business_outlined, size: 64, color: Colors.grey),
-                  SizedBox(height: 16),
-                  Text('No placements available'),
-                ],
+          // Show error state
+          if (provider.error != null) {
+            return EmptyState(
+              icon: Icons.error_outline,
+              title: 'Error loading placements',
+              subtitle: provider.error!,
+              action: ElevatedButton.icon(
+                onPressed: () => provider.refresh(),
+                icon: const Icon(Icons.refresh),
+                label: const Text('Retry'),
               ),
             );
           }
 
-          return ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: placements.length,
-            itemBuilder: (context, index) {
-              final placement = placements[index];
-              return _buildPlacementCard(placement);
-            },
+          final placements = provider.placements;
+
+          // Show empty state
+          if (placements.isEmpty) {
+            return const EmptyState(
+              icon: Icons.business_outlined,
+              title: 'No placements available',
+              subtitle: 'New opportunities will appear here',
+            );
+          }
+
+          return RefreshIndicator(
+            onRefresh: () => provider.refresh(),
+            child: ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: placements.length,
+              itemBuilder: (context, index) {
+                final placement = placements[index];
+                return _buildPlacementCard(placement);
+              },
+            ),
           );
         },
       ),
@@ -490,44 +472,62 @@ class _NotesViewState extends State<NotesView> {
   }
 
   Widget _buildApplyButton(String placementId, String company) {
-    final userId = AuthService.firebase().currentUser?.id;
-    if (userId == null) return const SizedBox.shrink();
+    return Consumer<PlacementsProvider>(
+      builder: (context, provider, child) {
+        final hasApplied = provider.hasApplied(placementId);
+        final isApplying = provider.isApplying(placementId);
+        final appliedDate = provider.getAppliedDate(placementId);
 
-    if (_isLoadingApplications) {
-      return SizedBox(
-        width: 40,
-        height: 40,
-        child: CircularProgressIndicator(
-          strokeWidth: 2,
-          valueColor: AlwaysStoppedAnimation<Color>(Colors.blue.shade400),
-        ),
-      );
-    }
+        // Show "Applied" chip with date
+        if (hasApplied && !isApplying) {
+          return Chip(
+            label: Text(
+              appliedDate != null
+                  ? 'Applied • ${DateFormat('MMM dd').format(appliedDate)}'
+                  : 'Applied',
+            ),
+            backgroundColor: Colors.blue.shade100,
+            labelStyle: TextStyle(color: Colors.blue.shade700, fontSize: 12),
+          );
+        }
 
-    final hasApplied = _appliedPlacementIds.contains(placementId);
+        // Show loading button while applying
+        if (isApplying) {
+          return ElevatedButton.icon(
+            onPressed: null,
+            icon: const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+            ),
+            label: const Text('Applying...'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue.shade300,
+            ),
+          );
+        }
 
-    if (hasApplied) {
-      return Chip(
-        label: const Text('Applied'),
-        backgroundColor: Colors.blue.shade100,
-        labelStyle: TextStyle(color: Colors.blue.shade700),
-      );
-    }
-
-    return ElevatedButton(
-      onPressed: () => _showApplyDialog(placementId, company),
-      child: const Text('Apply'),
+        // Show apply button
+        return ElevatedButton(
+          onPressed: () => _showApplyDialog(placementId, company),
+          child: const Text('Apply'),
+        );
+      },
     );
   }
 
   void _showApplyDialog(String placementId, String company) {
+    // Capture the provider before showing the dialog
+    final provider = context.read<PlacementsProvider>();
+
     showDialog(
       context: context,
-      builder: (context) => _ApplyDialogWidget(
-        placementId: placementId,
-        company: company,
-        placementsService: _placementsService,
-        onApplicationSuccess: () => _markAsApplied(placementId),
+      builder: (dialogContext) => ChangeNotifierProvider<PlacementsProvider>.value(
+        value: provider,
+        child: _ApplyDialogWidget(placementId: placementId, company: company),
       ),
     );
   }
@@ -1007,15 +1007,8 @@ class _NotesViewState extends State<NotesView> {
 class _ApplyDialogWidget extends StatefulWidget {
   final String placementId;
   final String company;
-  final PlacementsService placementsService;
-  final VoidCallback onApplicationSuccess;
 
-  const _ApplyDialogWidget({
-    required this.placementId,
-    required this.company,
-    required this.placementsService,
-    required this.onApplicationSuccess,
-  });
+  const _ApplyDialogWidget({required this.placementId, required this.company});
 
   @override
   State<_ApplyDialogWidget> createState() => _ApplyDialogWidgetState();
@@ -1094,27 +1087,21 @@ class _ApplyDialogWidgetState extends State<_ApplyDialogWidget> {
       return;
     }
 
-    final userId = AuthService.firebase().currentUser?.id;
-    if (userId == null) {
-      setState(() => _errorMessage = 'User not authenticated');
-      return;
-    }
-
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
 
     try {
-      await widget.placementsService.applyForPlacement(
-        userId: userId,
+      // Use Provider to apply
+      final provider = context.read<PlacementsProvider>();
+      final success = await provider.applyForPlacement(
         placementId: widget.placementId,
         resume: resume,
         company: widget.company,
       );
 
-      if (mounted) {
-        widget.onApplicationSuccess();
+      if (mounted && success) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -1126,7 +1113,7 @@ class _ApplyDialogWidgetState extends State<_ApplyDialogWidget> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _errorMessage = 'Error submitting application. Please try again.';
+          _errorMessage = e.toString().replaceAll('Exception: ', '');
           _isLoading = false;
         });
       }

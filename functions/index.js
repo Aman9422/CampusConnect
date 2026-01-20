@@ -670,71 +670,68 @@ exports.logPlacementView = onRequest(
 );
 
 /**
- * Log placement application event and create application record (VERSION 4)
+ * Log placement application event and create application record (V5)
  * 
- * This is an HTTPS Callable Cloud Function (onCall) that:
- * 1. Extracts uid from Firebase Auth context (cannot be spoofed)
- * 2. Creates application record in top-level `applications` collection
- * 3. Mirrors to `placements/{placementId}/applications/{userId}` for compatibility
- * 4. Logs placement_applied analytics event
- * 5. Returns success/error via callable response
+ * V5 Features:
+ * - HTTPS Callable (secure auth context)
+ * - Idempotent (safe to call multiple times)
+ * - Duplicate prevention via Firestore transaction
+ * - Returns existing application if already applied
+ * - Dual storage for backward compatibility
+ * - Analytics logging
  * 
- * Security: uid comes from Firebase Auth, not from client input
+ * Security: uid extracted from Firebase Auth (cannot be spoofed)
  */
 exports.logPlacementApplication = onCall(
     {cors: false},
     async (request) => {
-      // Extract uid from Firebase Auth context (automatically validated)
+      // Extract uid from Firebase Auth context
       const uid = request.auth?.uid;
       
       if (!uid) {
         throw new admin.functions.https.HttpsError(
-            'unauthenticated',
-            'User must be logged in to apply'
+            "unauthenticated",
+            "User must be logged in to apply"
         );
       }
 
       try {
-        // Extract data from request.data (HTTPS Callable payload)
         const {placementId, resumeUrl, company} = request.data;
 
         // Validate required fields
         if (!placementId) {
           throw new admin.functions.https.HttpsError(
-              'invalid-argument',
-              'Missing required field: placementId'
+              "invalid-argument",
+              "Missing required field: placementId"
           );
         }
 
-        // VERSION 4: Create application in top-level collection
+        // V5: Idempotent application creation
         const applicationId = `${uid}_${placementId}`;
-        
+        let isNewApplication = false;
+
         await admin.firestore().runTransaction(async (transaction) => {
-          // Check if already applied (prevent duplicates)
-          const existingApp = await transaction.get(
-              admin.firestore()
-                  .collection("applications")
-                  .doc(applicationId)
-          );
+          // Check if application already exists
+          const existingAppRef = admin.firestore()
+              .collection("applications")
+              .doc(applicationId);
+          
+          const existingApp = await transaction.get(existingAppRef);
 
           if (existingApp.exists) {
-            // User already applied - return success (idempotent)
+            // Already applied - return success (idempotent behavior)
+            isNewApplication = false;
             return;
           }
 
-          // Create application in top-level collection (V4)
-          transaction.set(
-              admin.firestore()
-                  .collection("applications")
-                  .doc(applicationId),
-              {
-                userId: uid,
-                placementId,
-                resumeUrl: resumeUrl || "",
-                appliedAt: admin.firestore.FieldValue.serverTimestamp(),
-                status: "applied",
-              }
-          );
+          // Create new application in top-level collection
+          transaction.set(existingAppRef, {
+            userId: uid,
+            placementId,
+            resumeUrl: resumeUrl || "",
+            appliedAt: admin.firestore.FieldValue.serverTimestamp(),
+            status: "applied",
+          });
 
           // Mirror to old structure for backward compatibility
           transaction.set(
@@ -751,36 +748,42 @@ exports.logPlacementApplication = onCall(
                 status: "pending",
               }
           );
+
+          isNewApplication = true;
         });
 
-        // Log analytics event
+        // Log analytics event (even for duplicate attempts)
         await logAnalyticsEvent({
           eventType: "placement_applied",
           userId: uid,
           metadata: {
             placementId,
             company: company || "Unknown",
+            isNewApplication,
           },
         });
 
-        // Return success to Flutter
+        // Return success
         return {
           success: true,
-          message: "Application submitted successfully",
+          message: isNewApplication 
+              ? "Application submitted successfully" 
+              : "Already applied to this placement",
           applicationId,
+          isNewApplication,
         };
       } catch (error) {
         console.error("Error in logPlacementApplication:", error);
         
-        // If it's already an HttpsError, rethrow it
+        // If already an HttpsError, rethrow
         if (error instanceof admin.functions.https.HttpsError) {
           throw error;
         }
         
-        // Otherwise, throw a generic error
+        // Generic error
         throw new admin.functions.https.HttpsError(
-            'internal',
-            'Failed to submit application: ' + error.message
+            "internal",
+            `Failed to submit application: ${error.message}`
         );
       }
     }

@@ -1,3 +1,4 @@
+import 'package:campusconnect/models/application.dart';
 import 'package:campusconnect/models/placement.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
@@ -200,5 +201,37 @@ class PlacementsService {
               .map((doc) => doc['placementId'] as String)
               .toList();
         });
+  }
+
+  // V5: Get all active placements (one-time fetch)
+  Future<List<Placement>> getAllPlacementsOnce() async {
+    try {
+      final snapshot = await _firestore
+          .collection('placements')
+          .where('isActive', isEqualTo: true)
+          .orderBy('postedAt', descending: true)
+          .get();
+
+      return snapshot.docs.map((doc) => Placement.fromFirestore(doc)).toList();
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // V5: Get user applications (one-time fetch)
+  Future<List<Application>> getUserApplicationsOnce(String userId) async {
+    try {
+      final snapshot = await _firestore
+          .collection('applications')
+          .where('userId', isEqualTo: userId)
+          .orderBy('appliedAt', descending: true)
+          .get();
+
+      return snapshot.docs
+          .map((doc) => Application.fromFirestore(doc))
+          .toList();
+    } catch (e) {
+      rethrow;
+    }
   }
 }
