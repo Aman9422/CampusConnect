@@ -1,4 +1,4 @@
-const {onRequest} = require("firebase-functions/v2/https");
+const {onRequest, onCall} = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 
 admin.initializeApp();
@@ -670,38 +670,121 @@ exports.logPlacementView = onRequest(
 );
 
 /**
- * Log placement application event (VERSION 4)
- * Call this from placement application logic
+ * Log placement application event and create application record (V5)
+ * 
+ * V5 Features:
+ * - HTTPS Callable (secure auth context)
+ * - Idempotent (safe to call multiple times)
+ * - Duplicate prevention via Firestore transaction
+ * - Returns existing application if already applied
+ * - Dual storage for backward compatibility
+ * - Analytics logging
+ * 
+ * Security: uid extracted from Firebase Auth (cannot be spoofed)
  */
-exports.logPlacementApplication = onRequest(
-    {cors: true},
-    async (request, response) => {
-      if (request.method !== "POST") {
-        return response.status(405).json({error: "Method not allowed"});
+exports.logPlacementApplication = onCall(
+    {cors: false},
+    async (request) => {
+      // Extract uid from Firebase Auth context
+      const uid = request.auth?.uid;
+      
+      if (!uid) {
+        throw new admin.functions.https.HttpsError(
+            "unauthenticated",
+            "User must be logged in to apply"
+        );
       }
 
       try {
-        const {userId, placementId, company} = request.body;
+        const {placementId, resumeUrl, company} = request.data;
 
-        if (!userId || !placementId) {
-          return response.status(400).json({
-            error: "Missing required fields",
-          });
+        // Validate required fields
+        if (!placementId) {
+          throw new admin.functions.https.HttpsError(
+              "invalid-argument",
+              "Missing required field: placementId"
+          );
         }
 
+        // V5: Idempotent application creation
+        const applicationId = `${uid}_${placementId}`;
+        let isNewApplication = false;
+
+        await admin.firestore().runTransaction(async (transaction) => {
+          // Check if application already exists
+          const existingAppRef = admin.firestore()
+              .collection("applications")
+              .doc(applicationId);
+          
+          const existingApp = await transaction.get(existingAppRef);
+
+          if (existingApp.exists) {
+            // Already applied - return success (idempotent behavior)
+            isNewApplication = false;
+            return;
+          }
+
+          // Create new application in top-level collection
+          transaction.set(existingAppRef, {
+            userId: uid,
+            placementId,
+            resumeUrl: resumeUrl || "",
+            appliedAt: admin.firestore.FieldValue.serverTimestamp(),
+            status: "applied",
+          });
+
+          // Mirror to old structure for backward compatibility
+          transaction.set(
+              admin.firestore()
+                  .collection("placements")
+                  .doc(placementId)
+                  .collection("applications")
+                  .doc(uid),
+              {
+                userId: uid,
+                placementId,
+                resume: resumeUrl || "",
+                appliedAt: admin.firestore.FieldValue.serverTimestamp(),
+                status: "pending",
+              }
+          );
+
+          isNewApplication = true;
+        });
+
+        // Log analytics event (even for duplicate attempts)
         await logAnalyticsEvent({
           eventType: "placement_applied",
-          userId,
+          userId: uid,
           metadata: {
             placementId,
-            company,
+            company: company || "Unknown",
+            isNewApplication,
           },
         });
 
-        return response.status(200).json({success: true});
+        // Return success
+        return {
+          success: true,
+          message: isNewApplication 
+              ? "Application submitted successfully" 
+              : "Already applied to this placement",
+          applicationId,
+          isNewApplication,
+        };
       } catch (error) {
-        console.error("Error logging placement application:", error);
-        return response.status(500).json({error: "Internal server error"});
+        console.error("Error in logPlacementApplication:", error);
+        
+        // If already an HttpsError, rethrow
+        if (error instanceof admin.functions.https.HttpsError) {
+          throw error;
+        }
+        
+        // Generic error
+        throw new admin.functions.https.HttpsError(
+            "internal",
+            `Failed to submit application: ${error.message}`
+        );
       }
     }
 );
