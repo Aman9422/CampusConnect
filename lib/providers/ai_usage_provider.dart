@@ -1,12 +1,12 @@
 import 'package:campusconnect/services/ai/ai_service.dart';
 import 'package:flutter/foundation.dart';
 
-/// V5: Centralized AI usage state
+/// V5.1.1: Centralized AI usage state with proper lifecycle
 /// Tracks trial status, quota, and usage
 class AIUsageProvider with ChangeNotifier {
-  final String userId;
+  String? userId; // V5.1.1: Made nullable for logout handling
 
-  AIUsageProvider({required AIService aiService, required this.userId});
+  AIUsageProvider({required AIService aiService, this.userId});
 
   // State
   bool _isInTrial = false;
@@ -26,8 +26,31 @@ class AIUsageProvider with ChangeNotifier {
   String? get error => _error;
   bool get hasReachedLimit => messagesUsedToday >= dailyLimit;
 
+  /// V5.1.1: Initialize with user ID (called after login)
+  Future<void> initWithUser(String newUserId) async {
+    userId = newUserId;
+    await init();
+  }
+
+  /// V5.1.1: Reset state (called on logout)
+  void reset() {
+    userId = null;
+    _isInTrial = false;
+    _daysRemainingInTrial = 0;
+    _messagesUsedToday = 0;
+    _dailyLimit = 50;
+    _isLoading = false;
+    _error = null;
+    notifyListeners();
+  }
+
   /// Initialize: Load AI usage data
   Future<void> init() async {
+    if (userId == null) {
+      debugPrint('Cannot init AIUsageProvider: userId is null');
+      return;
+    }
+
     _isLoading = true;
     _error = null;
     notifyListeners();

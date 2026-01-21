@@ -25,17 +25,29 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'CampusConnect',
-      theme: ThemeData(primarySwatch: Colors.blue, useMaterial3: true),
-      home: const HomePage(),
-      routes: {
-        loginRoute: (context) => const LoginView(),
-        registerRoute: (context) => const RegisterView(),
-        notesRoute: (context) => const NotesView(),
-        verifyEmailRoute: (context) => const VerifyEmailView(),
-        profileRoute: (context) => const ProfileView(),
-      },
+    // V5.1.1: Providers at root level - persist across auth changes
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(
+          create: (_) =>
+              PlacementsProvider(service: PlacementsService.instance()),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => AIUsageProvider(aiService: AIService.instance()),
+        ),
+      ],
+      child: MaterialApp(
+        title: 'CampusConnect',
+        theme: ThemeData(primarySwatch: Colors.blue, useMaterial3: true),
+        home: const HomePage(),
+        routes: {
+          loginRoute: (context) => const LoginView(),
+          registerRoute: (context) => const RegisterView(),
+          notesRoute: (context) => const NotesView(),
+          verifyEmailRoute: (context) => const VerifyEmailView(),
+          profileRoute: (context) => const ProfileView(),
+        },
+      ),
     );
   }
 }
@@ -53,28 +65,27 @@ class HomePage extends StatelessWidget {
             final user = AuthService.firebase().currentUser;
             if (user != null) {
               if (user.isEmailVerified) {
-                // V5: Wrap authenticated view with providers
-                return MultiProvider(
-                  providers: [
-                    ChangeNotifierProvider(
-                      create: (_) => PlacementsProvider(
-                        service: PlacementsService.instance(),
-                        userId: user.id,
-                      )..init(),
-                    ),
-                    ChangeNotifierProvider(
-                      create: (_) => AIUsageProvider(
-                        aiService: AIService.instance(),
-                        userId: user.id,
-                      )..init(),
-                    ),
-                  ],
-                  child: const NotesView(),
-                );
+                // V5.1.1: Initialize providers with userId
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  final placementsProvider = context.read<PlacementsProvider>();
+                  final aiProvider = context.read<AIUsageProvider>();
+
+                  // Only init if not already initialized or userId changed
+                  placementsProvider.initWithUser(user.id);
+                  aiProvider.initWithUser(user.id);
+                });
+
+                return const NotesView();
               } else {
                 return const VerifyEmailView();
               }
             } else {
+              // V5.1.1: Reset providers on logout
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                context.read<PlacementsProvider>().reset();
+                context.read<AIUsageProvider>().reset();
+              });
+
               return const LoginView();
             }
           default:

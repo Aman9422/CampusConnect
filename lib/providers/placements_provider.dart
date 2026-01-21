@@ -6,7 +6,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 
-/// V5.1: Enhanced with offline detection and better error handling
+/// V5.1.1: Enhanced with proper lifecycle management
 /// Single source of truth for:
 /// - Active placements
 /// - User's applied placement IDs
@@ -15,10 +15,10 @@ import 'package:flutter/foundation.dart';
 /// - Network connectivity
 class PlacementsProvider with ChangeNotifier {
   final PlacementsService _service;
-  final String userId;
+  String? userId; // V5.1.1: Made nullable for logout handling
   final Connectivity _connectivity = Connectivity();
 
-  PlacementsProvider({required PlacementsService service, required this.userId})
+  PlacementsProvider({required PlacementsService service, this.userId})
     : _service = service;
 
   // State
@@ -47,6 +47,30 @@ class PlacementsProvider with ChangeNotifier {
 
   /// V5.1: Check if any apply operation is in progress
   bool get isAnyApplyInProgress => _applyingPlacementId != null;
+
+  /// V5.1.1: Initialize with user ID (called after login)
+  Future<void> initWithUser(String newUserId) async {
+    // Only reinitialize if userId changed or not initialized
+    if (userId == newUserId && _isInitialized) {
+      return;
+    }
+
+    userId = newUserId;
+    await init();
+  }
+
+  /// V5.1.1: Reset state (called on logout)
+  void reset() {
+    userId = null;
+    _placements = [];
+    _appliedPlacementIds = {};
+    _appliedDates = {};
+    _isLoading = false;
+    _isInitialized = false;
+    _error = null;
+    _applyingPlacementId = null;
+    notifyListeners();
+  }
 
   /// Initialize: Load placements and user applications ONCE
   /// V5 Optimization: Fetch data once instead of constant streams
@@ -119,9 +143,15 @@ class PlacementsProvider with ChangeNotifier {
   }
 
   /// Load user's applications
+  /// V5.1.1: Safely handle null userId
   Future<void> _loadUserApplications() async {
+    if (userId == null) {
+      debugPrint('Cannot load applications: userId is null');
+      return; // Skip loading if not logged in
+    }
+
     try {
-      final applications = await _service.getUserApplicationsOnce(userId);
+      final applications = await _service.getUserApplicationsOnce(userId!);
       _appliedPlacementIds = applications.map((app) => app.placementId).toSet();
       _appliedDates = {
         for (var app in applications) app.placementId: app.appliedAt,
