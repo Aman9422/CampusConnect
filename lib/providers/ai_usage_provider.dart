@@ -1,10 +1,12 @@
 import 'package:campusconnect/services/ai/ai_service.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 
-/// V5.1.1: Centralized AI usage state with proper lifecycle
-/// Tracks trial status, quota, and usage
+/// V5.1.1+: Centralized AI usage state with proper lifecycle
+/// Tracks trial status, quota, usage, and network connectivity
 class AIUsageProvider with ChangeNotifier {
   String? userId; // V5.1.1: Made nullable for logout handling
+  final Connectivity _connectivity = Connectivity();
 
   AIUsageProvider({required AIService aiService, this.userId});
 
@@ -15,6 +17,7 @@ class AIUsageProvider with ChangeNotifier {
   int _dailyLimit = 50;
   bool _isLoading = false;
   String? _error;
+  bool _isOnline = true; // V5.1.x: Network state
 
   // Getters
   bool get isInTrial => _isInTrial;
@@ -25,6 +28,7 @@ class AIUsageProvider with ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get error => _error;
   bool get hasReachedLimit => messagesUsedToday >= dailyLimit;
+  bool get isOnline => _isOnline; // V5.1.x: Expose network state
 
   /// V5.1.1: Initialize with user ID (called after login)
   Future<void> initWithUser(String newUserId) async {
@@ -41,15 +45,20 @@ class AIUsageProvider with ChangeNotifier {
     _dailyLimit = 50;
     _isLoading = false;
     _error = null;
+    _isOnline = true;
     notifyListeners();
   }
 
   /// Initialize: Load AI usage data
+  /// V5.1.x: Enhanced with network connectivity monitoring
   Future<void> init() async {
     if (userId == null) {
       debugPrint('Cannot init AIUsageProvider: userId is null');
       return;
     }
+
+    // V5.1.x: Start monitoring network connectivity
+    _startConnectivityMonitoring();
 
     _isLoading = true;
     _error = null;
@@ -70,6 +79,21 @@ class AIUsageProvider with ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  /// V5.1.x: Monitor network connectivity changes
+  void _startConnectivityMonitoring() {
+    _connectivity.onConnectivityChanged.listen((result) {
+      final wasOnline = _isOnline;
+      _isOnline = !result.contains(ConnectivityResult.none);
+
+      if (wasOnline != _isOnline) {
+        debugPrint(
+          'AIUsageProvider: Network state changed to ${_isOnline ? "online" : "offline"}',
+        );
+        notifyListeners();
+      }
+    });
   }
 
   /// Update usage after sending a message

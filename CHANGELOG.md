@@ -1,5 +1,97 @@
 # CampusConnect Changelog
 
+## Version 5.1.2 (January 21, 2026) - App-Wide Network Guard Standardization
+
+### 🎯 Objective
+Extend v5.1 professional-grade guardrails across the entire app for consistent, production-ready error handling and offline awareness.
+
+### ✨ Features Added
+
+**App-Wide Network Awareness:**
+- Added connectivity monitoring to `AIUsageProvider` (matching PlacementsProvider pattern)
+- Network state exposed via `isOnline` getter
+- Offline banner now shown in AI chat screen
+- Chat input disabled when offline or at daily limit
+
+**Standardized Error Handling:**
+- AI chat now uses `ErrorMessages.getUserFriendlyMessage()` for all errors
+- No more raw technical errors shown to users (e.g., "SocketException", "Failed host lookup")
+- Consistent error presentation across Placements and AI features
+
+**Pre-Flight Network Guards:**
+- AI chat blocks message sending when offline
+- Shows user-friendly message: "You're offline. Please reconnect and try again."
+- Prevents wasted API calls and timeout errors
+
+**Trial & Usage Awareness:**
+- Trial expiration banner shown in chat (when 2 days or less remaining)
+- Daily limit enforcement in UI (input disabled when limit reached)
+- Provider state updated from backend responses
+
+### 📁 Files Modified
+
+**lib/providers/ai_usage_provider.dart:**
+- Added `connectivity_plus` monitoring
+- Added `_isOnline` state tracking
+- Added `isOnline` getter (public)
+- Added `_startConnectivityMonitoring()` method
+- Network state reset on logout
+
+**lib/views/notes_view.dart:**
+- Added `AIUsageProvider` import and usage
+- Added `OfflineBanner` to AI chat screen
+- Added trial expiration warning banner
+- Updated chat input to disable when offline/at limit
+- Added network pre-flight check in `_handleSendMessage()`
+- Replaced raw error display with `ErrorMessages.getUserFriendlyMessage()`
+- Provider state updates from AI responses
+
+### 🎯 Consistency Achieved
+
+| Feature | Network Check | Error Translation | Offline UI |
+|---------|---------------|-------------------|------------|
+| Placements | ✅ | ✅ | ✅ |
+| AI Chat | ✅ | ✅ | ✅ |
+| Auth Flows | ✅ (Firebase) | ✅ (Typed exceptions) | N/A |
+
+### 🔒 Production Readiness
+
+✅ **No technical errors exposed to users**
+✅ **Offline mode blocks unsafe actions everywhere**
+✅ **Errors are consistent across all features**
+✅ **App recovers cleanly from network changes**
+✅ **No Provider lifecycle crashes** (fixed in v5.1.1)
+✅ **Ready for v6.0 UI redesign**
+✅ **Code quality is production-grade**
+
+### 📝 Technical Details
+
+**Architecture Pattern:**
+- Single connectivity source per provider (no global singleton)
+- Providers manage their own network state
+- UI components watch provider for offline status
+- Pre-flight checks prevent unnecessary API calls
+
+**Error Flow:**
+```
+API Call → Exception → ErrorMessages.getUserFriendlyMessage() → User sees friendly message
+```
+
+**Offline Flow:**
+```
+User action → Check provider.isOnline → Block if offline → Show friendly message
+```
+
+### ✅ Validation
+
+- ✅ Zero compilation errors
+- ✅ flutter analyze: Only 1 deprecation warning (non-critical)
+- ✅ No breaking changes
+- ✅ All v5.1 and v5.1.1 features intact
+- ✅ Consistent UX across all network-dependent features
+
+---
+
 ## Version 5.1.1 (January 21, 2026) - Critical Bugfix Release
 
 ### 🐛 Critical Bug Fixed

@@ -3,6 +3,7 @@ import 'package:campusconnect/enums/menu_action.dart';
 import 'package:campusconnect/models/chat_message.dart';
 import 'package:campusconnect/models/note.dart';
 import 'package:campusconnect/models/placement.dart';
+import 'package:campusconnect/providers/ai_usage_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/services/ai/ai_service.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
@@ -579,6 +580,8 @@ class _NotesViewState extends State<NotesView> {
   }
 
   Widget _buildChatScreen() {
+    final aiProvider = context.watch<AIUsageProvider>();
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('AI Assistant'),
@@ -587,6 +590,32 @@ class _NotesViewState extends State<NotesView> {
       ),
       body: Column(
         children: [
+          // V5.1.x: Offline banner for AI chat
+          OfflineBanner(isOffline: !aiProvider.isOnline),
+          // Trial warning banner
+          if (aiProvider.isInTrial && aiProvider.daysRemainingInTrial <= 2)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              color: Colors.orange.shade100,
+              child: Row(
+                children: [
+                  Icon(Icons.warning_amber, color: Colors.orange.shade700),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      aiProvider.daysRemainingInTrial == 1
+                          ? 'AI trial expires tomorrow!'
+                          : 'AI trial expires in ${aiProvider.daysRemainingInTrial} days',
+                      style: TextStyle(
+                        color: Colors.orange.shade900,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           Expanded(
             child: _chatMessages.isEmpty
                 ? _buildEmptyChatState()
@@ -720,6 +749,12 @@ class _NotesViewState extends State<NotesView> {
   }
 
   Widget _buildChatInput() {
+    final aiProvider = context.watch<AIUsageProvider>();
+    final isDisabled =
+        _isLoadingAIResponse ||
+        !aiProvider.isOnline ||
+        aiProvider.hasReachedLimit;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -730,10 +765,15 @@ class _NotesViewState extends State<NotesView> {
           Expanded(
             child: TextField(
               controller: _chatController,
+              enabled: !isDisabled,
               maxLines: null,
               textCapitalization: TextCapitalization.sentences,
               decoration: InputDecoration(
-                hintText: 'Ask me anything...',
+                hintText: !aiProvider.isOnline
+                    ? 'Offline - connect to send messages'
+                    : aiProvider.hasReachedLimit
+                    ? 'Daily limit reached'
+                    : 'Ask me anything...',
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(24),
                 ),
@@ -747,12 +787,12 @@ class _NotesViewState extends State<NotesView> {
           ),
           const SizedBox(width: 8),
           IconButton(
-            onPressed: _isLoadingAIResponse
+            onPressed: isDisabled
                 ? null
                 : () => _handleSendMessage(_chatController.text),
             icon: Icon(
               Icons.send,
-              color: _isLoadingAIResponse ? Colors.grey : Colors.blue.shade400,
+              color: isDisabled ? Colors.grey : Colors.blue.shade400,
             ),
           ),
         ],
@@ -769,6 +809,18 @@ class _NotesViewState extends State<NotesView> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('User not authenticated')));
+      return;
+    }
+
+    // V5.1.x: Network pre-flight guard
+    final aiProvider = context.read<AIUsageProvider>();
+    if (!aiProvider.isOnline) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("You're offline. Please reconnect and try again."),
+          backgroundColor: Colors.orange,
+        ),
+      );
       return;
     }
 
@@ -797,33 +849,38 @@ class _NotesViewState extends State<NotesView> {
         _isLoadingAIResponse = false;
       });
 
-      // VERSION 4: Show trial info if trial is expiring soon
-      if (aiResponse.trial != null &&
-          aiResponse.trial!.isActive &&
-          aiResponse.trial!.daysRemaining <= 2) {
-        _showTrialWarning(aiResponse.trial!.daysRemaining);
+      // VERSION 4: Update provider with latest usage info
+      if (aiResponse.trial != null) {
+        aiProvider.updateTrialInfo(
+          isInTrial: aiResponse.trial!.isActive,
+          daysRemaining: aiResponse.trial!.daysRemaining,
+        );
       }
 
-      // VERSION 4: Show usage warning if near limit
-      if (aiResponse.usage != null && aiResponse.usage!.isNearLimit) {
-        _showUsageWarning(
-          aiResponse.usage!.dailyCount,
-          aiResponse.usage!.dailyLimit,
+      if (aiResponse.usage != null) {
+        aiProvider.updateUsageInfo(
+          messagesUsed: aiResponse.usage!.dailyCount,
+          dailyLimit: aiResponse.usage!.dailyLimit,
         );
       }
 
       // Scroll to bottom
       _scrollToBottom();
     } catch (e) {
+      // V5.1.x: User-friendly error translation
+      final friendlyError = ErrorMessages.getUserFriendlyMessage(e);
+
       setState(() {
         _chatMessages.add(
           ChatMessage.ai(
-            'Sorry, I encountered an error. Please try again.\n\nError: $e',
+            'Sorry, I couldn\'t process your message.\n\n$friendlyError',
           ),
         );
         _isLoadingAIResponse = false;
       });
       _scrollToBottom();
+
+      debugPrint('AI Chat error: $e');
     }
   }
 
@@ -839,33 +896,7 @@ class _NotesViewState extends State<NotesView> {
     });
   }
 
-  // VERSION 4: Show trial expiration warning
-  void _showTrialWarning(int daysRemaining) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          daysRemaining == 1
-              ? 'Your AI trial expires tomorrow! '
-              : 'Your AI trial expires in $daysRemaining days.',
-        ),
-        backgroundColor: Colors.orange,
-        duration: const Duration(seconds: 4),
-      ),
-    );
-  }
-
-  // VERSION 4: Show usage limit warning
-  void _showUsageWarning(int current, int limit) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('You\'ve used $current of $limit daily AI messages.'),
-        backgroundColor: Colors.orange.shade700,
-        duration: const Duration(seconds: 3),
-      ),
-    );
-  }
+  // V5.1.2: Trial and usage warnings now shown via banner in chat screen (removed snackbar methods)
 
   Widget _buildProfileScreen() {
     final user = AuthService.firebase().currentUser;
