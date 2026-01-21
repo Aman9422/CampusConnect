@@ -1,17 +1,22 @@
 import 'package:campusconnect/models/placement.dart';
 import 'package:campusconnect/services/firestore/placements_service.dart';
+import 'package:campusconnect/utilities/analytics_helper.dart';
+import 'package:campusconnect/utilities/error_messages.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 
-/// V5: Centralized state management for placements
+/// V5.1: Enhanced with offline detection and better error handling
 /// Single source of truth for:
 /// - Active placements
 /// - User's applied placement IDs
 /// - Application dates
 /// - Loading states
+/// - Network connectivity
 class PlacementsProvider with ChangeNotifier {
   final PlacementsService _service;
   final String userId;
+  final Connectivity _connectivity = Connectivity();
 
   PlacementsProvider({required PlacementsService service, required this.userId})
     : _service = service;
@@ -24,6 +29,7 @@ class PlacementsProvider with ChangeNotifier {
   bool _isInitialized = false;
   String? _error;
   String? _applyingPlacementId; // Track which placement is being applied to
+  bool _isOnline = true; // V5.1: Network state
 
   // Getters
   List<Placement> get placements => _placements;
@@ -32,16 +38,24 @@ class PlacementsProvider with ChangeNotifier {
   bool get isLoading => _isLoading;
   bool get isInitialized => _isInitialized;
   String? get error => _error;
+  bool get isOnline => _isOnline; // V5.1: Expose network state
 
   bool hasApplied(String placementId) =>
       _appliedPlacementIds.contains(placementId);
   bool isApplying(String placementId) => _applyingPlacementId == placementId;
   DateTime? getAppliedDate(String placementId) => _appliedDates[placementId];
 
+  /// V5.1: Check if any apply operation is in progress
+  bool get isAnyApplyInProgress => _applyingPlacementId != null;
+
   /// Initialize: Load placements and user applications ONCE
   /// V5 Optimization: Fetch data once instead of constant streams
+  /// V5.1: Monitor network connectivity
   Future<void> init() async {
     if (_isInitialized) return; // Already initialized
+
+    // V5.1: Start monitoring network connectivity
+    _startConnectivityMonitoring();
 
     _isLoading = true;
     _error = null;
@@ -57,11 +71,39 @@ class PlacementsProvider with ChangeNotifier {
       _isInitialized = true;
       _error = null;
     } catch (e) {
-      _error = 'Failed to load placements: ${e.toString()}';
+      _error = ErrorMessages.getUserFriendlyMessage(e);
       debugPrint('PlacementsProvider init error: $e');
     } finally {
       _isLoading = false;
       notifyListeners();
+    }
+  }
+
+  /// V5.1: Monitor network connectivity changes
+  void _startConnectivityMonitoring() {
+    _connectivity.onConnectivityChanged.listen((result) {
+      // Convert List<ConnectivityResult> to bool
+      final wasOnline = _isOnline;
+      _isOnline = !result.contains(ConnectivityResult.none);
+
+      if (wasOnline != _isOnline) {
+        debugPrint(
+          'Network status changed: ${_isOnline ? "Online" : "Offline"}',
+        );
+        notifyListeners();
+      }
+    });
+  }
+
+  /// V5.1: Check network connectivity
+  Future<bool> _checkConnectivity() async {
+    try {
+      final result = await _connectivity.checkConnectivity();
+      _isOnline = !result.contains(ConnectivityResult.none);
+      return _isOnline;
+    } catch (e) {
+      debugPrint('Error checking connectivity: $e');
+      return _isOnline; // Return last known state
     }
   }
 
@@ -91,7 +133,16 @@ class PlacementsProvider with ChangeNotifier {
   }
 
   /// Refresh placements (manual refresh)
+  /// V5.1: Check network before refreshing
   Future<void> refresh() async {
+    // V5.1: Check connectivity
+    final isConnected = await _checkConnectivity();
+    if (!isConnected) {
+      _error = 'No internet connection';
+      notifyListeners();
+      return;
+    }
+
     _isLoading = true;
     _error = null;
     notifyListeners();
@@ -101,7 +152,7 @@ class PlacementsProvider with ChangeNotifier {
       await _loadUserApplications();
       _error = null;
     } catch (e) {
-      _error = 'Failed to refresh: ${e.toString()}';
+      _error = ErrorMessages.getUserFriendlyMessage(e);
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -110,17 +161,35 @@ class PlacementsProvider with ChangeNotifier {
 
   /// Apply for a placement with optimistic update
   /// V5: Instant UI feedback, backend validation
+  /// V5.1: Enhanced guardrails and error handling
   Future<bool> applyForPlacement({
     required String placementId,
     required String resume,
     String? company,
   }) async {
-    // Prevent duplicate applies
+    // V5.1: GUARDRAIL - Check if already applied
     if (_appliedPlacementIds.contains(placementId)) {
-      return true; // Already applied
+      debugPrint('Already applied to placement: $placementId');
+      return true; // Already applied, return success
     }
 
-    // Set applying state
+    // V5.1: GUARDRAIL - Prevent re-entrant calls
+    if (_applyingPlacementId != null) {
+      throw Exception('Another application is already in progress');
+    }
+
+    // V5.1: GUARDRAIL - Check network connectivity
+    final isConnected = await _checkConnectivity();
+    if (!isConnected) {
+      throw Exception('No internet connection. Please check your network');
+    }
+
+    // V5.1: GUARDRAIL - Validate resume
+    if (resume.trim().isEmpty) {
+      throw Exception('Resume information is required');
+    }
+
+    // Set applying state (prevents double-tap)
     _applyingPlacementId = placementId;
     notifyListeners();
 
@@ -157,12 +226,21 @@ class PlacementsProvider with ChangeNotifier {
       final success = data['success'] as bool? ?? false;
 
       if (!success) {
-        throw Exception(data['message'] ?? 'Failed to submit application');
+        final message =
+            data['message'] as String? ?? 'Failed to submit application';
+        throw Exception(message);
       }
 
       // Success: Keep optimistic update
       _applyingPlacementId = null;
       notifyListeners();
+
+      // V5.1: Log analytics success
+      await AnalyticsHelper.logPlacementApplySuccess(
+        placementId: placementId,
+        company: company ?? 'Unknown',
+      );
+
       return true;
     } catch (e) {
       // Rollback optimistic update on error
@@ -172,7 +250,16 @@ class PlacementsProvider with ChangeNotifier {
       notifyListeners();
 
       debugPrint('Error applying for placement: $e');
-      rethrow;
+
+      // V5.1: Log analytics failure
+      await AnalyticsHelper.logPlacementApplyFailure(
+        placementId: placementId,
+        company: company ?? 'Unknown',
+        errorReason: e.toString(),
+      );
+
+      // V5.1: Throw user-friendly error
+      throw Exception(ErrorMessages.getUserFriendlyMessage(e));
     }
   }
 

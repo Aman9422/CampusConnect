@@ -7,7 +7,9 @@ import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/services/ai/ai_service.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/services/firestore/notes_service.dart';
+import 'package:campusconnect/utilities/error_messages.dart';
 import 'package:campusconnect/widgets/empty_state.dart';
+import 'package:campusconnect/widgets/offline_banner.dart';
 import 'package:campusconnect/widgets/skeleton_loader.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -343,51 +345,63 @@ class _NotesViewState extends State<NotesView> {
       ),
       body: Consumer<PlacementsProvider>(
         builder: (context, provider, child) {
-          // Show skeleton loaders while initializing
-          if (provider.isLoading && !provider.isInitialized) {
-            return ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: 3,
-              itemBuilder: (context, index) => const PlacementCardSkeleton(),
-            );
-          }
+          return Column(
+            children: [
+              // V5.1: Offline banner
+              OfflineBanner(isOffline: !provider.isOnline),
 
-          // Show error state
-          if (provider.error != null) {
-            return EmptyState(
-              icon: Icons.error_outline,
-              title: 'Error loading placements',
-              subtitle: provider.error!,
-              action: ElevatedButton.icon(
-                onPressed: () => provider.refresh(),
-                icon: const Icon(Icons.refresh),
-                label: const Text('Retry'),
-              ),
-            );
-          }
-
-          final placements = provider.placements;
-
-          // Show empty state
-          if (placements.isEmpty) {
-            return const EmptyState(
-              icon: Icons.business_outlined,
-              title: 'No placements available',
-              subtitle: 'New opportunities will appear here',
-            );
-          }
-
-          return RefreshIndicator(
-            onRefresh: () => provider.refresh(),
-            child: ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: placements.length,
-              itemBuilder: (context, index) {
-                final placement = placements[index];
-                return _buildPlacementCard(placement);
-              },
-            ),
+              // Content
+              Expanded(child: _buildPlacementsContent(provider)),
+            ],
           );
+        },
+      ),
+    );
+  }
+
+  Widget _buildPlacementsContent(PlacementsProvider provider) {
+    // Show skeleton loaders while initializing
+    if (provider.isLoading && !provider.isInitialized) {
+      return ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: 3,
+        itemBuilder: (context, index) => const PlacementCardSkeleton(),
+      );
+    }
+
+    // Show error state
+    if (provider.error != null) {
+      return EmptyState(
+        icon: Icons.error_outline,
+        title: 'Error loading placements',
+        subtitle: provider.error!,
+        action: ElevatedButton.icon(
+          onPressed: () => provider.refresh(),
+          icon: const Icon(Icons.refresh),
+          label: const Text('Retry'),
+        ),
+      );
+    }
+
+    final placements = provider.placements;
+
+    // Show empty state
+    if (placements.isEmpty) {
+      return const EmptyState(
+        icon: Icons.business_outlined,
+        title: 'No placements available',
+        subtitle: 'New opportunities will appear here',
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: () => provider.refresh(),
+      child: ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: placements.length,
+        itemBuilder: (context, index) {
+          final placement = placements[index];
+          return _buildPlacementCard(placement);
         },
       ),
     );
@@ -477,6 +491,8 @@ class _NotesViewState extends State<NotesView> {
         final hasApplied = provider.hasApplied(placementId);
         final isApplying = provider.isApplying(placementId);
         final appliedDate = provider.getAppliedDate(placementId);
+        final isOffline = !provider.isOnline;
+        final anyApplyInProgress = provider.isAnyApplyInProgress;
 
         // Show "Applied" chip with date
         if (hasApplied && !isApplying) {
@@ -510,10 +526,15 @@ class _NotesViewState extends State<NotesView> {
           );
         }
 
+        // V5.1: Disable button if offline or another apply is in progress
+        final isDisabled = isOffline || anyApplyInProgress;
+
         // Show apply button
         return ElevatedButton(
-          onPressed: () => _showApplyDialog(placementId, company),
-          child: const Text('Apply'),
+          onPressed: isDisabled
+              ? null
+              : () => _showApplyDialog(placementId, company),
+          child: Text(isOffline ? 'Offline' : 'Apply'),
         );
       },
     );
@@ -525,10 +546,14 @@ class _NotesViewState extends State<NotesView> {
 
     showDialog(
       context: context,
-      builder: (dialogContext) => ChangeNotifierProvider<PlacementsProvider>.value(
-        value: provider,
-        child: _ApplyDialogWidget(placementId: placementId, company: company),
-      ),
+      builder: (dialogContext) =>
+          ChangeNotifierProvider<PlacementsProvider>.value(
+            value: provider,
+            child: _ApplyDialogWidget(
+              placementId: placementId,
+              company: company,
+            ),
+          ),
     );
   }
 
@@ -1107,13 +1132,15 @@ class _ApplyDialogWidgetState extends State<_ApplyDialogWidget> {
           const SnackBar(
             content: Text('Application submitted successfully!'),
             backgroundColor: Colors.green,
+            duration: Duration(seconds: 3),
           ),
         );
       }
     } catch (e) {
+      // V5.1: Use error message utility for user-friendly errors
       if (mounted) {
         setState(() {
-          _errorMessage = e.toString().replaceAll('Exception: ', '');
+          _errorMessage = ErrorMessages.getUserFriendlyMessage(e);
           _isLoading = false;
         });
       }
