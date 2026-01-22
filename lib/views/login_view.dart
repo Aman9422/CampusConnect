@@ -1,9 +1,9 @@
 import 'package:campusconnect/constants/routes.dart';
 import 'package:campusconnect/services/auth/auth_exceptions.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
+import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/utilities/show_error_dialog.dart';
 import 'package:flutter/material.dart';
-
 
 class LoginView extends StatefulWidget {
   const LoginView({super.key});
@@ -33,95 +33,267 @@ class _LoginViewState extends State<LoginView> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Login'),
-        backgroundColor: Colors.blueAccent[400],
-      ),
-      body: Column(
-        children: [
-          TextField(
-            controller: _email,
-            enableSuggestions: false,
-            autocorrect: false,
-            keyboardType: TextInputType.emailAddress,
-            decoration: const InputDecoration(
-              hintText: 'Enter your email here',
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              AppTheme.primaryBlue.withOpacity(0.05),
+              AppTheme.primaryBlueLight.withOpacity(0.02),
+              Colors.white,
+            ],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(AppTheme.space24),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Logo/Title with gradient background
+                  Container(
+                    padding: const EdgeInsets.all(AppTheme.space20),
+                    decoration: BoxDecoration(
+                      gradient: AppTheme.primaryGradient,
+                      shape: BoxShape.circle,
+                      boxShadow: AppTheme.shadowColored,
+                    ),
+                    child: const Icon(
+                      Icons.school_rounded,
+                      size: 48,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: AppTheme.space24),
+                  Text(
+                    'Welcome Back',
+                    textAlign: TextAlign.center,
+                    style: AppTheme.titleLarge.copyWith(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: AppTheme.space8),
+                  Text(
+                    'Sign in to continue to CampusConnect',
+                    textAlign: TextAlign.center,
+                    style: AppTheme.bodyMedium.copyWith(
+                      color: AppTheme.gray600,
+                    ),
+                  ),
+                  const SizedBox(height: AppTheme.space40),
+
+                  // Email field
+                  TextField(
+                    controller: _email,
+                    enableSuggestions: false,
+                    autocorrect: false,
+                    keyboardType: TextInputType.emailAddress,
+                    style: AppTheme.bodyMedium,
+                    decoration: InputDecoration(
+                      hintText: 'Email',
+                      hintStyle: AppTheme.bodyMedium.copyWith(
+                        color: AppTheme.gray500,
+                      ),
+                      prefixIcon: Icon(
+                        Icons.email_outlined,
+                        color: AppTheme.gray500,
+                      ),
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(
+                          AppTheme.radiusMedium,
+                        ),
+                        borderSide: BorderSide(color: AppTheme.gray300),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(
+                          AppTheme.radiusMedium,
+                        ),
+                        borderSide: BorderSide(color: AppTheme.gray300),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(
+                          AppTheme.radiusMedium,
+                        ),
+                        borderSide: BorderSide(
+                          color: AppTheme.primaryBlue,
+                          width: 2,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppTheme.space16),
+
+                  // Password field
+                  TextField(
+                    controller: _password,
+                    obscureText: true,
+                    enableSuggestions: false,
+                    autocorrect: false,
+                    style: AppTheme.bodyMedium,
+                    decoration: InputDecoration(
+                      hintText: 'Password',
+                      hintStyle: AppTheme.bodyMedium.copyWith(
+                        color: AppTheme.gray500,
+                      ),
+                      prefixIcon: Icon(
+                        Icons.lock_outline,
+                        color: AppTheme.gray500,
+                      ),
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(
+                          AppTheme.radiusMedium,
+                        ),
+                        borderSide: BorderSide(color: AppTheme.gray300),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(
+                          AppTheme.radiusMedium,
+                        ),
+                        borderSide: BorderSide(color: AppTheme.gray300),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(
+                          AppTheme.radiusMedium,
+                        ),
+                        borderSide: BorderSide(
+                          color: AppTheme.primaryBlue,
+                          width: 2,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppTheme.space24),
+
+                  // Login button
+                  ElevatedButton(
+                    onPressed: () async {
+                      final email = _email.text.trim();
+                      final password = _password.text.trim();
+
+                      if (email.isEmpty || password.isEmpty) {
+                        if (!context.mounted) return;
+                        await showErrorDialog(
+                          context,
+                          'Email and password cannot be empty.',
+                        );
+                        return;
+                      }
+
+                      try {
+                        await AuthService.firebase().logIn(
+                          email: email,
+                          password: password,
+                        );
+
+                        final user = AuthService.firebase().currentUser;
+
+                        if (!context.mounted) return;
+
+                        if (user?.isEmailVerified ?? false) {
+                          Navigator.of(
+                            context,
+                          ).pushNamedAndRemoveUntil(notesRoute, (_) => false);
+                        } else {
+                          Navigator.of(context).pushNamedAndRemoveUntil(
+                            verifyEmailRoute,
+                            (_) => false,
+                          );
+                        }
+                      } on UserNotFoundAuthException {
+                        await showErrorDialog(
+                          context,
+                          'No account found for that email.',
+                        );
+                      } on WrongPasswordAuthException {
+                        await showErrorDialog(context, 'Incorrect password.');
+                      } on InvalidEmailAuthException {
+                        if (!context.mounted) return;
+                        await showErrorDialog(
+                          context,
+                          'Incorrect email or password.',
+                        );
+                      } on InvalidCredentialAuthException {
+                        if (!context.mounted) return;
+                        await showErrorDialog(
+                          context,
+                          'Invalid credentials provided.',
+                        );
+                      } on GenericAuthException {
+                        if (!context.mounted) return;
+                        await showErrorDialog(
+                          context,
+                          'Authentication error. Please try again.',
+                        );
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primaryBlue,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(
+                        vertical: AppTheme.space16,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(
+                          AppTheme.radiusMedium,
+                        ),
+                      ),
+                    ),
+                    child: Text(
+                      'Login',
+                      style: AppTheme.bodyLarge.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppTheme.space16),
+
+                  // Register link
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        'Don\'t have an account? ',
+                        style: AppTheme.bodyMedium.copyWith(
+                          color: AppTheme.gray600,
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          Navigator.of(context).pushNamedAndRemoveUntil(
+                            registerRoute,
+                            (_) => false,
+                          );
+                        },
+                        style: TextButton.styleFrom(
+                          foregroundColor: AppTheme.primaryBlue,
+                          padding: EdgeInsets.zero,
+                          minimumSize: const Size(0, 0),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        child: Text(
+                          'Register',
+                          style: AppTheme.bodyMedium.copyWith(
+                            color: AppTheme.primaryBlue,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
-          TextField(
-            controller: _password,
-            obscureText: true,
-            enableSuggestions: false,
-            autocorrect: false,
-            decoration: const InputDecoration(hintText: 'Enter Password'),
-          ),
-          TextButton(
-            onPressed: () async {
-              final email = _email.text.trim();
-              final password = _password.text.trim();
-
-              if (email.isEmpty || password.isEmpty) {
-                if (!context.mounted) return;
-                await showErrorDialog(
-                  context,
-                  'Email and password cannot be empty.',
-                );
-                return;
-              }
-
-              try {
-                await AuthService.firebase().logIn(
-                  email: email,
-                  password: password,
-                );
-
-                final user = AuthService.firebase().currentUser;
-
-                if (!context.mounted) return;
-
-                if (user?.isEmailVerified ?? false) {
-                  Navigator.of(
-                    context,
-                  ).pushNamedAndRemoveUntil(notesRoute, (_) => false);
-                } else {
-                  Navigator.of(
-                    context,
-                  ).pushNamedAndRemoveUntil(verifyEmailRoute, (_) => false);
-                }
-              } on UserNotFoundAuthException {
-                await showErrorDialog(
-                  context,
-                  'No account found for that email.',
-                );
-              } on WrongPasswordAuthException {
-                await showErrorDialog(context, 'Incorrect password.');
-              } on InvalidEmailAuthException {
-                if (!context.mounted) return;
-                await showErrorDialog(context, 'Incorrect email or password.');
-              } on InvalidCredentialAuthException {
-                if (!context.mounted) return;
-                await showErrorDialog(context, 'Invalid credentials provided.');
-              } on GenericAuthException {
-                if (!context.mounted) return;
-                await showErrorDialog(
-                  context,
-                  'Authentication error. Please try again.',
-                );
-              }
-            },
-
-            child: const Text('Login'),
-          ),
-
-          TextButton(
-            onPressed: () {
-              Navigator.of(
-                context,
-              ).pushNamedAndRemoveUntil(registerRoute, (_) => false);
-            },
-            child: const Text('Not registered yet? Register here!'),
-          ),
-        ],
+        ),
       ),
     );
   }

@@ -1,7 +1,8 @@
+import 'package:campusconnect/theme/app_theme.dart';
 import 'package:flutter/material.dart';
 
-/// V5.1: Offline awareness banner
-/// Shows a subtle banner when network is unavailable
+/// V5.1 / v6.0: Offline awareness banner
+/// Shows a polished banner when network is unavailable
 class OfflineBanner extends StatelessWidget {
   final bool isOffline;
 
@@ -13,23 +14,20 @@ class OfflineBanner extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.orange.shade100,
-        border: Border(
-          bottom: BorderSide(color: Colors.orange.shade300, width: 1),
-        ),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppTheme.space16,
+        vertical: AppTheme.space12,
       ),
+      decoration: AppTheme.bannerDecoration(AppTheme.warningBg),
       child: Row(
         children: [
-          Icon(Icons.cloud_off, size: 16, color: Colors.orange.shade900),
-          const SizedBox(width: 8),
+          Icon(Icons.cloud_off_outlined, size: 18, color: AppTheme.warning),
+          const SizedBox(width: AppTheme.space12),
           Expanded(
             child: Text(
               'You\'re offline. Some features may be unavailable.',
-              style: TextStyle(
-                color: Colors.orange.shade900,
-                fontSize: 13,
+              style: AppTheme.bodySmall.copyWith(
+                color: AppTheme.gray800,
                 fontWeight: FontWeight.w500,
               ),
             ),

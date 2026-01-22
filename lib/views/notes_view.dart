@@ -8,8 +8,10 @@ import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/services/ai/ai_service.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/services/firestore/notes_service.dart';
+import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/utilities/error_messages.dart';
 import 'package:campusconnect/widgets/empty_state.dart';
+import 'package:campusconnect/widgets/home_widgets.dart';
 import 'package:campusconnect/widgets/offline_banner.dart';
 import 'package:campusconnect/widgets/skeleton_loader.dart';
 import 'package:flutter/material.dart';
@@ -55,36 +57,84 @@ class _NotesViewState extends State<NotesView> {
           _buildProfileScreen(),
         ],
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _selectedIndex,
-        type: BottomNavigationBarType.fixed,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-          BottomNavigationBarItem(icon: Icon(Icons.note), label: 'Notes'),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.business),
-            label: 'Placements',
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.95),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 16,
+              offset: const Offset(0, -4),
+            ),
+          ],
+          border: Border(
+            top: BorderSide(color: AppTheme.gray200.withOpacity(0.5), width: 1),
           ),
-          BottomNavigationBarItem(icon: Icon(Icons.chat), label: 'AI Chat'),
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
-        ],
-        onTap: (index) {
-          setState(() {
-            _selectedIndex = index;
-          });
-        },
+        ),
+        child: BottomNavigationBar(
+          currentIndex: _selectedIndex,
+          type: BottomNavigationBarType.fixed,
+          backgroundColor: Colors.transparent,
+          selectedItemColor: AppTheme.primaryBlue,
+          unselectedItemColor: AppTheme.gray500,
+          selectedLabelStyle: AppTheme.caption.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+          unselectedLabelStyle: AppTheme.caption,
+          elevation: 0,
+          items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.home_outlined),
+              activeIcon: Icon(Icons.home),
+              label: 'Home',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.note_outlined),
+              activeIcon: Icon(Icons.note),
+              label: 'Notes',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.business_outlined),
+              activeIcon: Icon(Icons.business),
+              label: 'Placements',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.chat_bubble_outline),
+              activeIcon: Icon(Icons.chat_bubble),
+              label: 'AI Chat',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.person_outline),
+              activeIcon: Icon(Icons.person),
+              label: 'Profile',
+            ),
+          ],
+          onTap: (index) {
+            setState(() {
+              _selectedIndex = index;
+            });
+          },
+        ),
       ),
     );
   }
 
   Widget _buildHomeScreen() {
     return Scaffold(
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('CampusConnect'),
-        backgroundColor: Colors.blue.shade400,
+        backgroundColor: Colors.white,
         elevation: 0,
+        title: Text(
+          'Home',
+          style: AppTheme.titleMedium.copyWith(
+            fontWeight: FontWeight.w600,
+            color: AppTheme.gray900,
+          ),
+        ),
         actions: [
           PopupMenuButton<MenuAction>(
+            icon: Icon(Icons.more_vert, color: AppTheme.gray700),
             onSelected: (value) async {
               switch (value) {
                 case MenuAction.logout:
@@ -110,60 +160,40 @@ class _NotesViewState extends State<NotesView> {
         ],
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppTheme.space20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Greeting
             Text(
               'Welcome back!',
-              style: Theme.of(context).textTheme.headlineSmall,
+              style: AppTheme.titleLarge.copyWith(
+                fontSize: 24,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.gray900,
+              ),
             ),
-            const SizedBox(height: 24),
-
-            // Quick Access Cards
+            const SizedBox(height: AppTheme.space4),
             Text(
-              'Quick Access',
-              style: Theme.of(context).textTheme.titleMedium,
+              DateFormat('EEEE, d/M/yyyy').format(DateTime.now()),
+              style: AppTheme.bodySmall.copyWith(color: AppTheme.gray600),
             ),
-            const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _buildQuickAccessCard(
-                  context,
-                  icon: Icons.note,
-                  label: 'Notes',
-                  onTap: () {
-                    setState(() => _selectedIndex = 1);
-                  },
-                ),
-                _buildQuickAccessCard(
-                  context,
-                  icon: Icons.business,
-                  label: 'Placements',
-                  onTap: () {
-                    setState(() => _selectedIndex = 2);
-                  },
-                ),
-                _buildQuickAccessCard(
-                  context,
-                  icon: Icons.chat,
-                  label: 'AI Chat',
-                  onTap: () {
-                    setState(() => _selectedIndex = 3);
-                  },
-                ),
-              ],
-            ),
-            const SizedBox(height: 32),
+            const SizedBox(height: AppTheme.space24),
 
-            // Recent Placements
+            // Featured Event Card
+            const FeaturedCard(),
+            const SizedBox(height: AppTheme.space24),
+
+            // Today / This Week Section
+            _buildTodaySection(),
+            const SizedBox(height: AppTheme.space24),
+
+            // Latest Placements Section
             Text(
               'Latest Placements',
-              style: Theme.of(context).textTheme.titleMedium,
+              style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: AppTheme.space16),
             Consumer<PlacementsProvider>(
               builder: (context, provider, child) {
                 if (provider.isLoading && !provider.isInitialized) {
@@ -201,36 +231,155 @@ class _NotesViewState extends State<NotesView> {
     );
   }
 
-  Widget _buildQuickAccessCard(
-    BuildContext context, {
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Card(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+  Widget _buildTodaySection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Today / This Week',
+          style: AppTheme.bodyLarge.copyWith(
+            fontWeight: FontWeight.w600,
+            color: AppTheme.gray900,
+          ),
+        ),
+        const SizedBox(height: AppTheme.space12),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+            border: Border.all(color: AppTheme.gray200, width: 1),
+            boxShadow: AppTheme.shadowSmall,
+          ),
           child: Column(
             children: [
-              Icon(icon, size: 32, color: Colors.blue.shade400),
-              const SizedBox(height: 8),
-              Text(label, style: Theme.of(context).textTheme.bodySmall),
+              _buildTodayItem(
+                icon: Icons.event_available,
+                iconColor: AppTheme.error,
+                title: 'Placement deadline approaching',
+                subtitle: 'Google - Apply by March 15',
+                onTap: () {
+                  //  Navigate to placements screen
+                  setState(() => _selectedIndex = 2);
+                },
+              ),
+              _buildDivider(),
+              _buildTodayItem(
+                icon: Icons.description,
+                iconColor: AppTheme.primaryBlue,
+                title: 'New lecture notes uploaded',
+                subtitle: 'Data Structures - Unit 3',
+                onTap: () {
+                  // Navigate to notes screen
+                  setState(() => _selectedIndex = 1);
+                },
+              ),
+              _buildDivider(),
+              _buildTodayItem(
+                icon: Icons.check_circle,
+                iconColor: AppTheme.success,
+                title: 'You applied to NVIDIA',
+                subtitle: 'Application submitted 2 days ago',
+                onTap: () {
+                  // Navigate to placements screen
+                  setState(() => _selectedIndex = 2);
+                },
+              ),
+              _buildDivider(),
+              _buildTodayItem(
+                icon: Icons.chat_bubble,
+                iconColor: Color(0xFF7C3AED),
+                title: 'Ask CampusConnect AI for guidance',
+                subtitle: 'Get help with your career',
+                onTap: () {
+              
+                  setState(() => _selectedIndex = 3);
+                },
+              ),
             ],
           ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTodayItem({
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppTheme.space16,
+          vertical: AppTheme.space12,
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(AppTheme.space8),
+              decoration: BoxDecoration(
+                color: iconColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+              ),
+              child: Icon(icon, color: iconColor, size: 20),
+            ),
+            const SizedBox(width: AppTheme.space12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: AppTheme.bodyMedium.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.gray900,
+                    ),
+                  ),
+                  const SizedBox(height: AppTheme.space4),
+                  Text(
+                    subtitle,
+                    style: AppTheme.bodySmall.copyWith(
+                      color: AppTheme.gray600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right,
+              color: AppTheme.gray400,
+              size: 20,
+            ),
+          ],
         ),
       ),
     );
   }
 
+  Widget _buildDivider() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: AppTheme.space16),
+      height: 1,
+      color: AppTheme.gray200,
+    );
+  }
+
   Widget _buildNotesScreen() {
     return Scaffold(
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('Notes'),
-        backgroundColor: Colors.blue.shade400,
+        backgroundColor: Colors.white,
         elevation: 0,
+        title: Text(
+          'Lecture Notes',
+          style: AppTheme.titleMedium.copyWith(
+            fontWeight: FontWeight.w600,
+            color: AppTheme.gray900,
+          ),
+        ),
       ),
       body: StreamBuilder<List<Note>>(
         stream: _notesService.getAllNotes(),
@@ -272,10 +421,14 @@ class _NotesViewState extends State<NotesView> {
 
   Widget _buildNoteCard(Note note) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      margin: const EdgeInsets.only(bottom: AppTheme.space12),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+        side: BorderSide(color: AppTheme.gray200, width: 1),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppTheme.space16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -285,24 +438,77 @@ class _NotesViewState extends State<NotesView> {
                 Expanded(
                   child: Text(
                     note.title,
-                    style: Theme.of(context).textTheme.titleMedium,
+                    style: AppTheme.titleMedium.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppTheme.space12),
             Wrap(
-              spacing: 8,
+              spacing: AppTheme.space8,
+              runSpacing: AppTheme.space8,
               children: [
-                Chip(
-                  label: Text(note.subject),
-                  backgroundColor: Colors.blue.shade100,
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppTheme.space12,
+                    vertical: AppTheme.space4,
+                  ),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        AppTheme.primaryBlue.withOpacity(0.1),
+                        AppTheme.primaryBlue.withOpacity(0.05),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+                    border: Border.all(
+                      color: AppTheme.primaryBlue.withOpacity(0.3),
+                      width: 0.5,
+                    ),
+                  ),
+                  child: Text(
+                    note.subject,
+                    style: AppTheme.label.copyWith(
+                      color: AppTheme.primaryBlue,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
+                    ),
+                  ),
                 ),
-                Chip(
-                  label: Text('Year: ${note.year}'),
-                  backgroundColor: Colors.green.shade100,
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppTheme.space12,
+                    vertical: AppTheme.space4,
+                  ),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        AppTheme.successBg,
+                        AppTheme.successBg.withOpacity(0.5),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+                    border: Border.all(
+                      color: AppTheme.success.withOpacity(0.3),
+                      width: 0.5,
+                    ),
+                  ),
+                  child: Text(
+                    'Year: ${note.year}',
+                    style: AppTheme.label.copyWith(
+                      color: AppTheme.success,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -331,13 +537,20 @@ class _NotesViewState extends State<NotesView> {
 
   Widget _buildPlacementsScreen() {
     return Scaffold(
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('Placements'),
-        backgroundColor: Colors.blue.shade400,
+        backgroundColor: Colors.white,
         elevation: 0,
+        title: Text(
+          'Placements',
+          style: AppTheme.titleMedium.copyWith(
+            fontWeight: FontWeight.w600,
+            color: AppTheme.gray900,
+          ),
+        ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
             onPressed: () {
               context.read<PlacementsProvider>().refresh();
             },
@@ -410,77 +623,154 @@ class _NotesViewState extends State<NotesView> {
 
   Widget _buildPlacementCard(Placement placement) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Column(
+      margin: const EdgeInsets.only(bottom: AppTheme.space16),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
+        side: BorderSide(color: AppTheme.gray200, width: 1),
+      ),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
+          gradient: LinearGradient(
+            colors: [Colors.white, AppTheme.primaryBlue.withOpacity(0.02)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(AppTheme.space16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(placement.company, style: AppTheme.titleMedium),
+                        const SizedBox(height: AppTheme.space4),
+                        Text(
+                          placement.role,
+                          style: AppTheme.bodyMedium.copyWith(
+                            color: AppTheme.gray600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppTheme.space12,
+                      vertical: AppTheme.space4,
+                    ),
+                    decoration: BoxDecoration(
+                      gradient: placement.isDeadlinePassed
+                          ? LinearGradient(
+                              colors: [
+                                AppTheme.errorBg,
+                                AppTheme.errorBg.withOpacity(0.7),
+                              ],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            )
+                          : LinearGradient(
+                              colors: [
+                                AppTheme.successBg,
+                                AppTheme.successBg.withOpacity(0.7),
+                              ],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                      borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+                      border: Border.all(
+                        color: placement.isDeadlinePassed
+                            ? AppTheme.error.withOpacity(0.3)
+                            : AppTheme.success.withOpacity(0.3),
+                        width: 0.5,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: placement.isDeadlinePassed
+                              ? AppTheme.error.withOpacity(0.15)
+                              : AppTheme.success.withOpacity(0.15),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Text(
+                      placement.isDeadlinePassed ? 'Closed' : 'Open',
+                      style: AppTheme.label.copyWith(
+                        color: placement.isDeadlinePassed
+                            ? AppTheme.error
+                            : AppTheme.success,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 10,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppTheme.space12),
+              Text(
+                placement.description,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: AppTheme.bodySmall.copyWith(color: AppTheme.gray700),
+              ),
+              const SizedBox(height: AppTheme.space16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        placement.company,
-                        style: Theme.of(context).textTheme.titleMedium,
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.currency_rupee,
+                            size: 14,
+                            color: AppTheme.gray600,
+                          ),
+                          const SizedBox(width: AppTheme.space4),
+                          Text(
+                            placement.salary,
+                            style: AppTheme.bodySmall.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.gray800,
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        placement.role,
-                        style: Theme.of(
-                          context,
-                        ).textTheme.bodyMedium?.copyWith(color: Colors.grey),
+                      const SizedBox(height: AppTheme.space4),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.calendar_today_outlined,
+                            size: 12,
+                            color: AppTheme.gray500,
+                          ),
+                          const SizedBox(width: AppTheme.space4),
+                          Text(
+                            'Deadline: ${DateFormat('MMM dd, yyyy').format(placement.deadline)}',
+                            style: AppTheme.caption.copyWith(
+                              color: AppTheme.gray600,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
-                ),
-                if (placement.isDeadlinePassed)
-                  Chip(
-                    label: const Text('Closed'),
-                    backgroundColor: Colors.red.shade100,
-                  )
-                else
-                  Chip(
-                    label: const Text('Open'),
-                    backgroundColor: Colors.green.shade100,
-                  ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              placement.description,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Salary: ${placement.salary}',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                    Text(
-                      'Deadline: ${DateFormat('MMM dd, yyyy').format(placement.deadline)}',
-                      style: Theme.of(
-                        context,
-                      ).textTheme.bodySmall?.copyWith(color: Colors.grey),
-                    ),
-                  ],
-                ),
-                if (!placement.isDeadlinePassed)
-                  _buildApplyButton(placement.id, placement.company),
-              ],
-            ),
-          ],
+                  if (!placement.isDeadlinePassed)
+                    _buildApplyButton(placement.id, placement.company),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -497,14 +787,54 @@ class _NotesViewState extends State<NotesView> {
 
         // Show "Applied" chip with date
         if (hasApplied && !isApplying) {
-          return Chip(
-            label: Text(
-              appliedDate != null
-                  ? 'Applied • ${DateFormat('MMM dd').format(appliedDate)}'
-                  : 'Applied',
+          return Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppTheme.space12,
+              vertical: AppTheme.space8,
             ),
-            backgroundColor: Colors.blue.shade100,
-            labelStyle: TextStyle(color: Colors.blue.shade700, fontSize: 12),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  AppTheme.primaryBlue.withOpacity(0.12),
+                  AppTheme.primaryBlue.withOpacity(0.06),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+              border: Border.all(
+                color: AppTheme.primaryBlue.withOpacity(0.3),
+                width: 1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: AppTheme.primaryBlue.withOpacity(0.1),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.check_circle_outline,
+                  size: 16,
+                  color: AppTheme.primaryBlue,
+                ),
+                const SizedBox(width: AppTheme.space4),
+                Text(
+                  appliedDate != null
+                      ? 'Applied • ${DateFormat('MMM dd').format(appliedDate)}'
+                      : 'Applied',
+                  style: AppTheme.label.copyWith(
+                    color: AppTheme.primaryBlue,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
           );
         }
 
@@ -520,9 +850,21 @@ class _NotesViewState extends State<NotesView> {
                 valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
               ),
             ),
-            label: const Text('Applying...'),
+            label: Text(
+              'Applying...',
+              style: AppTheme.bodySmall.copyWith(fontWeight: FontWeight.w600),
+            ),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blue.shade300,
+              backgroundColor: AppTheme.primaryBlue.withOpacity(0.6),
+              foregroundColor: Colors.white,
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppTheme.space16,
+                vertical: AppTheme.space8,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+              ),
             ),
           );
         }
@@ -531,11 +873,48 @@ class _NotesViewState extends State<NotesView> {
         final isDisabled = isOffline || anyApplyInProgress;
 
         // Show apply button
-        return ElevatedButton(
-          onPressed: isDisabled
-              ? null
-              : () => _showApplyDialog(placementId, company),
-          child: Text(isOffline ? 'Offline' : 'Apply'),
+        return Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                AppTheme.primaryBlue,
+                AppTheme.primaryBlue.withOpacity(0.85),
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+            boxShadow: [
+              BoxShadow(
+                color: AppTheme.primaryBlue.withOpacity(0.3),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: isDisabled
+                  ? null
+                  : () => _showApplyDialog(placementId, company),
+              borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppTheme.space20,
+                  vertical: AppTheme.space12,
+                ),
+                child: Text(
+                  isOffline ? 'Offline' : 'Apply',
+                  style: AppTheme.bodySmall.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ),
+            ),
+          ),
         );
       },
     );
@@ -583,33 +962,53 @@ class _NotesViewState extends State<NotesView> {
     final aiProvider = context.watch<AIUsageProvider>();
 
     return Scaffold(
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('AI Assistant'),
-        backgroundColor: Colors.blue.shade400,
+        backgroundColor: Colors.white,
         elevation: 0,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back, color: AppTheme.gray900),
+          onPressed: () {
+            setState(() => _selectedIndex = 0);
+          },
+        ),
+        title: Text(
+          'CampusConnect AI',
+          style: AppTheme.titleMedium.copyWith(
+            fontWeight: FontWeight.w600,
+            color: AppTheme.gray900,
+          ),
+        ),
       ),
       body: Column(
         children: [
           // V5.1.x: Offline banner for AI chat
           OfflineBanner(isOffline: !aiProvider.isOnline),
-          // Trial warning banner
+          // v6.0: Modern trial warning banner
           if (aiProvider.isInTrial && aiProvider.daysRemainingInTrial <= 2)
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              color: Colors.orange.shade100,
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppTheme.space16,
+                vertical: AppTheme.space12,
+              ),
+              decoration: AppTheme.bannerDecoration(AppTheme.warningBg),
               child: Row(
                 children: [
-                  Icon(Icons.warning_amber, color: Colors.orange.shade700),
-                  const SizedBox(width: 8),
+                  Icon(
+                    Icons.access_time_outlined,
+                    size: 18,
+                    color: AppTheme.warning,
+                  ),
+                  const SizedBox(width: AppTheme.space12),
                   Expanded(
                     child: Text(
                       aiProvider.daysRemainingInTrial == 1
                           ? 'AI trial expires tomorrow!'
                           : 'AI trial expires in ${aiProvider.daysRemainingInTrial} days',
-                      style: TextStyle(
-                        color: Colors.orange.shade900,
-                        fontWeight: FontWeight.w500,
+                      style: AppTheme.bodySmall.copyWith(
+                        color: AppTheme.gray800,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
@@ -638,28 +1037,38 @@ class _NotesViewState extends State<NotesView> {
   Widget _buildEmptyChatState() {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(32),
+        padding: const EdgeInsets.all(AppTheme.space32),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.smart_toy, size: 64, color: Colors.blue.shade400),
-            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(AppTheme.space24),
+              decoration: BoxDecoration(
+                gradient: AppTheme.primaryGradient,
+                shape: BoxShape.circle,
+                boxShadow: AppTheme.shadowColored,
+              ),
+              child: const Icon(
+                Icons.smart_toy_rounded,
+                size: 56,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(height: AppTheme.space24),
             Text(
               'CampusConnect AI',
-              style: Theme.of(context).textTheme.headlineSmall,
+              style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w700),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppTheme.space8),
             Text(
               'Your personal AI mentor for academics and career guidance',
               textAlign: TextAlign.center,
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: Colors.grey),
+              style: AppTheme.bodyMedium.copyWith(color: AppTheme.gray600),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: AppTheme.space32),
             Wrap(
-              spacing: 8,
-              runSpacing: 8,
+              spacing: AppTheme.space8,
+              runSpacing: AppTheme.space8,
               alignment: WrapAlignment.center,
               children: [
                 _buildSuggestionChip('How to prepare for placements?'),
@@ -675,9 +1084,32 @@ class _NotesViewState extends State<NotesView> {
   }
 
   Widget _buildSuggestionChip(String text) {
-    return ActionChip(
-      label: Text(text),
-      onPressed: () => _handleSendMessage(text),
+    return InkWell(
+      onTap: () => _handleSendMessage(text),
+      borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppTheme.space16,
+          vertical: AppTheme.space12,
+        ),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Colors.white, AppTheme.primaryBlue.withOpacity(0.05)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+          border: Border.all(color: AppTheme.gray300, width: 1),
+          boxShadow: AppTheme.shadowSmall,
+        ),
+        child: Text(
+          text,
+          style: AppTheme.bodySmall.copyWith(
+            color: AppTheme.gray700,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ),
     );
   }
 
@@ -687,34 +1119,48 @@ class _NotesViewState extends State<NotesView> {
           ? Alignment.centerRight
           : Alignment.centerLeft,
       child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        margin: const EdgeInsets.only(bottom: AppTheme.space12),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppTheme.space16,
+          vertical: AppTheme.space12,
+        ),
         constraints: BoxConstraints(
           maxWidth: MediaQuery.of(context).size.width * 0.75,
         ),
         decoration: BoxDecoration(
-          color: message.isUserMessage
-              ? Colors.blue.shade400
-              : Colors.grey.shade200,
-          borderRadius: BorderRadius.circular(16),
+          gradient: message.isUserMessage ? AppTheme.primaryGradient : null,
+          color: message.isUserMessage ? null : AppTheme.gray100,
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(AppTheme.radiusLarge),
+            topRight: const Radius.circular(AppTheme.radiusLarge),
+            bottomLeft: Radius.circular(
+              message.isUserMessage ? AppTheme.radiusLarge : AppTheme.space4,
+            ),
+            bottomRight: Radius.circular(
+              message.isUserMessage ? AppTheme.space4 : AppTheme.radiusLarge,
+            ),
+          ),
+          boxShadow: message.isUserMessage
+              ? AppTheme.shadowColored
+              : AppTheme.shadowSmall,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               message.content,
-              style: TextStyle(
-                color: message.isUserMessage ? Colors.white : Colors.black87,
+              style: AppTheme.bodyMedium.copyWith(
+                color: message.isUserMessage ? Colors.white : AppTheme.gray900,
+                height: 1.5,
               ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: AppTheme.space4),
             Text(
               DateFormat('HH:mm').format(message.timestamp),
-              style: TextStyle(
-                fontSize: 10,
+              style: AppTheme.caption.copyWith(
                 color: message.isUserMessage
                     ? Colors.white.withOpacity(0.7)
-                    : Colors.grey,
+                    : AppTheme.gray600,
               ),
             ),
           ],
@@ -725,7 +1171,7 @@ class _NotesViewState extends State<NotesView> {
 
   Widget _buildLoadingIndicator() {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppTheme.space16),
       child: Row(
         children: [
           SizedBox(
@@ -733,15 +1179,16 @@ class _NotesViewState extends State<NotesView> {
             height: 20,
             child: CircularProgressIndicator(
               strokeWidth: 2,
-              valueColor: AlwaysStoppedAnimation<Color>(Colors.blue.shade400),
+              valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryBlue),
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: AppTheme.space12),
           Text(
             'AI is thinking...',
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: Colors.grey),
+            style: AppTheme.bodySmall.copyWith(
+              color: AppTheme.gray600,
+              fontStyle: FontStyle.italic,
+            ),
           ),
         ],
       ),
@@ -756,9 +1203,11 @@ class _NotesViewState extends State<NotesView> {
         aiProvider.hasReachedLimit;
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppTheme.space16),
       decoration: BoxDecoration(
-        border: Border(top: BorderSide(color: Colors.grey.shade300)),
+        color: Colors.white,
+        border: Border(top: BorderSide(color: AppTheme.gray200, width: 1)),
+        boxShadow: AppTheme.shadowSmall,
       ),
       child: Row(
         children: [
@@ -768,31 +1217,57 @@ class _NotesViewState extends State<NotesView> {
               enabled: !isDisabled,
               maxLines: null,
               textCapitalization: TextCapitalization.sentences,
+              style: AppTheme.bodyMedium,
               decoration: InputDecoration(
                 hintText: !aiProvider.isOnline
                     ? 'Offline - connect to send messages'
                     : aiProvider.hasReachedLimit
                     ? 'Daily limit reached'
                     : 'Ask me anything...',
+                hintStyle: AppTheme.bodyMedium.copyWith(
+                  color: AppTheme.gray500,
+                ),
+                filled: true,
+                fillColor: AppTheme.gray50,
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(24),
+                  borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+                  borderSide: BorderSide(color: AppTheme.gray300),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+                  borderSide: BorderSide(color: AppTheme.gray300),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+                  borderSide: BorderSide(color: AppTheme.primaryBlue, width: 2),
+                ),
+                disabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+                  borderSide: BorderSide(color: AppTheme.gray200),
                 ),
                 contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
+                  horizontal: AppTheme.space16,
+                  vertical: AppTheme.space12,
                 ),
               ),
               onSubmitted: (_) => _handleSendMessage(_chatController.text),
             ),
           ),
-          const SizedBox(width: 8),
-          IconButton(
-            onPressed: isDisabled
-                ? null
-                : () => _handleSendMessage(_chatController.text),
-            icon: Icon(
-              Icons.send,
-              color: isDisabled ? Colors.grey : Colors.blue.shade400,
+          const SizedBox(width: AppTheme.space8),
+          Container(
+            decoration: BoxDecoration(
+              color: isDisabled ? AppTheme.gray300 : AppTheme.primaryBlue,
+              shape: BoxShape.circle,
+            ),
+            child: IconButton(
+              onPressed: isDisabled
+                  ? null
+                  : () => _handleSendMessage(_chatController.text),
+              icon: Icon(
+                Icons.send_rounded,
+                color: isDisabled ? AppTheme.gray600 : Colors.white,
+                size: 20,
+              ),
             ),
           ),
         ],
@@ -899,87 +1374,171 @@ class _NotesViewState extends State<NotesView> {
   // V5.1.2: Trial and usage warnings now shown via banner in chat screen (removed snackbar methods)
 
   Widget _buildProfileScreen() {
-    final user = AuthService.firebase().currentUser;
-
     return Scaffold(
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('Profile'),
-        backgroundColor: Colors.blue.shade400,
+        backgroundColor: Colors.white,
         elevation: 0,
+        title: Text(
+          'Profile',
+          style: AppTheme.titleMedium.copyWith(
+            fontWeight: FontWeight.w600,
+            color: AppTheme.gray900,
+          ),
+        ),
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppTheme.space20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Profile Header
-            Center(
-              child: Column(
+            // Profile Header Card
+            Container(
+              padding: const EdgeInsets.all(AppTheme.space20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
+                border: Border.all(color: AppTheme.gray200, width: 1),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppTheme.gray200.withOpacity(0.5),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Row(
                 children: [
                   Container(
-                    width: 80,
-                    height: 80,
+                    width: 64,
+                    height: 64,
                     decoration: BoxDecoration(
-                      color: Colors.blue.shade400,
+                      gradient: AppTheme.primaryGradient,
                       shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppTheme.primaryBlue.withOpacity(0.3),
+                          blurRadius: 12,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
                     ),
                     child: const Icon(
-                      Icons.person,
-                      size: 40,
+                      Icons.person_rounded,
+                      size: 32,
                       color: Colors.white,
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Student',
-                    style: Theme.of(context).textTheme.titleLarge,
+                  const SizedBox(width: AppTheme.space16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Student Name',
+                          style: AppTheme.titleMedium.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.gray900,
+                          ),
+                        ),
+                        const SizedBox(height: AppTheme.space4),
+                        Text(
+                          'Student ID: 12345',
+                          style: AppTheme.bodySmall.copyWith(
+                            color: AppTheme.gray600,
+                          ),
+                        ),
+                        Text(
+                          'Computer Science, Year 2',
+                          style: AppTheme.bodySmall.copyWith(
+                            color: AppTheme.gray600,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 32),
+            const SizedBox(height: AppTheme.space24),
 
-            // Account Information
+            // Academic Information Section
             Text(
-              'Account Information',
-              style: Theme.of(context).textTheme.titleMedium,
+              'Academic Information',
+              style: AppTheme.bodyLarge.copyWith(
+                fontWeight: FontWeight.w600,
+                color: AppTheme.gray900,
+              ),
             ),
-            const SizedBox(height: 16),
-            _buildProfileInfoCard(
-              label: 'Email',
-              value: user?.email ?? 'Not available',
+            const SizedBox(height: AppTheme.space12),
+            _buildProfileMenuCard(
+              icon: Icons.school,
+              title: 'Program Details',
+              subtitle: 'Computer Science',
+              onTap: () {},
             ),
-            _buildProfileInfoCard(label: 'App Version', value: 'v2.0.0'),
-            const SizedBox(height: 32),
+            _buildProfileMenuCard(
+              icon: Icons.star,
+              title: 'GPA',
+              subtitle: 'View your GPA',
+              onTap: () {},
+            ),
+            _buildProfileMenuCard(
+              icon: Icons.history,
+              title: 'Academic History',
+              subtitle: 'View your academic records',
+              onTap: () {},
+            ),
+            const SizedBox(height: AppTheme.space24),
 
-            // Settings Section
-            Text('Settings', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 16),
-            ListTile(
-              leading: const Icon(Icons.lock_outline),
-              title: const Text('Change Password'),
-              subtitle: const Text('Update your password'),
-              onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Change password coming in a future update'),
-                  ),
-                );
-              },
+            // Personal Settings Section
+            Text(
+              'Personal Settings',
+              style: AppTheme.bodyLarge.copyWith(
+                fontWeight: FontWeight.w600,
+                color: AppTheme.gray900,
+              ),
             ),
-            ListTile(
-              leading: const Icon(Icons.notifications_none),
-              title: const Text('Notifications'),
-              subtitle: const Text('Manage your notifications'),
-              onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Notification settings coming soon'),
-                  ),
-                );
-              },
+            const SizedBox(height: AppTheme.space12),
+            _buildProfileMenuCard(
+              icon: Icons.person,
+              title: 'Edit Profile',
+              subtitle: 'Update your personal information',
+              onTap: () {},
             ),
-            const SizedBox(height: 32),
+            _buildProfileMenuCard(
+              icon: Icons.notifications,
+              title: 'Notifications',
+              subtitle: 'Manage your notification preferences',
+              onTap: () {},
+            ),
+            const SizedBox(height: AppTheme.space24),
+
+            // App Info
+            Container(
+              padding: const EdgeInsets.all(AppTheme.space16),
+              decoration: BoxDecoration(
+                color: AppTheme.gray100,
+                borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'App Version',
+                    style: AppTheme.bodySmall.copyWith(color: AppTheme.gray600),
+                  ),
+                  Text(
+                    'v6.0.0',
+                    style: AppTheme.bodySmall.copyWith(
+                      color: AppTheme.gray600,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AppTheme.space32),
 
             // Logout Button
             SizedBox(
@@ -989,9 +1548,15 @@ class _NotesViewState extends State<NotesView> {
                 icon: const Icon(Icons.logout),
                 label: const Text('Logout'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red.shade400,
+                  backgroundColor: AppTheme.error,
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(
+                    vertical: AppTheme.space12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+                  ),
                 ),
               ),
             ),
@@ -1001,25 +1566,45 @@ class _NotesViewState extends State<NotesView> {
     );
   }
 
-  Widget _buildProfileInfoCard({required String label, required String value}) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: Colors.grey),
-            ),
-            const SizedBox(height: 8),
-            Text(value, style: Theme.of(context).textTheme.bodyLarge),
-          ],
+  Widget _buildProfileMenuCard({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppTheme.space12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+        border: Border.all(color: AppTheme.gray200, width: 1),
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: AppTheme.space16,
+          vertical: AppTheme.space8,
         ),
+        leading: Container(
+          padding: const EdgeInsets.all(AppTheme.space8),
+          decoration: BoxDecoration(
+            color: AppTheme.primaryBlue.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+          ),
+          child: Icon(icon, color: AppTheme.primaryBlue, size: 20),
+        ),
+        title: Text(
+          title,
+          style: AppTheme.bodyMedium.copyWith(
+            fontWeight: FontWeight.w600,
+            color: AppTheme.gray900,
+          ),
+        ),
+        subtitle: Text(
+          subtitle,
+          style: AppTheme.bodySmall.copyWith(color: AppTheme.gray600),
+        ),
+        trailing: Icon(Icons.chevron_right, color: AppTheme.gray400),
+        onTap: onTap,
       ),
     );
   }

@@ -5,6 +5,7 @@ import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/services/ai/ai_service.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/services/firestore/placements_service.dart';
+import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/views/login_view.dart';
 import 'package:campusconnect/views/notes_view.dart';
 import 'package:campusconnect/views/profile_view.dart';
@@ -38,7 +39,7 @@ class MyApp extends StatelessWidget {
       ],
       child: MaterialApp(
         title: 'CampusConnect',
-        theme: ThemeData(primarySwatch: Colors.blue, useMaterial3: true),
+        theme: AppTheme.lightTheme, // v6.0: Professional design system
         home: const HomePage(),
         routes: {
           loginRoute: (context) => const LoginView(),
