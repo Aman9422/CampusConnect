@@ -2,12 +2,15 @@ import 'package:campusconnect/constants/routes.dart';
 import 'package:campusconnect/firebase_options.dart';
 import 'package:campusconnect/providers/ai_usage_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
+import 'package:campusconnect/providers/profile_provider.dart';
 import 'package:campusconnect/services/ai/ai_service.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/services/firestore/placements_service.dart';
 import 'package:campusconnect/theme/app_theme.dart';
+import 'package:campusconnect/views/edit_profile_view.dart';
 import 'package:campusconnect/views/login_view.dart';
 import 'package:campusconnect/views/notes_view.dart';
+import 'package:campusconnect/views/profile_setup_view.dart';
 import 'package:campusconnect/views/profile_view.dart';
 import 'package:campusconnect/views/register_view.dart';
 import 'package:campusconnect/views/verify_email_view.dart';
@@ -36,63 +39,136 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(
           create: (_) => AIUsageProvider(aiService: AIService.instance()),
         ),
+        ChangeNotifierProvider(create: (_) => ProfileProvider()),
       ],
       child: MaterialApp(
         title: 'CampusConnect',
         theme: AppTheme.lightTheme, // v6.0: Professional design system
-        home: const HomePage(),
+        home: const AuthGuard(),
         routes: {
           loginRoute: (context) => const LoginView(),
           registerRoute: (context) => const RegisterView(),
           notesRoute: (context) => const NotesView(),
           verifyEmailRoute: (context) => const VerifyEmailView(),
           profileRoute: (context) => const ProfileView(),
+          '/edit-profile': (context) => const EditProfileView(),
+          '/profile-setup': (context) => const ProfileSetupView(),
         },
       ),
     );
   }
 }
 
-class HomePage extends StatelessWidget {
-  const HomePage({super.key});
+class AuthGuard extends StatefulWidget {
+  const AuthGuard({super.key});
+
+  @override
+  State<AuthGuard> createState() => _AuthGuardState();
+}
+
+class _AuthGuardState extends State<AuthGuard> {
+  bool _isInitialized = false;
+  bool _isLoggedOut = false; // V6.3: Track logout to prevent race conditions
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeFirebase();
+  }
+
+  Future<void> _initializeFirebase() async {
+    await AuthService.firebase().initialize();
+    if (mounted) {
+      setState(() {
+        _isInitialized = true;
+      });
+    }
+  }
+
+  void _handleLogout() {
+    // V6.3: Set flag BEFORE resetting providers to prevent re-init
+    _isLoggedOut = true;
+
+    final placementsProvider = context.read<PlacementsProvider>();
+    final aiProvider = context.read<AIUsageProvider>();
+    final profileProvider = context.read<ProfileProvider>();
+
+    placementsProvider.reset();
+    aiProvider.reset();
+    profileProvider.reset();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder(
-      future: AuthService.firebase().initialize(),
-      builder: (context, asyncSnapshot) {
-        switch (asyncSnapshot.connectionState) {
-          case ConnectionState.done:
-            final user = AuthService.firebase().currentUser;
-            if (user != null) {
-              if (user.isEmailVerified) {
-                // V5.1.1: Initialize providers with userId
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  final placementsProvider = context.read<PlacementsProvider>();
-                  final aiProvider = context.read<AIUsageProvider>();
+    if (!_isInitialized) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
 
-                  // Only init if not already initialized or userId changed
-                  placementsProvider.initWithUser(user.id);
-                  aiProvider.initWithUser(user.id);
-                });
+    return StreamBuilder(
+      stream: AuthService.firebase().authStateChanges,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final user = snapshot.data;
+
+        if (user != null && !_isLoggedOut) {
+          // Reset logout flag when user logs in
+          _isLoggedOut = false;
+
+          if (user.isEmailVerified) {
+            return Consumer<ProfileProvider>(
+              builder: (context, profileProvider, child) {
+                // Initialize profile if not done
+                if (!profileProvider.isInitialized) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (_isLoggedOut) return; // V6.3: Don't init if logged out
+
+                    final placementsProvider = context
+                        .read<PlacementsProvider>();
+                    final aiProvider = context.read<AIUsageProvider>();
+
+                    placementsProvider.initWithUser(user.id);
+                    aiProvider.initWithUser(user.id);
+                    profileProvider.initWithUser(
+                      user.id,
+                      user.email ?? 'noemail@example.com',
+                    );
+                  });
+
+                  return const Scaffold(
+                    body: Center(child: CircularProgressIndicator()),
+                  );
+                }
+
+                if (profileProvider.isLoading) {
+                  return const Scaffold(
+                    body: Center(child: CircularProgressIndicator()),
+                  );
+                }
+
+                if (!profileProvider.isProfileCompleted) {
+                  return const ProfileSetupView();
+                }
 
                 return const NotesView();
-              } else {
-                return const VerifyEmailView();
-              }
-            } else {
-              // V5.1.1: Reset providers on logout
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                context.read<PlacementsProvider>().reset();
-                context.read<AIUsageProvider>().reset();
-              });
-
-              return const LoginView();
-            }
-          default:
-            return const Scaffold(
-              body: Center(child: CircularProgressIndicator()),
+              },
             );
+          } else {
+            return const VerifyEmailView();
+          }
+        } else {
+          // V6.3: Reset providers on logout (only once)
+          if (!_isLoggedOut && user == null) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _handleLogout();
+            });
+          }
+
+          return const LoginView();
         }
       },
     );

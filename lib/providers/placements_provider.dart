@@ -69,14 +69,21 @@ class PlacementsProvider with ChangeNotifier {
     _isInitialized = false;
     _error = null;
     _applyingPlacementId = null;
+    _isDisposed = true; // V6.3: Mark as disposed to stop any pending operations
     notifyListeners();
   }
+
+  // V6.3: Flag to stop operations after logout
+  bool _isDisposed = false;
 
   /// Initialize: Load placements and user applications ONCE
   /// V5 Optimization: Fetch data once instead of constant streams
   /// V5.1: Monitor network connectivity
   Future<void> init() async {
     if (_isInitialized) return; // Already initialized
+    if (userId == null) return; // V6.3: Don't init without user
+
+    _isDisposed = false; // V6.3: Reset disposed flag on init
 
     // V5.1: Start monitoring network connectivity
     _startConnectivityMonitoring();
@@ -133,10 +140,13 @@ class PlacementsProvider with ChangeNotifier {
 
   /// Load all active placements
   Future<void> _loadPlacements() async {
+    if (_isDisposed || userId == null) return; // V6.3: Stop if logged out
     try {
       final placementsSnapshot = await _service.getAllPlacementsOnce();
+      if (_isDisposed) return; // V6.3: Check again after async operation
       _placements = placementsSnapshot;
     } catch (e) {
+      if (_isDisposed) return; // V6.3: Don't rethrow if logged out
       debugPrint('Error loading placements: $e');
       rethrow;
     }
@@ -145,7 +155,7 @@ class PlacementsProvider with ChangeNotifier {
   /// Load user's applications
   /// V5.1.1: Safely handle null userId
   Future<void> _loadUserApplications() async {
-    if (userId == null) {
+    if (userId == null || _isDisposed) {
       debugPrint('Cannot load applications: userId is null');
       return; // Skip loading if not logged in
     }

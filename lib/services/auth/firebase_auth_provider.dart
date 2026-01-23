@@ -56,6 +56,18 @@ class FirebaseAuthProvider implements AuthProvider {
     }
   }
 
+  // V6.3: Auth state changes stream
+  @override
+  Stream<AuthUser?> get authStateChanges {
+    return FirebaseAuth.instance.authStateChanges().map((user) {
+      if (user != null) {
+        return AuthUser.fromFirebase(user);
+      } else {
+        return null;
+      }
+    });
+  }
+
   @override
   Future<AuthUser> logIn({
     required String email,

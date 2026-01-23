@@ -1,6 +1,10 @@
 import 'package:campusconnect/constants/routes.dart';
+import 'package:campusconnect/providers/ai_usage_provider.dart';
+import 'package:campusconnect/providers/placements_provider.dart';
+import 'package:campusconnect/providers/profile_provider.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 class ProfileView extends StatefulWidget {
   const ProfileView({super.key});
@@ -145,6 +149,10 @@ class _ProfileViewState extends State<ProfileView> {
   Future<void> _handleLogout() async {
     final shouldLogout = await _showLogOutDialog();
     if (shouldLogout && mounted) {
+      // CRITICAL: Reset all providers BEFORE logout to prevent data leakage
+      context.read<ProfileProvider>().reset();
+      context.read<PlacementsProvider>().reset();
+      context.read<AIUsageProvider>().reset();
       await AuthService.firebase().logOut();
       if (!mounted) return;
       Navigator.of(context).pushNamedAndRemoveUntil(loginRoute, (_) => false);

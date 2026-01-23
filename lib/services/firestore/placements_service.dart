@@ -2,7 +2,14 @@ import 'package:campusconnect/models/application.dart';
 import 'package:campusconnect/models/placement.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:flutter/foundation.dart';
 
+/// PlacementsService - Handles all Firestore operations for placements
+///
+/// CRITICAL: Application data is always stored with UID-based document IDs
+/// - Primary path: placements/{placementId}/applications/{uid}
+/// - All queries use userId parameter from authenticated user
+/// - Never stores applications without explicit UID binding
 class PlacementsService {
   final FirebaseFirestore _firestore;
 
@@ -113,6 +120,46 @@ class PlacementsService {
     }
   }
 
+  /// Direct client-side apply (fallback if Cloud Function unavailable)
+  /// Stores at: placements/{placementId}/applications/{uid}
+  /// CRITICAL: Always uses UID as document ID for strict isolation
+  Future<void> applyForPlacementDirect({
+    required String userId,
+    required String placementId,
+    required String resume,
+    String? company,
+  }) async {
+    try {
+      // Check if already applied
+      final alreadyApplied = await hasUserApplied(
+        userId: userId,
+        placementId: placementId,
+      );
+
+      if (alreadyApplied) {
+        throw Exception('You have already applied for this placement');
+      }
+
+      // Create application at placements/{placementId}/applications/{uid}
+      await _firestore
+          .collection('placements')
+          .doc(placementId)
+          .collection('applications')
+          .doc(userId) // UID as document ID for strict isolation
+          .set({
+            'userId': userId,
+            'placementId': placementId,
+            'resumeUrl': resume,
+            'company': company ?? 'Unknown',
+            'appliedAt': FieldValue.serverTimestamp(),
+            'status': 'applied',
+          });
+    } catch (e) {
+      debugPrint('Error applying for placement: $e');
+      rethrow;
+    }
+  }
+
   // VERSION 4: Get all user applications (including closed placements)
   Stream<List<Map<String, dynamic>>> getUserApplicationsWithDetails(
     String userId,
@@ -164,27 +211,30 @@ class PlacementsService {
   }
 
   // Check if user has already applied (VERSION 4: Check new structure)
+  /// CRITICAL: Always uses UID-scoped access - placements/{placementId}/applications/{uid}
   Future<bool> hasUserApplied({
     required String userId,
     required String placementId,
   }) async {
     try {
+      // PRIMARY: Check exact path placements/{placementId}/applications/{uid}
+      final docInPlacement = await _firestore
+          .collection('placements')
+          .doc(placementId)
+          .collection('applications')
+          .doc(userId)
+          .get();
+
+      if (docInPlacement.exists) return true;
+
+      // FALLBACK: Check global applications collection with compound ID
       final applicationId = '${userId}_$placementId';
       final doc = await _firestore
           .collection('applications')
           .doc(applicationId)
           .get();
 
-      if (doc.exists) return true;
-
-      // Fallback: Check old structure for backward compatibility
-      final oldDoc = await _firestore
-          .collection('placements')
-          .doc(placementId)
-          .collection('applications')
-          .doc(userId)
-          .get();
-      return oldDoc.exists;
+      return doc.exists;
     } catch (e) {
       rethrow;
     }

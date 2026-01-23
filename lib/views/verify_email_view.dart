@@ -1,7 +1,10 @@
 import 'package:campusconnect/constants/routes.dart';
+import 'package:campusconnect/providers/ai_usage_provider.dart';
+import 'package:campusconnect/providers/placements_provider.dart';
+import 'package:campusconnect/providers/profile_provider.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:flutter/material.dart';
-
+import 'package:provider/provider.dart';
 
 class VerifyEmailView extends StatefulWidget {
   const VerifyEmailView({super.key});
@@ -34,13 +37,17 @@ class _VerifyEmailViewState extends State<VerifyEmailView> {
           ),
           TextButton(
             onPressed: () async {
+              // CRITICAL: Reset all providers BEFORE logout to prevent data leakage
+              context.read<ProfileProvider>().reset();
+              context.read<PlacementsProvider>().reset();
+              context.read<AIUsageProvider>().reset();
               await AuthService.firebase().logOut();
               if (!context.mounted) return;
               Navigator.of(
                 context,
-              ).pushNamedAndRemoveUntil(registerRoute, (_) => false);
+              ).pushNamedAndRemoveUntil(loginRoute, (_) => false);
             },
-            child: Text('Restart'),
+            child: Text('Login'),
           ),
         ],
       ),

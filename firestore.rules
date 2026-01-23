@@ -5,91 +5,94 @@ service cloud.firestore {
     // ===============================================
     // HELPER FUNCTIONS
     // ===============================================
-    // Check if user is authenticated
     function isAuthenticated() {
       return request.auth != null;
     }
 
-    // Check if user owns a document
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
     // ===============================================
-    // EXISTING COLLECTIONS
+    // USERS COLLECTION (with subcollections)
     // ===============================================
-
-    // Users collection
     match /users/{userId} {
-      allow read: if isOwner(userId);
-      allow write: if isOwner(userId);
-    }
-
-    // Notes collection
-    match /notes/{noteId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update, delete: if isOwner(resource.data.userId);
-    }
-
-    // Placements collection
-    match /placements/{placementId} {
-      allow read: if isAuthenticated();
-      allow write: if false; // Admin only via Cloud Functions
-
-      // Placement applications (old structure - keep for compatibility)
-      match /applications/{userId} {
-        allow read: if isAuthenticated();
-        allow create: if isOwner(userId);
-        allow update, delete: if false; // Immutable after creation
+      allow read, write: if isOwner(userId);
+      
+      // All subcollections under users/{uid}
+      match /{subcollection=**} {
+        allow read, write: if isOwner(userId);
       }
     }
 
-    // AI conversations
-    match /ai_conversations/{conversationId} {
-      allow read: if isOwner(resource.data.userId);
-      allow write: if false; // Only Cloud Functions can write
+    // ===============================================
+    // PLACEMENTS (READ-ONLY FOR USERS)
+    // ===============================================
+    match /placements/{placementId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+
+      // Applications under placements
+      match /applications/{appUserId} {
+        allow create: if isOwner(appUserId);
+        allow read: if isOwner(appUserId);
+        allow update, delete: if false;
+      }
     }
 
     // ===============================================
-    // VERSION 4: NEW COLLECTIONS
+    // GLOBAL APPLICATIONS COLLECTION
     // ===============================================
+    match /applications/{applicationId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if false;
+    }
 
-    // AI usage tracking
+    // ===============================================
+    // NOTES (SHARED RESOURCES)
+    // ===============================================
+    match /notes/{noteId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // ===============================================
+    // AI FEATURES (READ-ONLY FOR USER)
+    // ===============================================
+    match /ai_conversations/{conversationId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
     match /ai_usage/{userId} {
       allow read: if isOwner(userId);
-      allow write: if false; // Only Cloud Functions
+      allow write: if false;
     }
 
-    // AI rate limits
     match /ai_rate_limits/{userId} {
       allow read: if isOwner(userId);
       allow write: if false;
     }
 
-    // AI spam check
     match /ai_spam_check/{userId} {
       allow read: if isOwner(userId);
       allow write: if false;
     }
 
-    // Analytics events
+    // ===============================================
+    // ANALYTICS (ADMIN ONLY)
+    // ===============================================
     match /analytics_events/{eventId} {
-      allow read: if false; // Admin only
-      allow write: if false; // Only Cloud Functions
+      allow read, write: if false;
     }
 
-    // Applications - Top-level collection
-    match /applications/{applicationId} {
-      allow read: if isOwner(resource.data.userId);
-      allow write: if false;
+    // ===============================================
+    // DENY EVERYTHING ELSE
+    // ===============================================
+    match /{document=**} {
+      allow read, write: if false;
     }
-
-    // 🔥 COLLECTIONGROUP SUPPORT FOR APPLICATIONS ANYWHERE
-    match /{path=**}/applications/{applicationId} {
-      allow read: if isOwner(resource.data.userId);
-      allow write: if false;
-    }
-
   }
 }

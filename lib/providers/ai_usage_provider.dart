@@ -38,6 +38,7 @@ class AIUsageProvider with ChangeNotifier {
 
   /// V5.1.1: Reset state (called on logout)
   void reset() {
+    _isDisposed = true; // V6.3: Mark as disposed first
     userId = null;
     _isInTrial = false;
     _daysRemainingInTrial = 0;
@@ -49,6 +50,9 @@ class AIUsageProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  // V6.3: Flag to stop operations after logout
+  bool _isDisposed = false;
+
   /// Initialize: Load AI usage data
   /// V5.1.x: Enhanced with network connectivity monitoring
   Future<void> init() async {
@@ -56,6 +60,8 @@ class AIUsageProvider with ChangeNotifier {
       debugPrint('Cannot init AIUsageProvider: userId is null');
       return;
     }
+
+    _isDisposed = false; // V6.3: Reset on init
 
     // V5.1.x: Start monitoring network connectivity
     _startConnectivityMonitoring();

@@ -5,6 +5,7 @@ import 'package:campusconnect/models/note.dart';
 import 'package:campusconnect/models/placement.dart';
 import 'package:campusconnect/providers/ai_usage_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
+import 'package:campusconnect/providers/profile_provider.dart';
 import 'package:campusconnect/services/ai/ai_service.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/services/firestore/notes_service.dart';
@@ -140,6 +141,10 @@ class _NotesViewState extends State<NotesView> {
                 case MenuAction.logout:
                   final shouldLogout = await _showLogOutDialog();
                   if (shouldLogout && mounted) {
+                    // CRITICAL: Reset all providers BEFORE logout to prevent data leakage
+                    context.read<ProfileProvider>().reset();
+                    context.read<PlacementsProvider>().reset();
+                    context.read<AIUsageProvider>().reset();
                     await AuthService.firebase().logOut();
                     if (!mounted) return;
                     Navigator.of(
@@ -291,7 +296,6 @@ class _NotesViewState extends State<NotesView> {
                 title: 'Ask CampusConnect AI for guidance',
                 subtitle: 'Get help with your career',
                 onTap: () {
-              
                   setState(() => _selectedIndex = 3);
                 },
               ),
@@ -341,18 +345,12 @@ class _NotesViewState extends State<NotesView> {
                   const SizedBox(height: AppTheme.space4),
                   Text(
                     subtitle,
-                    style: AppTheme.bodySmall.copyWith(
-                      color: AppTheme.gray600,
-                    ),
+                    style: AppTheme.bodySmall.copyWith(color: AppTheme.gray600),
                   ),
                 ],
               ),
             ),
-            Icon(
-              Icons.chevron_right,
-              color: AppTheme.gray400,
-              size: 20,
-            ),
+            Icon(Icons.chevron_right, color: AppTheme.gray400, size: 20),
           ],
         ),
       ),
@@ -1374,195 +1372,314 @@ class _NotesViewState extends State<NotesView> {
   // V5.1.2: Trial and usage warnings now shown via banner in chat screen (removed snackbar methods)
 
   Widget _buildProfileScreen() {
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        title: Text(
-          'Profile',
-          style: AppTheme.titleMedium.copyWith(
-            fontWeight: FontWeight.w600,
-            color: AppTheme.gray900,
+    return Consumer<ProfileProvider>(
+      builder: (context, profileProvider, child) {
+        if (profileProvider.isLoading && !profileProvider.isInitialized) {
+          return const Scaffold(
+            backgroundColor: AppTheme.background,
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final profile = profileProvider.profile;
+        final isIncomplete = profile?.isIncomplete ?? true;
+
+        return Scaffold(
+          backgroundColor: AppTheme.background,
+          appBar: AppBar(
+            backgroundColor: Colors.white,
+            elevation: 0,
+            title: Text(
+              'Profile',
+              style: AppTheme.titleMedium.copyWith(
+                fontWeight: FontWeight.w600,
+                color: AppTheme.gray900,
+              ),
+            ),
           ),
-        ),
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(AppTheme.space20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Profile Header Card
-            Container(
-              padding: const EdgeInsets.all(AppTheme.space20),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
-                border: Border.all(color: AppTheme.gray200, width: 1),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppTheme.gray200.withOpacity(0.5),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Row(
-                children: [
+          body: SingleChildScrollView(
+            padding: const EdgeInsets.all(AppTheme.space20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Incomplete profile warning
+                if (isIncomplete) ...[
                   Container(
-                    width: 64,
-                    height: 64,
+                    padding: const EdgeInsets.all(AppTheme.space16),
                     decoration: BoxDecoration(
-                      gradient: AppTheme.primaryGradient,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppTheme.primaryBlue.withOpacity(0.3),
-                          blurRadius: 12,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
+                      color: AppTheme.warningBg,
+                      borderRadius: BorderRadius.circular(
+                        AppTheme.radiusMedium,
+                      ),
+                      border: Border.all(
+                        color: AppTheme.warning.withOpacity(0.3),
+                        width: 1,
+                      ),
                     ),
-                    child: const Icon(
-                      Icons.person_rounded,
-                      size: 32,
-                      color: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(width: AppTheme.space16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    child: Row(
                       children: [
-                        Text(
-                          'Student Name',
-                          style: AppTheme.titleMedium.copyWith(
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.gray900,
-                          ),
+                        Icon(
+                          Icons.info_outline,
+                          color: AppTheme.warning,
+                          size: 20,
                         ),
-                        const SizedBox(height: AppTheme.space4),
-                        Text(
-                          'Student ID: 12345',
-                          style: AppTheme.bodySmall.copyWith(
-                            color: AppTheme.gray600,
-                          ),
-                        ),
-                        Text(
-                          'Computer Science, Year 2',
-                          style: AppTheme.bodySmall.copyWith(
-                            color: AppTheme.gray600,
+                        const SizedBox(width: AppTheme.space12),
+                        Expanded(
+                          child: Text(
+                            'Complete your profile to get personalized recommendations',
+                            style: AppTheme.bodySmall.copyWith(
+                              color: AppTheme.gray800,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ),
                       ],
                     ),
                   ),
+                  const SizedBox(height: AppTheme.space20),
                 ],
-              ),
-            ),
-            const SizedBox(height: AppTheme.space24),
 
-            // Academic Information Section
-            Text(
-              'Academic Information',
-              style: AppTheme.bodyLarge.copyWith(
-                fontWeight: FontWeight.w600,
-                color: AppTheme.gray900,
-              ),
-            ),
-            const SizedBox(height: AppTheme.space12),
-            _buildProfileMenuCard(
-              icon: Icons.school,
-              title: 'Program Details',
-              subtitle: 'Computer Science',
-              onTap: () {},
-            ),
-            _buildProfileMenuCard(
-              icon: Icons.star,
-              title: 'GPA',
-              subtitle: 'View your GPA',
-              onTap: () {},
-            ),
-            _buildProfileMenuCard(
-              icon: Icons.history,
-              title: 'Academic History',
-              subtitle: 'View your academic records',
-              onTap: () {},
-            ),
-            const SizedBox(height: AppTheme.space24),
-
-            // Personal Settings Section
-            Text(
-              'Personal Settings',
-              style: AppTheme.bodyLarge.copyWith(
-                fontWeight: FontWeight.w600,
-                color: AppTheme.gray900,
-              ),
-            ),
-            const SizedBox(height: AppTheme.space12),
-            _buildProfileMenuCard(
-              icon: Icons.person,
-              title: 'Edit Profile',
-              subtitle: 'Update your personal information',
-              onTap: () {},
-            ),
-            _buildProfileMenuCard(
-              icon: Icons.notifications,
-              title: 'Notifications',
-              subtitle: 'Manage your notification preferences',
-              onTap: () {},
-            ),
-            const SizedBox(height: AppTheme.space24),
-
-            // App Info
-            Container(
-              padding: const EdgeInsets.all(AppTheme.space16),
-              decoration: BoxDecoration(
-                color: AppTheme.gray100,
-                borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'App Version',
-                    style: AppTheme.bodySmall.copyWith(color: AppTheme.gray600),
+                // Profile Header Card
+                Container(
+                  padding: const EdgeInsets.all(AppTheme.space20),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
+                    border: Border.all(color: AppTheme.gray200, width: 1),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppTheme.gray200.withOpacity(0.5),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
                   ),
-                  Text(
-                    'v6.0.0',
-                    style: AppTheme.bodySmall.copyWith(
-                      color: AppTheme.gray600,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: AppTheme.space32),
-
-            // Logout Button
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: () => _handleProfileLogout(),
-                icon: const Icon(Icons.logout),
-                label: const Text('Logout'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.error,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  padding: const EdgeInsets.symmetric(
-                    vertical: AppTheme.space12,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+                  child: Row(
+                    children: [
+                      // Avatar with fallback to icon
+                      Container(
+                        width: 64,
+                        height: 64,
+                        decoration: BoxDecoration(
+                          gradient:
+                              (profile?.personal.avatarUrl.isEmpty ?? true)
+                              ? AppTheme.primaryGradient
+                              : null,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppTheme.primaryBlue.withOpacity(0.3),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                          image:
+                              (profile?.personal.avatarUrl.isNotEmpty ?? false)
+                              ? DecorationImage(
+                                  image: NetworkImage(
+                                    profile!.personal.avatarUrl,
+                                  ),
+                                  fit: BoxFit.cover,
+                                )
+                              : null,
+                        ),
+                        child: (profile?.personal.avatarUrl.isEmpty ?? true)
+                            ? const Icon(
+                                Icons.person_rounded,
+                                size: 32,
+                                color: Colors.white,
+                              )
+                            : null,
+                      ),
+                      const SizedBox(width: AppTheme.space16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              (profile?.personal.fullName.isEmpty ?? true)
+                                  ? 'Student Name'
+                                  : profile!.personal.fullName,
+                              style: AppTheme.titleMedium.copyWith(
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.gray900,
+                              ),
+                            ),
+                            const SizedBox(height: AppTheme.space4),
+                            Text(
+                              profile?.personal.email ?? 'Email',
+                              style: AppTheme.bodySmall.copyWith(
+                                color: AppTheme.gray600,
+                              ),
+                            ),
+                            Text(
+                              (profile?.academic.program.isEmpty ?? true)
+                                  ? 'Program not set'
+                                  : '${profile!.academic.program}, Year ${profile.academic.year}',
+                              style: AppTheme.bodySmall.copyWith(
+                                color: AppTheme.gray600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ),
+                const SizedBox(height: AppTheme.space24),
+
+                // Contact Information Section
+                Text(
+                  'Contact Information',
+                  style: AppTheme.bodyLarge.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.gray900,
+                  ),
+                ),
+                const SizedBox(height: AppTheme.space12),
+                _buildProfileInfoTile(
+                  icon: Icons.email_outlined,
+                  title: 'Email',
+                  value: profile?.personal.email ?? 'Not set',
+                ),
+                _buildProfileInfoTile(
+                  icon: Icons.phone_outlined,
+                  title: 'Phone',
+                  value: (profile?.personal.phone.isEmpty ?? true)
+                      ? 'Not set'
+                      : profile!.personal.phone,
+                ),
+                const SizedBox(height: AppTheme.space24),
+
+                // Academic Information Section (Display-only)
+                Text(
+                  'Academic Information',
+                  style: AppTheme.bodyLarge.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.gray900,
+                  ),
+                ),
+                const SizedBox(height: AppTheme.space12),
+                _buildProfileInfoTile(
+                  icon: Icons.school_outlined,
+                  title: 'Program',
+                  value: (profile?.academic.program.isEmpty ?? true)
+                      ? 'Not set'
+                      : profile!.academic.program,
+                ),
+                _buildProfileInfoTile(
+                  icon: Icons.business_outlined,
+                  title: 'College',
+                  value: (profile?.academic.college.isEmpty ?? true)
+                      ? 'Not set'
+                      : profile!.academic.college,
+                ),
+                _buildProfileInfoTile(
+                  icon: Icons.calendar_today_outlined,
+                  title: 'Year',
+                  value:
+                      (profile?.academic.year == null ||
+                          profile!.academic.year == 0)
+                      ? 'Not set'
+                      : 'Year ${profile.academic.year}',
+                ),
+                _buildProfileInfoTile(
+                  icon: Icons.star_outline,
+                  title: 'CGPA',
+                  value:
+                      (profile?.academic.cgpa == null ||
+                          profile!.academic.cgpa == 0.0)
+                      ? 'Not set'
+                      : '${profile.academic.cgpa.toStringAsFixed(2)} / 10.0',
+                ),
+                const SizedBox(height: AppTheme.space24),
+
+                // Settings Section
+                Text(
+                  'Settings',
+                  style: AppTheme.bodyLarge.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.gray900,
+                  ),
+                ),
+                const SizedBox(height: AppTheme.space12),
+                _buildProfileMenuCard(
+                  icon: Icons.edit_outlined,
+                  title: 'Edit Profile',
+                  subtitle: 'Update your personal & academic information',
+                  onTap: () {
+                    Navigator.of(context).pushNamed('/edit-profile');
+                  },
+                ),
+                _buildProfileMenuCard(
+                  icon: Icons.notifications_outlined,
+                  title: 'Notifications',
+                  subtitle: 'Manage your notification preferences',
+                  onTap: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Notifications settings coming soon'),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: AppTheme.space24),
+
+                // App Info
+                Container(
+                  padding: const EdgeInsets.all(AppTheme.space16),
+                  decoration: BoxDecoration(
+                    color: AppTheme.gray100,
+                    borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'App Version',
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.gray600,
+                        ),
+                      ),
+                      Text(
+                        'v6.0.0',
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.gray600,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: AppTheme.space32),
+
+                // Logout Button
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () => _handleProfileLogout(),
+                    icon: const Icon(Icons.logout),
+                    label: const Text('Logout'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.error,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(
+                        vertical: AppTheme.space12,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(
+                          AppTheme.radiusMedium,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
@@ -1609,9 +1726,68 @@ class _NotesViewState extends State<NotesView> {
     );
   }
 
+  /// Display-only info tile (no tap action)
+  Widget _buildProfileInfoTile({
+    required IconData icon,
+    required String title,
+    required String value,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppTheme.space8),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppTheme.space16,
+        vertical: AppTheme.space12,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+        border: Border.all(color: AppTheme.gray200, width: 1),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(AppTheme.space8),
+            decoration: BoxDecoration(
+              color: AppTheme.gray100,
+              borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+            ),
+            child: Icon(icon, color: AppTheme.gray600, size: 18),
+          ),
+          const SizedBox(width: AppTheme.space12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: AppTheme.caption.copyWith(
+                    color: AppTheme.gray500,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  style: AppTheme.bodyMedium.copyWith(
+                    color: AppTheme.gray900,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _handleProfileLogout() async {
     final shouldLogout = await _showLogOutDialog();
     if (shouldLogout && mounted) {
+      // CRITICAL: Reset all providers BEFORE logout to prevent data leakage
+      context.read<ProfileProvider>().reset();
+      context.read<PlacementsProvider>().reset();
+      context.read<AIUsageProvider>().reset();
       await AuthService.firebase().logOut();
       if (!mounted) return;
       Navigator.of(context).pushNamedAndRemoveUntil(loginRoute, (_) => false);

@@ -198,9 +198,10 @@ class _LoginViewState extends State<LoginView> {
                         if (!context.mounted) return;
 
                         if (user?.isEmailVerified ?? false) {
+                          // Navigate to root - AuthGuard will check profile completion
                           Navigator.of(
                             context,
-                          ).pushNamedAndRemoveUntil(notesRoute, (_) => false);
+                          ).pushNamedAndRemoveUntil('/', (_) => false);
                         } else {
                           Navigator.of(context).pushNamedAndRemoveUntil(
                             verifyEmailRoute,
