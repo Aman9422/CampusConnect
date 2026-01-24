@@ -1,4 +1,5 @@
 import 'package:campusconnect/models/placement.dart';
+import 'package:campusconnect/services/firestore/notifications_service.dart';
 import 'package:campusconnect/services/firestore/placements_service.dart';
 import 'package:campusconnect/utilities/analytics_helper.dart';
 import 'package:campusconnect/utilities/error_messages.dart';
@@ -7,6 +8,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 
 /// V5.1.1: Enhanced with proper lifecycle management
+/// V6.4: Added notification creation on successful application
 /// Single source of truth for:
 /// - Active placements
 /// - User's applied placement IDs
@@ -15,6 +17,8 @@ import 'package:flutter/foundation.dart';
 /// - Network connectivity
 class PlacementsProvider with ChangeNotifier {
   final PlacementsService _service;
+  final NotificationsService _notificationsService =
+      NotificationsService.instance();
   String? userId; // V5.1.1: Made nullable for logout handling
   final Connectivity _connectivity = Connectivity();
 
@@ -202,10 +206,12 @@ class PlacementsProvider with ChangeNotifier {
   /// Apply for a placement with optimistic update
   /// V5: Instant UI feedback, backend validation
   /// V5.1: Enhanced guardrails and error handling
+  /// V6.4: Added notification creation on success
   Future<bool> applyForPlacement({
     required String placementId,
     required String resume,
     String? company,
+    String? role,
   }) async {
     // V5.1: GUARDRAIL - Check if already applied
     if (_appliedPlacementIds.contains(placementId)) {
@@ -274,6 +280,16 @@ class PlacementsProvider with ChangeNotifier {
       // Success: Keep optimistic update
       _applyingPlacementId = null;
       notifyListeners();
+
+      // V6.4: Create notification for successful application
+      if (userId != null) {
+        await _notificationsService.notifyPlacementApplied(
+          userId: userId!,
+          placementId: placementId,
+          company: company ?? 'Unknown',
+          role: role ?? 'Position',
+        );
+      }
 
       // V5.1: Log analytics success
       await AnalyticsHelper.logPlacementApplySuccess(

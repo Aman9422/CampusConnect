@@ -4,6 +4,7 @@ import 'package:campusconnect/models/chat_message.dart';
 import 'package:campusconnect/models/note.dart';
 import 'package:campusconnect/models/placement.dart';
 import 'package:campusconnect/providers/ai_usage_provider.dart';
+import 'package:campusconnect/providers/notifications_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
 import 'package:campusconnect/services/ai/ai_service.dart';
@@ -11,6 +12,7 @@ import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/services/firestore/notes_service.dart';
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/utilities/error_messages.dart';
+import 'package:campusconnect/views/widgets/notification_badge.dart';
 import 'package:campusconnect/widgets/empty_state.dart';
 import 'package:campusconnect/widgets/home_widgets.dart';
 import 'package:campusconnect/widgets/offline_banner.dart';
@@ -126,14 +128,25 @@ class _NotesViewState extends State<NotesView> {
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
-        title: Text(
-          'Home',
-          style: AppTheme.titleMedium.copyWith(
-            fontWeight: FontWeight.w600,
-            color: AppTheme.gray900,
-          ),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.school, color: AppTheme.gray900, size: 24),
+            const SizedBox(width: 8),
+            Text(
+              'CampusConnect',
+              style: AppTheme.titleMedium.copyWith(
+                fontWeight: FontWeight.w600,
+                color: AppTheme.gray900,
+              ),
+            ),
+          ],
         ),
         actions: [
+          // V6.4: Notification badge
+          NotificationBadge(
+            onTap: () => Navigator.pushNamed(context, notificationsRoute),
+          ),
           PopupMenuButton<MenuAction>(
             icon: Icon(Icons.more_vert, color: AppTheme.gray700),
             onSelected: (value) async {
@@ -145,6 +158,7 @@ class _NotesViewState extends State<NotesView> {
                     context.read<ProfileProvider>().reset();
                     context.read<PlacementsProvider>().reset();
                     context.read<AIUsageProvider>().reset();
+                    context.read<NotificationsProvider>().reset();
                     await AuthService.firebase().logOut();
                     if (!mounted) return;
                     Navigator.of(
@@ -764,7 +778,11 @@ class _NotesViewState extends State<NotesView> {
                     ],
                   ),
                   if (!placement.isDeadlinePassed)
-                    _buildApplyButton(placement.id, placement.company),
+                    _buildApplyButton(
+                      placement.id,
+                      placement.company,
+                      placement.role,
+                    ),
                 ],
               ),
             ],
@@ -774,7 +792,7 @@ class _NotesViewState extends State<NotesView> {
     );
   }
 
-  Widget _buildApplyButton(String placementId, String company) {
+  Widget _buildApplyButton(String placementId, String company, String role) {
     return Consumer<PlacementsProvider>(
       builder: (context, provider, child) {
         final hasApplied = provider.hasApplied(placementId);
@@ -895,7 +913,7 @@ class _NotesViewState extends State<NotesView> {
             child: InkWell(
               onTap: isDisabled
                   ? null
-                  : () => _showApplyDialog(placementId, company),
+                  : () => _showApplyDialog(placementId, company, role),
               borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
               child: Padding(
                 padding: const EdgeInsets.symmetric(
@@ -918,7 +936,7 @@ class _NotesViewState extends State<NotesView> {
     );
   }
 
-  void _showApplyDialog(String placementId, String company) {
+  void _showApplyDialog(String placementId, String company, String role) {
     // Capture the provider before showing the dialog
     final provider = context.read<PlacementsProvider>();
 
@@ -930,6 +948,7 @@ class _NotesViewState extends State<NotesView> {
             child: _ApplyDialogWidget(
               placementId: placementId,
               company: company,
+              role: role,
             ),
           ),
     );
@@ -1396,6 +1415,12 @@ class _NotesViewState extends State<NotesView> {
                 color: AppTheme.gray900,
               ),
             ),
+            actions: [
+              // V6.4: Notification badge
+              NotificationBadge(
+                onTap: () => Navigator.pushNamed(context, notificationsRoute),
+              ),
+            ],
           ),
           body: SingleChildScrollView(
             padding: const EdgeInsets.all(AppTheme.space20),
@@ -1611,18 +1636,6 @@ class _NotesViewState extends State<NotesView> {
                     Navigator.of(context).pushNamed('/edit-profile');
                   },
                 ),
-                _buildProfileMenuCard(
-                  icon: Icons.notifications_outlined,
-                  title: 'Notifications',
-                  subtitle: 'Manage your notification preferences',
-                  onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Notifications settings coming soon'),
-                      ),
-                    );
-                  },
-                ),
                 const SizedBox(height: AppTheme.space24),
 
                 // App Info
@@ -1824,8 +1837,13 @@ class _NotesViewState extends State<NotesView> {
 class _ApplyDialogWidget extends StatefulWidget {
   final String placementId;
   final String company;
+  final String role;
 
-  const _ApplyDialogWidget({required this.placementId, required this.company});
+  const _ApplyDialogWidget({
+    required this.placementId,
+    required this.company,
+    required this.role,
+  });
 
   @override
   State<_ApplyDialogWidget> createState() => _ApplyDialogWidgetState();
@@ -1916,6 +1934,7 @@ class _ApplyDialogWidgetState extends State<_ApplyDialogWidget> {
         placementId: widget.placementId,
         resume: resume,
         company: widget.company,
+        role: widget.role,
       );
 
       if (mounted && success) {

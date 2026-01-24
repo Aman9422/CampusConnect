@@ -87,6 +87,12 @@ class MockAuthProvider implements AuthProvider {
   AuthUser? get currentUser => _user;
 
   @override
+  Stream<AuthUser?> get authStateChanges {
+    // Return a stream that emits the current user
+    return Stream.value(_user);
+  }
+
+  @override
   Future<void> initialize() async {
     await Future.delayed(const Duration(seconds: 1));
     _isInitialized = true;

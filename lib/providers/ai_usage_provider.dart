@@ -47,11 +47,18 @@ class AIUsageProvider with ChangeNotifier {
     _isLoading = false;
     _error = null;
     _isOnline = true;
-    notifyListeners();
+    // Don't notify after dispose
   }
 
   // V6.3: Flag to stop operations after logout
   bool _isDisposed = false;
+
+  /// V6.3: Safe notify that checks disposed state
+  void _safeNotify() {
+    if (!_isDisposed) {
+      notifyListeners();
+    }
+  }
 
   /// Initialize: Load AI usage data
   /// V5.1.x: Enhanced with network connectivity monitoring
@@ -68,7 +75,7 @@ class AIUsageProvider with ChangeNotifier {
 
     _isLoading = true;
     _error = null;
-    notifyListeners();
+    _safeNotify();
 
     try {
       // In V5, we'll fetch usage data from backend
@@ -83,7 +90,7 @@ class AIUsageProvider with ChangeNotifier {
       debugPrint('AIUsageProvider init error: $e');
     } finally {
       _isLoading = false;
-      notifyListeners();
+      _safeNotify();
     }
   }
 
@@ -97,7 +104,7 @@ class AIUsageProvider with ChangeNotifier {
         debugPrint(
           'AIUsageProvider: Network state changed to ${_isOnline ? "online" : "offline"}',
         );
-        notifyListeners();
+        _safeNotify();
       }
     });
   }
@@ -105,20 +112,20 @@ class AIUsageProvider with ChangeNotifier {
   /// Update usage after sending a message
   void incrementUsage() {
     _messagesUsedToday++;
-    notifyListeners();
+    _safeNotify();
   }
 
   /// Update trial info from AI response
   void updateTrialInfo({required bool isInTrial, required int daysRemaining}) {
     _isInTrial = isInTrial;
     _daysRemainingInTrial = daysRemaining;
-    notifyListeners();
+    _safeNotify();
   }
 
   /// Update usage info from AI response
   void updateUsageInfo({required int messagesUsed, required int dailyLimit}) {
     _messagesUsedToday = messagesUsed;
     _dailyLimit = dailyLimit;
-    notifyListeners();
+    _safeNotify();
   }
 }

@@ -89,6 +89,16 @@ service cloud.firestore {
     }
 
     // ===============================================
+    // ANNOUNCEMENTS (v6.4 - Admin broadcasts)
+    // ===============================================
+    match /announcements/{announcementId} {
+      // All authenticated users can read announcements
+      allow read: if isAuthenticated();
+      // Only admin can write (via console/admin SDK)
+      allow write: if false;
+    }
+
+    // ===============================================
     // DENY EVERYTHING ELSE
     // ===============================================
     match /{document=**} {
