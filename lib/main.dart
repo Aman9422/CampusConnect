@@ -158,6 +158,18 @@ class _AuthGuardState extends State<AuthGuard> {
                   );
                 }
 
+                // v6.5: Sync profile to placements provider for eligibility checks
+                // Use addPostFrameCallback to avoid calling during build
+                if (profileProvider.hasProfile) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (!mounted || _isLoggedOut) return;
+                    final placementsProvider = context.read<PlacementsProvider>();
+                    placementsProvider.updateUserProfile(
+                      profileProvider.profile!,
+                    );
+                  });
+                }
+
                 if (profileProvider.isLoading) {
                   return const Scaffold(
                     body: Center(child: CircularProgressIndicator()),

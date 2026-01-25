@@ -87,14 +87,18 @@ class NotificationsProvider extends ChangeNotifier {
   /// Reset state (called on logout)
   void reset() {
     _isDisposed = true;
-    _notificationsSubscription?.cancel();
+
+    // Cancel subscription immediately and synchronously clear reference
+    final subscription = _notificationsSubscription;
     _notificationsSubscription = null;
+    subscription?.cancel();
+
     userId = null;
     _notifications = [];
     _isLoading = false;
     _isInitialized = false;
     _error = null;
-    notifyListeners();
+    // Don't notify after dispose to prevent any further updates
   }
 
   /// Mark a notification as read

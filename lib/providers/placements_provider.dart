@@ -1,4 +1,7 @@
 import 'package:campusconnect/models/placement.dart';
+import 'package:campusconnect/models/placement_eligibility.dart';
+import 'package:campusconnect/models/student_profile.dart';
+import 'package:campusconnect/services/eligibility_engine.dart';
 import 'package:campusconnect/services/firestore/notifications_service.dart';
 import 'package:campusconnect/services/firestore/placements_service.dart';
 import 'package:campusconnect/utilities/analytics_helper.dart';
@@ -9,18 +12,23 @@ import 'package:flutter/foundation.dart';
 
 /// V5.1.1: Enhanced with proper lifecycle management
 /// V6.4: Added notification creation on successful application
+/// V6.5: Added rule-based eligibility checking
 /// Single source of truth for:
 /// - Active placements
 /// - User's applied placement IDs
 /// - Application dates
 /// - Loading states
 /// - Network connectivity
+/// - Eligibility status (v6.5)
 class PlacementsProvider with ChangeNotifier {
   final PlacementsService _service;
   final NotificationsService _notificationsService =
       NotificationsService.instance();
   String? userId; // V5.1.1: Made nullable for logout handling
   final Connectivity _connectivity = Connectivity();
+
+  // V6.5: Student profile for eligibility checking
+  StudentProfile? _userProfile;
 
   PlacementsProvider({required PlacementsService service, this.userId})
     : _service = service;
@@ -34,6 +42,9 @@ class PlacementsProvider with ChangeNotifier {
   String? _error;
   String? _applyingPlacementId; // Track which placement is being applied to
   bool _isOnline = true; // V5.1: Network state
+
+  // V6.5: Eligibility cache
+  Map<String, PlacementEligibility> _eligibilityCache = {};
 
   // Getters
   List<Placement> get placements => _placements;
@@ -49,8 +60,35 @@ class PlacementsProvider with ChangeNotifier {
   bool isApplying(String placementId) => _applyingPlacementId == placementId;
   DateTime? getAppliedDate(String placementId) => _appliedDates[placementId];
 
+  // V6.5: Eligibility getters
+  PlacementEligibility? getEligibility(String placementId) =>
+      _eligibilityCache[placementId];
+
+  bool isEligible(String placementId) =>
+      _eligibilityCache[placementId]?.isEligible ?? false;
+
+  /// V6.5: Get eligible placements only
+  List<Placement> get eligiblePlacements => _placements
+      .where((p) => _eligibilityCache[p.id]?.isEligible ?? false)
+      .toList();
+
+  /// V6.5: Get placements sorted by eligibility (eligible first)
+  List<Placement> get sortedPlacements {
+    if (_eligibilityCache.isEmpty) return _placements;
+    return EligibilityEngine.sortByEligibility(
+      placements: _placements,
+      eligibilityMap: _eligibilityCache,
+    );
+  }
+
   /// V5.1: Check if any apply operation is in progress
   bool get isAnyApplyInProgress => _applyingPlacementId != null;
+
+  /// V6.5: Update user profile for eligibility checking
+  void updateUserProfile(StudentProfile profile) {
+    _userProfile = profile;
+    _recalculateEligibility();
+  }
 
   /// V5.1.1: Initialize with user ID (called after login)
   Future<void> initWithUser(String newUserId) async {
@@ -73,6 +111,8 @@ class PlacementsProvider with ChangeNotifier {
     _isInitialized = false;
     _error = null;
     _applyingPlacementId = null;
+    _userProfile = null;
+    _eligibilityCache = {};
     _isDisposed = true; // V6.3: Mark as disposed to stop any pending operations
     notifyListeners();
   }
@@ -176,8 +216,25 @@ class PlacementsProvider with ChangeNotifier {
     }
   }
 
+  /// V6.5: Recalculate eligibility for all placements
+  void _recalculateEligibility() {
+    if (_userProfile == null || _placements.isEmpty) {
+      _eligibilityCache = {};
+      return;
+    }
+
+    _eligibilityCache = EligibilityEngine.checkAllEligibility(
+      placements: _placements,
+      profile: _userProfile!,
+      appliedPlacementIds: _appliedPlacementIds,
+    );
+
+    notifyListeners();
+  }
+
   /// Refresh placements (manual refresh)
   /// V5.1: Check network before refreshing
+  /// V6.5: Recalculate eligibility after refresh
   Future<void> refresh() async {
     // V5.1: Check connectivity
     final isConnected = await _checkConnectivity();
@@ -194,6 +251,7 @@ class PlacementsProvider with ChangeNotifier {
     try {
       await _loadPlacements();
       await _loadUserApplications();
+      _recalculateEligibility(); // V6.5
       _error = null;
     } catch (e) {
       _error = ErrorMessages.getUserFriendlyMessage(e);

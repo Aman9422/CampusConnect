@@ -19,7 +19,18 @@ service cloud.firestore {
     match /users/{userId} {
       allow read, write: if isOwner(userId);
       
-      // All subcollections under users/{uid}
+      // Notifications subcollection
+      match /notifications/{notificationId} {
+        allow read, write: if isOwner(userId);
+      }
+      
+      // v6.5: AI Insights (read-only, Cloud Functions write)
+      match /ai_insights/{insightId} {
+        allow read: if isOwner(userId);
+        allow write: if false; // Only Cloud Functions can write
+      }
+      
+      // All other subcollections under users/{uid}
       match /{subcollection=**} {
         allow read, write: if isOwner(userId);
       }

@@ -3,6 +3,7 @@ import 'package:campusconnect/enums/menu_action.dart';
 import 'package:campusconnect/models/chat_message.dart';
 import 'package:campusconnect/models/note.dart';
 import 'package:campusconnect/models/placement.dart';
+import 'package:campusconnect/models/placement_eligibility.dart';
 import 'package:campusconnect/providers/ai_usage_provider.dart';
 import 'package:campusconnect/providers/notifications_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
@@ -12,6 +13,7 @@ import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/services/firestore/notes_service.dart';
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/utilities/error_messages.dart';
+import 'package:campusconnect/views/widgets/eligibility_badge.dart';
 import 'package:campusconnect/views/widgets/notification_badge.dart';
 import 'package:campusconnect/widgets/empty_state.dart';
 import 'package:campusconnect/widgets/home_widgets.dart';
@@ -223,7 +225,8 @@ class _NotesViewState extends State<NotesView> {
                   return Center(child: Text('Error: ${provider.error}'));
                 }
 
-                final placements = provider.placements;
+                // v6.5: Use sorted placements (eligible first)
+                final placements = provider.sortedPlacements;
                 if (placements.isEmpty) {
                   return const Center(
                     child: Padding(
@@ -239,7 +242,8 @@ class _NotesViewState extends State<NotesView> {
                   itemCount: placements.length.clamp(0, 2),
                   itemBuilder: (context, index) {
                     final placement = placements[index];
-                    return _buildPlacementCard(placement);
+                    final eligibility = provider.getEligibility(placement.id);
+                    return _buildPlacementCard(placement, eligibility);
                   },
                 );
               },
@@ -609,7 +613,9 @@ class _NotesViewState extends State<NotesView> {
       );
     }
 
-    final placements = provider.placements;
+    // v6.5: Use sorted placements (eligible first)
+    final placements = provider.sortedPlacements;
+    final eligiblePlacements = provider.eligiblePlacements;
 
     // Show empty state
     if (placements.isEmpty) {
@@ -624,16 +630,89 @@ class _NotesViewState extends State<NotesView> {
       onRefresh: () => provider.refresh(),
       child: ListView.builder(
         padding: const EdgeInsets.all(16),
-        itemCount: placements.length,
+        itemCount: placements.length + (eligiblePlacements.isNotEmpty ? 1 : 0),
         itemBuilder: (context, index) {
-          final placement = placements[index];
-          return _buildPlacementCard(placement);
+          // v6.5: Show "Recommended for You" header before eligible placements
+          if (eligiblePlacements.isNotEmpty && index == 0) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildRecommendedHeader(eligiblePlacements.length),
+                const SizedBox(height: AppTheme.space8),
+              ],
+            );
+          }
+
+          // Adjust index for header
+          final placementIndex = eligiblePlacements.isNotEmpty
+              ? index - 1
+              : index;
+          final placement = placements[placementIndex];
+          final eligibility = provider.getEligibility(placement.id);
+          return _buildPlacementCard(placement, eligibility);
         },
       ),
     );
   }
 
-  Widget _buildPlacementCard(Placement placement) {
+  /// v6.5: Recommended section header
+  Widget _buildRecommendedHeader(int count) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppTheme.space12,
+        vertical: AppTheme.space8,
+      ),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            AppTheme.primaryBlue.withOpacity(0.1),
+            AppTheme.primaryBlue.withOpacity(0.05),
+          ],
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+        ),
+        borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+        border: Border.all(color: AppTheme.primaryBlue.withOpacity(0.2)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.stars_rounded, color: AppTheme.primaryBlue, size: 20),
+          const SizedBox(width: AppTheme.space8),
+          Text(
+            'Recommended for You',
+            style: AppTheme.titleSmall.copyWith(
+              color: AppTheme.primaryBlue,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const Spacer(),
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppTheme.space8,
+              vertical: AppTheme.space4,
+            ),
+            decoration: BoxDecoration(
+              color: AppTheme.primaryBlue.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+            ),
+            child: Text(
+              '$count eligible',
+              style: AppTheme.caption.copyWith(
+                color: AppTheme.primaryBlue,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// v6.5: Updated to accept eligibility parameter
+  Widget _buildPlacementCard(
+    Placement placement,
+    PlacementEligibility? eligibility,
+  ) {
     return Card(
       margin: const EdgeInsets.only(bottom: AppTheme.space16),
       elevation: 0,
@@ -657,6 +736,7 @@ class _NotesViewState extends State<NotesView> {
             children: [
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
                     child: Column(
@@ -673,57 +753,74 @@ class _NotesViewState extends State<NotesView> {
                       ],
                     ),
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppTheme.space12,
-                      vertical: AppTheme.space4,
-                    ),
-                    decoration: BoxDecoration(
-                      gradient: placement.isDeadlinePassed
-                          ? LinearGradient(
-                              colors: [
-                                AppTheme.errorBg,
-                                AppTheme.errorBg.withOpacity(0.7),
-                              ],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            )
-                          : LinearGradient(
-                              colors: [
-                                AppTheme.successBg,
-                                AppTheme.successBg.withOpacity(0.7),
-                              ],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      // Status badge (Open/Closed)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppTheme.space12,
+                          vertical: AppTheme.space4,
+                        ),
+                        decoration: BoxDecoration(
+                          gradient: placement.isDeadlinePassed
+                              ? LinearGradient(
+                                  colors: [
+                                    AppTheme.errorBg,
+                                    AppTheme.errorBg.withOpacity(0.7),
+                                  ],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                )
+                              : LinearGradient(
+                                  colors: [
+                                    AppTheme.successBg,
+                                    AppTheme.successBg.withOpacity(0.7),
+                                  ],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                ),
+                          borderRadius: BorderRadius.circular(
+                            AppTheme.radiusFull,
+                          ),
+                          border: Border.all(
+                            color: placement.isDeadlinePassed
+                                ? AppTheme.error.withOpacity(0.3)
+                                : AppTheme.success.withOpacity(0.3),
+                            width: 0.5,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: placement.isDeadlinePassed
+                                  ? AppTheme.error.withOpacity(0.15)
+                                  : AppTheme.success.withOpacity(0.15),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
                             ),
-                      borderRadius: BorderRadius.circular(AppTheme.radiusFull),
-                      border: Border.all(
-                        color: placement.isDeadlinePassed
-                            ? AppTheme.error.withOpacity(0.3)
-                            : AppTheme.success.withOpacity(0.3),
-                        width: 0.5,
+                          ],
+                        ),
+                        child: Text(
+                          placement.isDeadlinePassed ? 'Closed' : 'Open',
+                          style: AppTheme.label.copyWith(
+                            color: placement.isDeadlinePassed
+                                ? AppTheme.error
+                                : AppTheme.success,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 10,
+                            letterSpacing: 0.3,
+                          ),
+                        ),
                       ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: placement.isDeadlinePassed
-                              ? AppTheme.error.withOpacity(0.15)
-                              : AppTheme.success.withOpacity(0.15),
-                          blurRadius: 8,
-                          offset: const Offset(0, 2),
+                      // v6.5: Eligibility badge
+                      if (eligibility != null &&
+                          !placement.isDeadlinePassed) ...[
+                        const SizedBox(height: AppTheme.space8),
+                        EligibilityBadge(
+                          eligibility: eligibility,
+                          compact: true,
                         ),
                       ],
-                    ),
-                    child: Text(
-                      placement.isDeadlinePassed ? 'Closed' : 'Open',
-                      style: AppTheme.label.copyWith(
-                        color: placement.isDeadlinePassed
-                            ? AppTheme.error
-                            : AppTheme.success,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 10,
-                        letterSpacing: 0.3,
-                      ),
-                    ),
+                    ],
                   ),
                 ],
               ),
@@ -1088,9 +1185,10 @@ class _NotesViewState extends State<NotesView> {
               runSpacing: AppTheme.space8,
               alignment: WrapAlignment.center,
               children: [
+                // v6.5: Smart suggestion that uses eligibility engine
+                _buildSuggestionChip('Which placements am I eligible for?'),
                 _buildSuggestionChip('How to prepare for placements?'),
                 _buildSuggestionChip('Study tips for exams'),
-                _buildSuggestionChip('Career guidance'),
                 _buildSuggestionChip('Resume help'),
               ],
             ),
@@ -1328,6 +1426,18 @@ class _NotesViewState extends State<NotesView> {
     // Scroll to bottom
     _scrollToBottom();
 
+    // v6.5: Check if this is an eligibility-related question
+    final eligibilityResponse = _handleEligibilityQuestion(message);
+    if (eligibilityResponse != null) {
+      // Answer from v6.5 intelligence - no AI call needed!
+      setState(() {
+        _chatMessages.add(ChatMessage.ai(eligibilityResponse));
+        _isLoadingAIResponse = false;
+      });
+      _scrollToBottom();
+      return;
+    }
+
     try {
       // Call AI service (VERSION 4: Returns AIResponse with metadata)
       final aiResponse = await _aiService.sendMessage(
@@ -1374,6 +1484,87 @@ class _NotesViewState extends State<NotesView> {
 
       debugPrint('AI Chat error: $e');
     }
+  }
+
+  /// v6.5: Detect eligibility-related questions and answer from v6.5 intelligence
+  String? _handleEligibilityQuestion(String message) {
+    final lowerMessage = message.toLowerCase();
+    
+    // Detect eligibility intent
+    final isEligibilityQuestion = 
+        lowerMessage.contains('eligible') ||
+        lowerMessage.contains('eligibility') ||
+        lowerMessage.contains('can i apply') ||
+        lowerMessage.contains('qualify') ||
+        (lowerMessage.contains('which') && lowerMessage.contains('placement')) ||
+        (lowerMessage.contains('what') && lowerMessage.contains('placement') && lowerMessage.contains('for me'));
+    
+    if (!isEligibilityQuestion) {
+      return null; // Not an eligibility question, let AI handle it
+    }
+    
+    // Get data from v6.5 intelligence
+    final placementsProvider = context.read<PlacementsProvider>();
+    final profileProvider = context.read<ProfileProvider>();
+    final profile = profileProvider.profile;
+    
+    if (profile == null) {
+      return "I couldn't find your profile. Please complete your profile setup first to check placement eligibility.";
+    }
+    
+    final eligiblePlacements = placementsProvider.eligiblePlacements;
+    final allPlacements = placementsProvider.placements;
+    
+    if (allPlacements.isEmpty) {
+      return "There are no active placements available right now. Check back later for new opportunities!";
+    }
+    
+    if (eligiblePlacements.isEmpty) {
+      // Build helpful response explaining why
+      final buffer = StringBuffer();
+      buffer.writeln("Based on your profile, you're currently not eligible for any active placements.\n");
+      buffer.writeln("📋 Your Profile:");
+      buffer.writeln("• Program: ${profile.academic.program}");
+      buffer.writeln("• Year: ${profile.academic.year}");
+      buffer.writeln("• CGPA: ${profile.academic.cgpa.toStringAsFixed(2)}\n");
+      buffer.writeln("💡 Tips to unlock more opportunities:");
+      buffer.writeln("• Keep improving your CGPA");
+      buffer.writeln("• Build skills in high-demand areas");
+      buffer.writeln("• Update your profile regularly\n");
+      buffer.writeln("Check the Placements tab to see all opportunities and their requirements.");
+      return buffer.toString();
+    }
+    
+    // Build personalized response with eligible placements
+    final buffer = StringBuffer();
+    buffer.writeln("🎯 Great news! Based on your profile, you're eligible for ${eligiblePlacements.length} placement${eligiblePlacements.length > 1 ? 's' : ''}:\n");
+    
+    for (int i = 0; i < eligiblePlacements.length && i < 5; i++) {
+      final placement = eligiblePlacements[i];
+      final daysUntilDeadline = placement.deadline.difference(DateTime.now()).inDays;
+      
+      buffer.writeln("${i + 1}. ${placement.company} - ${placement.role}");
+      buffer.writeln("   💰 ${placement.salary}");
+      if (daysUntilDeadline <= 7) {
+        buffer.writeln("   ⚠️ Deadline: ${daysUntilDeadline} day${daysUntilDeadline != 1 ? 's' : ''} left!");
+      } else {
+        buffer.writeln("   📅 Deadline: ${DateFormat('MMM dd, yyyy').format(placement.deadline)}");
+      }
+      buffer.writeln("");
+    }
+    
+    if (eligiblePlacements.length > 5) {
+      buffer.writeln("...and ${eligiblePlacements.length - 5} more!\n");
+    }
+    
+    buffer.writeln("📋 Your Profile:");
+    buffer.writeln("• Program: ${profile.academic.program}");
+    buffer.writeln("• Year: ${profile.academic.year}");
+    buffer.writeln("• CGPA: ${profile.academic.cgpa.toStringAsFixed(2)}\n");
+    
+    buffer.writeln("👉 Go to the Placements tab to apply!");
+    
+    return buffer.toString();
   }
 
   void _scrollToBottom() {
