@@ -32,15 +32,22 @@ class _RegisterViewState extends State<RegisterView> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
-            colors: [
-              AppTheme.accentGradient.colors[0].withOpacity(0.05),
-              AppTheme.accentGradient.colors[1].withOpacity(0.02),
-              Colors.white,
-            ],
+            colors: isDark
+                ? [
+                    AppTheme.secondaryIndigo.withOpacity(0.1),
+                    AppTheme.darkBackground,
+                  ]
+                : [
+                    AppTheme.accentGradient.colors[0].withOpacity(0.05),
+                    AppTheme.accentGradient.colors[1].withOpacity(0.02),
+                    Colors.white,
+                  ],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
@@ -80,6 +87,7 @@ class _RegisterViewState extends State<RegisterView> {
                     style: AppTheme.titleLarge.copyWith(
                       fontSize: 28,
                       fontWeight: FontWeight.w700,
+                      color: isDark ? Colors.white : AppTheme.gray900,
                     ),
                   ),
                   const SizedBox(height: AppTheme.space8),
@@ -87,7 +95,7 @@ class _RegisterViewState extends State<RegisterView> {
                     'Sign up to get started with CampusConnect',
                     textAlign: TextAlign.center,
                     style: AppTheme.bodyMedium.copyWith(
-                      color: AppTheme.gray600,
+                      color: isDark ? AppTheme.gray400 : AppTheme.gray600,
                     ),
                   ),
                   const SizedBox(height: AppTheme.space40),
@@ -98,29 +106,35 @@ class _RegisterViewState extends State<RegisterView> {
                     enableSuggestions: false,
                     autocorrect: false,
                     keyboardType: TextInputType.emailAddress,
-                    style: AppTheme.bodyMedium,
+                    style: AppTheme.bodyMedium.copyWith(
+                      color: isDark ? Colors.white : AppTheme.gray900,
+                    ),
                     decoration: InputDecoration(
                       hintText: 'Email',
                       hintStyle: AppTheme.bodyMedium.copyWith(
-                        color: AppTheme.gray500,
+                        color: isDark ? AppTheme.gray500 : AppTheme.gray500,
                       ),
                       prefixIcon: Icon(
                         Icons.email_outlined,
-                        color: AppTheme.gray500,
+                        color: isDark ? AppTheme.gray400 : AppTheme.gray500,
                       ),
                       filled: true,
-                      fillColor: Colors.white,
+                      fillColor: isDark ? AppTheme.darkSurface : Colors.white,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(
                           AppTheme.radiusMedium,
                         ),
-                        borderSide: BorderSide(color: AppTheme.gray300),
+                        borderSide: BorderSide(
+                          color: isDark ? AppTheme.gray700 : AppTheme.gray300,
+                        ),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(
                           AppTheme.radiusMedium,
                         ),
-                        borderSide: BorderSide(color: AppTheme.gray300),
+                        borderSide: BorderSide(
+                          color: isDark ? AppTheme.gray700 : AppTheme.gray300,
+                        ),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(
@@ -141,29 +155,35 @@ class _RegisterViewState extends State<RegisterView> {
                     obscureText: true,
                     enableSuggestions: false,
                     autocorrect: false,
-                    style: AppTheme.bodyMedium,
+                    style: AppTheme.bodyMedium.copyWith(
+                      color: isDark ? Colors.white : AppTheme.gray900,
+                    ),
                     decoration: InputDecoration(
                       hintText: 'Password',
                       hintStyle: AppTheme.bodyMedium.copyWith(
-                        color: AppTheme.gray500,
+                        color: isDark ? AppTheme.gray500 : AppTheme.gray500,
                       ),
                       prefixIcon: Icon(
                         Icons.lock_outline,
-                        color: AppTheme.gray500,
+                        color: isDark ? AppTheme.gray400 : AppTheme.gray500,
                       ),
                       filled: true,
-                      fillColor: Colors.white,
+                      fillColor: isDark ? AppTheme.darkSurface : Colors.white,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(
                           AppTheme.radiusMedium,
                         ),
-                        borderSide: BorderSide(color: AppTheme.gray300),
+                        borderSide: BorderSide(
+                          color: isDark ? AppTheme.gray700 : AppTheme.gray300,
+                        ),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(
                           AppTheme.radiusMedium,
                         ),
-                        borderSide: BorderSide(color: AppTheme.gray300),
+                        borderSide: BorderSide(
+                          color: isDark ? AppTheme.gray700 : AppTheme.gray300,
+                        ),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(
@@ -252,7 +272,7 @@ class _RegisterViewState extends State<RegisterView> {
                       Text(
                         'Already have an account? ',
                         style: AppTheme.bodyMedium.copyWith(
-                          color: AppTheme.gray600,
+                          color: isDark ? AppTheme.gray400 : AppTheme.gray600,
                         ),
                       ),
                       TextButton(

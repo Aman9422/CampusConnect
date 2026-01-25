@@ -2,7 +2,7 @@
 
 **Complete technical documentation for developers**
 
-Version: 5.1.2 (January 21, 2026)
+Version: 6.6.0 (January 25, 2026)
 
 ---
 
@@ -10,14 +10,17 @@ Version: 5.1.2 (January 21, 2026)
 
 1. [Architecture Overview](#architecture-overview)
 2. [Version History & Evolution](#version-history--evolution)
-3. [Current Implementation (v5.1.2)](#current-implementation-v512)
+3. [Current Implementation (v6.6)](#current-implementation-v66)
 4. [Provider Lifecycle Management](#provider-lifecycle-management)
 5. [Network Awareness & Error Handling](#network-awareness--error-handling)
-6. [Firebase Integration](#firebase-integration)
-7. [AI Chat System](#ai-chat-system)
-8. [Placements System](#placements-system)
-9. [Development Guidelines](#development-guidelines)
-10. [Testing & Validation](#testing--validation)
+6. [Theme & Personalization System](#theme--personalization-system)
+7. [Profile System](#profile-system)
+8. [Eligibility Engine](#eligibility-engine)
+9. [Firebase Integration](#firebase-integration)
+10. [AI Chat System](#ai-chat-system)
+11. [Placements System](#placements-system)
+12. [Development Guidelines](#development-guidelines)
+13. [Testing & Validation](#testing--validation)
 
 ---
 
@@ -37,6 +40,8 @@ Version: 5.1.2 (January 21, 2026)
 ┌─────────────────────────────────────────┐
 │           Presentation Layer            │
 │  (Views - Stateful/Stateless Widgets)   │
+│  - Modern UI with AppTheme tokens       │
+│  - Dark mode support throughout         │
 └─────────────────┬───────────────────────┘
                   │ watch/read
 ┌─────────────────▼───────────────────────┐
@@ -44,6 +49,9 @@ Version: 5.1.2 (January 21, 2026)
 │  (Providers - ChangeNotifier pattern)   │
 │  - PlacementsProvider                   │
 │  - AIUsageProvider                      │
+│  - ProfileProvider (v6.1+)              │
+│  - ThemeProvider (v6.6+)                │
+│  - LayoutProvider (v6.6+)               │
 └─────────────────┬───────────────────────┘
                   │ uses
 ┌─────────────────▼───────────────────────┐
@@ -53,6 +61,7 @@ Version: 5.1.2 (January 21, 2026)
 │  - PlacementsService                    │
 │  - NotesService                         │
 │  - AIService                            │
+│  - LocalPreferencesService (v6.6+)      │
 └─────────────────┬───────────────────────┘
                   │ communicates with
 ┌─────────────────▼───────────────────────┐
@@ -61,6 +70,7 @@ Version: 5.1.2 (January 21, 2026)
 │  - Firestore Database                   │
 │  - Cloud Functions (HTTPS Callable)     │
 │  - HTTP REST API                        │
+│  - SharedPreferences (local)            │
 └─────────────────────────────────────────┘
 ```
 
@@ -131,7 +141,7 @@ Version: 5.1.2 (January 21, 2026)
   - Added `reset()` method (called on logout)
   - Providers persist, state resets
 
-### v5.1.2 - App-Wide Standardization (Current)
+### v5.1.2 - App-Wide Standardization
 **Extended guardrails to entire app:**
 - Network awareness in `AIUsageProvider`
 - Offline banner in AI chat
@@ -141,15 +151,79 @@ Version: 5.1.2 (January 21, 2026)
 - Chat input disabled when offline/at limit
 - Consistent UX across all network features
 
+### v6.0 - Complete UI Redesign
+**Modern design system overhaul:**
+- Created `AppTheme` class with centralized design tokens
+- Primary color: Deep Blue (#1A365D)
+- Accent gradient: Blue to Teal (#2563EB → #0D9488)
+- Consistent spacing, typography, and elevation
+- Card-based layout system
+- Professional color palette (gray scale, semantic colors)
+- Light theme foundation with dark mode preparation
+
+### v6.1 - Profile System Enhancement
+**Complete profile data model:**
+- Created `UserProfile` model with 15+ fields
+- `ProfileProvider` for state management
+- Academic info (branch, year, CGPA, backlogs)
+- Skills array for competency tracking
+- Resume URL storage
+- Profile completeness calculation
+
+### v6.2 - Profile Setup & Auth Flow
+**First-time user onboarding:**
+- Multi-step `ProfileSetupView` (4 steps)
+- Auth flow integration (register → verify → setup)
+- Skip option with incomplete profile warning
+- Form validation and error handling
+- Smooth animations between steps
+
+### v6.3 - Edit Profile
+**Profile modification capability:**
+- `EditProfileView` with tabbed interface
+- Personal, Academic, Skills tabs
+- Pre-populated form fields
+- Save/discard changes flow
+- Real-time validation
+
+### v6.4 - In-App Notifications
+**User notification system:**
+- `NotificationBadge` widget
+- `NotificationsView` with categorized list
+- Notification types (placements, system, profile)
+- Read/unread state management
+- Timestamp formatting
+
+### v6.5 - Placement Intelligence (Eligibility)
+**Smart placement matching:**
+- `EligibilityResult` model with status enum
+- `PlacementsProvider.checkEligibility()` method
+- Criteria: CGPA, backlogs, branch, year
+- Visual indicators (Eligible/Not Eligible/Partial)
+- Missing criteria explanation
+- Filter placements by eligibility
+
+### v6.6 - Personalization & Dark Mode (Current)
+**User customization features:**
+- `LocalPreferencesService` (SharedPreferences wrapper)
+- `ThemeProvider` with Light/Dark/System modes
+- `LayoutProvider` with Comfortable/Compact density
+- `SettingsView` for user preferences
+- Complete dark mode support across all screens
+- `InitialsAvatar` widget for profile display
+- Display name and bio editing
+- Persisted preferences (survives app restart)
+
 ---
 
-## Current Implementation (v5.1.2)
+## Current Implementation (v6.6)
 
 ### Project Structure
 
 ```
 lib/
 ├── main.dart                    # App entry, providers at root
+├── firebase_options.dart        # Firebase configuration
 ├── constants/
 │   └── routes.dart              # Named routes
 ├── enums/
@@ -157,11 +231,16 @@ lib/
 ├── models/
 │   ├── chat_message.dart        # AI chat message model
 │   ├── note.dart                # Academic note model
-│   ├── placement.dart           # Placement model
-│   └── auth_user.dart           # User model
+│   ├── placement.dart           # Placement model (with eligibility)
+│   ├── auth_user.dart           # User model
+│   ├── user_profile.dart        # Profile model (v6.1+)
+│   └── eligibility_result.dart  # Eligibility model (v6.5+)
 ├── providers/
 │   ├── placements_provider.dart # Placements state (v5.0+)
-│   └── ai_usage_provider.dart   # AI usage state (v5.0+)
+│   ├── ai_usage_provider.dart   # AI usage state (v5.0+)
+│   ├── profile_provider.dart    # Profile state (v6.1+)
+│   ├── theme_provider.dart      # Theme state (v6.6+)
+│   └── layout_provider.dart     # Layout density state (v6.6+)
 ├── services/
 │   ├── auth/
 │   │   ├── auth_service.dart    # Auth abstraction
@@ -170,22 +249,31 @@ lib/
 │   ├── firestore/
 │   │   ├── placements_service.dart # Placements CRUD
 │   │   └── notes_service.dart   # Notes CRUD
-│   └── ai/
-│       └── ai_service.dart      # AI HTTP client
+│   ├── ai/
+│   │   └── ai_service.dart      # AI HTTP client
+│   └── local_preferences_service.dart # Local storage (v6.6+)
+├── theme/
+│   └── app_theme.dart           # Design tokens & themes (v6.0+)
 ├── utilities/
 │   ├── error_messages.dart      # Error translation (v5.1+)
 │   ├── analytics_helper.dart    # Analytics wrapper (v5.1+)
 │   └── show_error_dialog.dart   # Error dialog helper
 ├── views/
-│   ├── login_view.dart
-│   ├── register_view.dart
-│   ├── verify_email_view.dart
-│   ├── notes_view.dart          # Main app screen (tabs)
-│   └── profile_view.dart
+│   ├── login_view.dart          # Auth (dark mode support)
+│   ├── register_view.dart       # Auth (dark mode support)
+│   ├── verify_email_view.dart   # Email verification
+│   ├── notes_view.dart          # Main app screen (5 tabs)
+│   ├── profile_setup_view.dart  # Onboarding (v6.2+)
+│   ├── edit_profile_view.dart   # Profile editing (v6.3+)
+│   ├── notifications_view.dart  # Notifications (v6.4+)
+│   └── settings_view.dart       # Settings (v6.6+)
 └── widgets/
     ├── offline_banner.dart      # Offline indicator (v5.1+)
     ├── empty_state.dart         # Empty state widget
-    └── skeleton_loader.dart     # Loading skeleton
+    ├── skeleton_loader.dart     # Loading skeleton
+    ├── notification_badge.dart  # Notification count (v6.4+)
+    ├── initials_avatar.dart     # Profile avatar (v6.6+)
+    └── home_widgets.dart        # Home screen widgets (v6.0+)
 ```
 
 ### Key Dependencies
@@ -200,6 +288,7 @@ dependencies:
   cloud_functions: ^6.0.5
   firebase_analytics: ^12.1.0
   connectivity_plus: ^6.1.0     # Network monitoring (v5.1+)
+  shared_preferences: ^2.2.2    # Local storage (v6.6+)
   http: ^1.2.2                  # AI service HTTP
   intl: ^0.19.0                 # Date formatting
   url_launcher: ^6.3.1          # Open URLs
@@ -474,6 +563,454 @@ Widget build(BuildContext context) {
       OfflineBanner(isOffline: !provider.isOnline),  // ← Add to any screen
       // ... rest of UI
     ],
+  );
+}
+```
+
+---
+
+## Theme & Personalization System
+
+### AppTheme Design Tokens (v6.0+)
+
+```dart
+// lib/theme/app_theme.dart
+class AppTheme {
+  // Primary Colors
+  static const Color primaryBlue = Color(0xFF1A365D);
+  static const Color accentBlue = Color(0xFF2563EB);
+  static const Color accentTeal = Color(0xFF0D9488);
+  
+  // Dark Mode Colors
+  static const Color darkBackground = Color(0xFF121212);
+  static const Color darkSurface = Color(0xFF1E1E1E);
+  static const Color darkCard = Color(0xFF2D2D2D);
+  
+  // Gradients
+  static const LinearGradient primaryGradient = LinearGradient(
+    colors: [accentBlue, accentTeal],
+  );
+  
+  // Gray Scale
+  static const Color gray50 = Color(0xFFF9FAFB);
+  static const Color gray100 = Color(0xFFF3F4F6);
+  static const Color gray400 = Color(0xFF9CA3AF);
+  static const Color gray700 = Color(0xFF374151);
+  static const Color gray900 = Color(0xFF111827);
+  
+  // Theme Data
+  static ThemeData get lightTheme => ThemeData(
+    brightness: Brightness.light,
+    primaryColor: primaryBlue,
+    scaffoldBackgroundColor: gray50,
+    // ... complete theme configuration
+  );
+  
+  static ThemeData get darkTheme => ThemeData(
+    brightness: Brightness.dark,
+    primaryColor: primaryBlue,
+    scaffoldBackgroundColor: darkBackground,
+    // ... complete dark theme configuration
+  );
+}
+```
+
+### LocalPreferencesService (v6.6+)
+
+```dart
+// lib/services/local_preferences_service.dart
+class LocalPreferencesService {
+  static const String _themeKey = 'theme_mode';
+  static const String _layoutKey = 'layout_density';
+  
+  Future<void> setThemeMode(String mode) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_themeKey, mode);
+  }
+  
+  Future<String> getThemeMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_themeKey) ?? 'system';
+  }
+  
+  Future<void> setLayoutDensity(String density) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_layoutKey, density);
+  }
+  
+  Future<String> getLayoutDensity() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_layoutKey) ?? 'comfortable';
+  }
+}
+```
+
+### ThemeProvider (v6.6+)
+
+```dart
+// lib/providers/theme_provider.dart
+enum ThemeMode { light, dark, system }
+
+class ThemeProvider with ChangeNotifier {
+  final LocalPreferencesService _prefs;
+  ThemeMode _themeMode = ThemeMode.system;
+  
+  ThemeMode get themeMode => _themeMode;
+  
+  ThemeData getTheme(BuildContext context) {
+    switch (_themeMode) {
+      case ThemeMode.light:
+        return AppTheme.lightTheme;
+      case ThemeMode.dark:
+        return AppTheme.darkTheme;
+      case ThemeMode.system:
+        final brightness = MediaQuery.of(context).platformBrightness;
+        return brightness == Brightness.dark 
+            ? AppTheme.darkTheme 
+            : AppTheme.lightTheme;
+    }
+  }
+  
+  Future<void> setThemeMode(ThemeMode mode) async {
+    _themeMode = mode;
+    await _prefs.setThemeMode(mode.name);
+    notifyListeners();
+  }
+  
+  Future<void> loadFromPrefs() async {
+    final saved = await _prefs.getThemeMode();
+    _themeMode = ThemeMode.values.firstWhere(
+      (m) => m.name == saved,
+      orElse: () => ThemeMode.system,
+    );
+    notifyListeners();
+  }
+}
+```
+
+### LayoutProvider (v6.6+)
+
+```dart
+// lib/providers/layout_provider.dart
+enum LayoutDensity { comfortable, compact }
+
+class LayoutProvider with ChangeNotifier {
+  final LocalPreferencesService _prefs;
+  LayoutDensity _density = LayoutDensity.comfortable;
+  
+  LayoutDensity get density => _density;
+  bool get isCompact => _density == LayoutDensity.compact;
+  
+  // Dynamic spacing values
+  double get cardPadding => isCompact ? 12.0 : 16.0;
+  double get listItemPadding => isCompact ? 10.0 : 16.0;
+  double get itemSpacing => isCompact ? 10.0 : 16.0;
+  
+  Future<void> setDensity(LayoutDensity density) async {
+    _density = density;
+    await _prefs.setLayoutDensity(density.name);
+    notifyListeners();
+  }
+}
+```
+
+### Dark Mode Implementation Pattern
+
+```dart
+// In any widget that needs dark mode support:
+Widget build(BuildContext context) {
+  final isDark = Theme.of(context).brightness == Brightness.dark;
+  
+  return Container(
+    color: isDark ? AppTheme.darkSurface : Colors.white,
+    child: Text(
+      'Hello',
+      style: TextStyle(
+        color: isDark ? Colors.white : AppTheme.gray900,
+      ),
+    ),
+  );
+}
+```
+
+### Using Layout Provider in UI
+
+```dart
+Widget build(BuildContext context) {
+  final layout = context.watch<LayoutProvider>();
+  
+  return Card(
+    child: Padding(
+      padding: EdgeInsets.all(layout.cardPadding),  // 12 or 16
+      child: Column(
+        children: [
+          Text('Title', style: TextStyle(
+            fontSize: layout.isCompact ? 16 : 18,
+          )),
+          SizedBox(height: layout.itemSpacing),  // 10 or 16
+          // ... more content
+        ],
+      ),
+    ),
+  );
+}
+```
+
+---
+
+## Profile System
+
+### UserProfile Model (v6.1+)
+
+```dart
+// lib/models/user_profile.dart
+class UserProfile {
+  final String id;
+  final String email;
+  final String? displayName;
+  final String? bio;
+  final String? branch;
+  final int? year;
+  final double? cgpa;
+  final int? backlogs;
+  final List<String> skills;
+  final String? resumeUrl;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
+  
+  UserProfile({
+    required this.id,
+    required this.email,
+    this.displayName,
+    this.bio,
+    this.branch,
+    this.year,
+    this.cgpa,
+    this.backlogs,
+    this.skills = const [],
+    this.resumeUrl,
+    this.createdAt,
+    this.updatedAt,
+  });
+  
+  // Profile completeness calculation
+  double get completeness {
+    int filled = 0;
+    int total = 7;
+    
+    if (displayName != null && displayName!.isNotEmpty) filled++;
+    if (branch != null && branch!.isNotEmpty) filled++;
+    if (year != null) filled++;
+    if (cgpa != null) filled++;
+    if (backlogs != null) filled++;
+    if (skills.isNotEmpty) filled++;
+    if (resumeUrl != null && resumeUrl!.isNotEmpty) filled++;
+    
+    return filled / total;
+  }
+  
+  bool get isComplete => completeness >= 0.8;
+}
+```
+
+### ProfileProvider (v6.1+)
+
+```dart
+// lib/providers/profile_provider.dart
+class ProfileProvider with ChangeNotifier {
+  UserProfile? _profile;
+  bool _isLoading = false;
+  String? _error;
+  
+  UserProfile? get profile => _profile;
+  bool get isLoading => _isLoading;
+  bool get hasProfile => _profile != null;
+  
+  Future<void> loadProfile(String userId) async {
+    _isLoading = true;
+    notifyListeners();
+    
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .get();
+      
+      if (doc.exists) {
+        _profile = UserProfile.fromFirestore(doc);
+      }
+    } catch (e) {
+      _error = ErrorMessages.getUserFriendlyMessage(e);
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+  
+  Future<void> updateProfile(Map<String, dynamic> updates) async {
+    // Optimistic update + Firestore sync
+  }
+}
+```
+
+### InitialsAvatar Widget (v6.6+)
+
+```dart
+// lib/widgets/initials_avatar.dart
+class InitialsAvatar extends StatelessWidget {
+  final String? name;
+  final String? email;
+  final double size;
+  
+  String get initials {
+    if (name != null && name!.isNotEmpty) {
+      final parts = name!.trim().split(' ');
+      if (parts.length >= 2) {
+        return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+      }
+      return name![0].toUpperCase();
+    }
+    if (email != null && email!.isNotEmpty) {
+      return email![0].toUpperCase();
+    }
+    return '?';
+  }
+  
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        gradient: AppTheme.primaryGradient,
+        shape: BoxShape.circle,
+      ),
+      child: Center(
+        child: Text(
+          initials,
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: size * 0.4,
+          ),
+        ),
+      ),
+    );
+  }
+}
+```
+
+---
+
+## Eligibility Engine
+
+### EligibilityResult Model (v6.5+)
+
+```dart
+// lib/models/eligibility_result.dart
+enum EligibilityStatus { eligible, notEligible, partiallyEligible }
+
+class EligibilityResult {
+  final EligibilityStatus status;
+  final List<String> metCriteria;
+  final List<String> unmetCriteria;
+  final String? reason;
+  
+  EligibilityResult({
+    required this.status,
+    this.metCriteria = const [],
+    this.unmetCriteria = const [],
+    this.reason,
+  });
+  
+  bool get isEligible => status == EligibilityStatus.eligible;
+  bool get isPartial => status == EligibilityStatus.partiallyEligible;
+}
+```
+
+### Eligibility Checking Logic
+
+```dart
+// In PlacementsProvider
+EligibilityResult checkEligibility(Placement placement, UserProfile profile) {
+  final met = <String>[];
+  final unmet = <String>[];
+  
+  // CGPA Check
+  if (placement.minCgpa != null) {
+    if (profile.cgpa != null && profile.cgpa! >= placement.minCgpa!) {
+      met.add('CGPA: ${profile.cgpa} >= ${placement.minCgpa}');
+    } else {
+      unmet.add('CGPA: Required ${placement.minCgpa}, you have ${profile.cgpa ?? "N/A"}');
+    }
+  }
+  
+  // Backlogs Check
+  if (placement.maxBacklogs != null) {
+    if (profile.backlogs != null && profile.backlogs! <= placement.maxBacklogs!) {
+      met.add('Backlogs: ${profile.backlogs} <= ${placement.maxBacklogs}');
+    } else {
+      unmet.add('Backlogs: Max ${placement.maxBacklogs}, you have ${profile.backlogs ?? "N/A"}');
+    }
+  }
+  
+  // Branch Check
+  if (placement.eligibleBranches != null && placement.eligibleBranches!.isNotEmpty) {
+    if (profile.branch != null && placement.eligibleBranches!.contains(profile.branch)) {
+      met.add('Branch: ${profile.branch} is eligible');
+    } else {
+      unmet.add('Branch: ${profile.branch ?? "Not set"} not in eligible branches');
+    }
+  }
+  
+  // Determine status
+  EligibilityStatus status;
+  if (unmet.isEmpty) {
+    status = EligibilityStatus.eligible;
+  } else if (met.isEmpty) {
+    status = EligibilityStatus.notEligible;
+  } else {
+    status = EligibilityStatus.partiallyEligible;
+  }
+  
+  return EligibilityResult(
+    status: status,
+    metCriteria: met,
+    unmetCriteria: unmet,
+  );
+}
+```
+
+### UI Integration
+
+```dart
+Widget _buildEligibilityBadge(EligibilityResult result) {
+  Color color;
+  IconData icon;
+  String text;
+  
+  switch (result.status) {
+    case EligibilityStatus.eligible:
+      color = Colors.green;
+      icon = Icons.check_circle;
+      text = 'Eligible';
+      break;
+    case EligibilityStatus.partiallyEligible:
+      color = Colors.orange;
+      icon = Icons.warning;
+      text = 'Partial Match';
+      break;
+    case EligibilityStatus.notEligible:
+      color = Colors.red;
+      icon = Icons.cancel;
+      text = 'Not Eligible';
+      break;
+  }
+  
+  return Chip(
+    avatar: Icon(icon, color: color, size: 16),
+    label: Text(text),
+    backgroundColor: color.withOpacity(0.1),
   );
 }
 ```
@@ -909,6 +1446,13 @@ flutter build apk --debug
 | Apply to placement | Optimistic UI update, button shows "Applied • Jan 21" |
 | Send AI message | Response appears, usage count updates |
 | Hit daily AI limit | Input disabled, hint shows "Daily limit reached" |
+| Toggle dark mode | All screens update colors immediately |
+| Switch to compact layout | Padding/spacing reduces across app |
+| Check eligibility | Badge shows Eligible/Partial/Not Eligible |
+| Edit profile | Changes save to Firestore, UI updates |
+| Complete profile setup | Redirect to main app, profile loaded |
+| Open settings | Theme and layout options visible |
+| Change display name | Avatar initials update, Firestore synced |
 
 ---
 
@@ -939,15 +1483,23 @@ flutter pub outdated
 ### Key Files Quick Reference
 
 - **main.dart**: App entry, provider setup
-- **placements_provider.dart**: Placements state management
+- **app_theme.dart**: Design tokens, light/dark themes
+- **placements_provider.dart**: Placements state + eligibility
 - **ai_usage_provider.dart**: AI usage state management
+- **profile_provider.dart**: User profile state
+- **theme_provider.dart**: Theme mode management
+- **layout_provider.dart**: Layout density management
+- **local_preferences_service.dart**: SharedPreferences wrapper
 - **error_messages.dart**: Error translation utility
 - **offline_banner.dart**: Offline indicator widget
-- **notes_view.dart**: Main app screen (tabs: Home, AI Chat, Profile)
-- **CHANGELOG.md**: Version history
+- **initials_avatar.dart**: Profile avatar widget
+- **notes_view.dart**: Main app screen (5 tabs: Home, Notes, Placements, Chat, Profile)
+- **settings_view.dart**: User preferences screen
+- **edit_profile_view.dart**: Profile editing screen
+- **profile_setup_view.dart**: Onboarding flow
 
 ---
 
-**Last Updated:** January 21, 2026 (v5.1.2)
+**Last Updated:** January 25, 2026 (v6.6.0)
 
 **Maintainer:** CampusConnect Dev Team

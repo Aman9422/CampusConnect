@@ -98,13 +98,21 @@ class PersonalInfo {
   final String email;
   final String phone;
   final String avatarUrl;
+  final String displayName; // v6.6: Optional display name (max 30 chars)
+  final String bio; // v6.6: Optional bio (max 120 chars)
 
   PersonalInfo({
     required this.fullName,
     required this.email,
     required this.phone,
     required this.avatarUrl,
+    this.displayName = '',
+    this.bio = '',
   });
+
+  /// v6.6: Get display name with fallback to full name
+  String get effectiveDisplayName =>
+      displayName.isNotEmpty ? displayName : fullName;
 
   factory PersonalInfo.fromMap(Map<String, dynamic> map) {
     return PersonalInfo(
@@ -112,6 +120,8 @@ class PersonalInfo {
       email: map['email'] ?? '',
       phone: map['phone'] ?? '',
       avatarUrl: map['avatarUrl'] ?? '',
+      displayName: map['displayName'] ?? '',
+      bio: map['bio'] ?? '',
     );
   }
 
@@ -121,6 +131,8 @@ class PersonalInfo {
       'email': email,
       'phone': phone,
       'avatarUrl': avatarUrl,
+      'displayName': displayName,
+      'bio': bio,
     };
   }
 
@@ -129,12 +141,16 @@ class PersonalInfo {
     String? email,
     String? phone,
     String? avatarUrl,
+    String? displayName,
+    String? bio,
   }) {
     return PersonalInfo(
       fullName: fullName ?? this.fullName,
       email: email ?? this.email,
       phone: phone ?? this.phone,
       avatarUrl: avatarUrl ?? this.avatarUrl,
+      displayName: displayName ?? this.displayName,
+      bio: bio ?? this.bio,
     );
   }
 }

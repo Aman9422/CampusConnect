@@ -159,7 +159,7 @@ class NotificationsView extends StatelessWidget {
       case NotificationType.statusChange:
         final placementId = notification.data?['placementId'] as String?;
         if (placementId != null) {
-          // TODO: Navigate to placement details
+          // Navigate to placement details
           // Navigator.pushNamed(context, '/placement/$placementId');
         }
         break;

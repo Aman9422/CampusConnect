@@ -136,6 +136,8 @@ class SkillsGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     final skills = [
       {'icon': Icons.school, 'label': 'Academic'},
       {'icon': Icons.people, 'label': 'Leadership'},
@@ -164,12 +166,17 @@ class SkillsGrid extends StatelessWidget {
           borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
           child: Container(
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: isDark ? AppTheme.darkSurface : Colors.white,
               borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
-              border: Border.all(color: AppTheme.gray200, width: 1),
+              border: Border.all(
+                color: isDark ? AppTheme.gray700 : AppTheme.gray200,
+                width: 1,
+              ),
               boxShadow: [
                 BoxShadow(
-                  color: AppTheme.gray200.withOpacity(0.5),
+                  color: isDark
+                      ? Colors.black.withOpacity(0.3)
+                      : AppTheme.gray200.withOpacity(0.5),
                   blurRadius: 8,
                   offset: const Offset(0, 2),
                 ),
@@ -181,7 +188,7 @@ class SkillsGrid extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(AppTheme.space12),
                   decoration: BoxDecoration(
-                    color: AppTheme.primaryBlue.withOpacity(0.1),
+                    color: AppTheme.primaryBlue.withOpacity(isDark ? 0.2 : 0.1),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
@@ -195,7 +202,7 @@ class SkillsGrid extends StatelessWidget {
                   skill['label'] as String,
                   style: AppTheme.bodySmall.copyWith(
                     fontWeight: FontWeight.w600,
-                    color: AppTheme.gray900,
+                    color: isDark ? Colors.white : AppTheme.gray900,
                     fontSize: 12,
                   ),
                   textAlign: TextAlign.center,

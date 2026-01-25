@@ -2,7 +2,7 @@
 
 **User-friendly version changelog with all features and improvements**
 
-Current Version: **5.1.2** (January 21, 2026)
+Current Version: **6.6.0** (January 25, 2026)
 
 ---
 
@@ -17,7 +17,14 @@ Current Version: **5.1.2** (January 21, 2026)
 | v5.0 | 2025 | Refactor | Provider architecture migration |
 | v5.1 | Jan 2026 | Polish | Stability & UX guardrails (Placements) |
 | v5.1.1 | Jan 21, 2026 | Bugfix | Provider lifecycle crash fix |
-| v5.1.2 | Jan 21, 2026 | Polish | App-wide network standardization ⭐ Current |
+| v5.1.2 | Jan 21, 2026 | Polish | App-wide network standardization |
+| v6.0 | Jan 22, 2026 | Redesign | Complete UI overhaul with modern design |
+| v6.1 | Jan 22, 2026 | Enhancement | Profile system improvements |
+| v6.2 | Jan 22, 2026 | Feature | Profile setup & auth flow |
+| v6.3 | Jan 22, 2026 | Feature | Edit profile functionality |
+| v6.4 | Jan 23, 2026 | Feature | In-app notifications system |
+| v6.5 | Jan 24, 2026 | Feature | Placement Intelligence (Eligibility) |
+| v6.6 | Jan 25, 2026 | Feature | Personalization & Dark Mode ⭐ Current |
 
 ---
 
@@ -441,95 +448,386 @@ Extend v5.1 professional guardrails to entire app for consistent, production-rea
 - ✅ Consistent UX everywhere
 - ✅ Production-ready across the board
 
-### 📦 Files Modified
-- `lib/providers/ai_usage_provider.dart` - Added connectivity monitoring
-- `lib/views/notes_view.dart` - Added offline awareness, error translation
-- `pubspec.yaml` - Version 5.1.2+3
-- `CHANGELOG.md` - v5.1.2 release notes
+---
 
-### 🏆 Production Readiness Checklist
+## Version 6.0 - Complete UI Redesign
 
-#### Code Quality
-- ✅ Zero compilation errors
-- ✅ Only 1 non-critical deprecation warning
-- ✅ No breaking changes
-- ✅ All previous features intact
-- ✅ Follows existing patterns
-- ✅ DRY principle maintained
+### 🎯 Goal
+Transform CampusConnect with a modern, professional UI while preserving all v5.x functionality.
 
-#### UX Quality
-- ✅ **No technical errors shown to users**
-- ✅ **Offline mode blocks unsafe actions everywhere**
-- ✅ **Errors are consistent across all features**
-- ✅ **App recovers cleanly from network changes**
-- ✅ **Clear user guidance** (what to do next)
-- ✅ **Visual feedback** (banners, disabled states)
+### ✨ Features Added
 
-#### Architecture Quality
-- ✅ Clean separation of concerns
-- ✅ Single source of truth (per provider)
-- ✅ Provider lifecycle properly managed
-- ✅ Scalable to new features
-- ✅ **Safe foundation for v6.0 UI redesign**
+#### 🎨 Modern Design System
+- **AppTheme Class** - Centralized design tokens
+- Professional color palette with gradients
+- Consistent spacing system (space4, space8, space12, etc.)
+- Border radius tokens (radiusSmall, radiusMedium, radiusLarge)
+- Shadow presets for elevation
+- Typography scale (titleLarge, bodyMedium, etc.)
 
-### 🎯 Impact Summary
+#### 🏠 Redesigned Home Screen
+- Premium gradient welcome header
+- Featured hackathon card with visual appeal
+- "Today / This Week" section with quick actions
+- Latest placements preview
+- Modern card-based layout
 
-| Feature Area | Before v5.1 | After v5.1.2 | Improvement |
-|--------------|-------------|--------------|-------------|
-| Error Messages | Technical jargon | User-friendly | 100% |
-| Offline Detection | None | Full | New feature |
-| Network Guards | None | Everywhere | New feature |
-| UX Consistency | Mixed | Unified | 100% |
-| Production Readiness | 60% | 95% | +35% |
+#### 📚 Enhanced Notes Screen
+- Subject-based filtering chips
+- Gradient badges for subjects and years
+- Open in browser functionality
+- Improved empty states
+- Skeleton loaders during fetch
+
+#### 💼 Premium Placements Screen
+- Gradient status badges (Open/Closed)
+- Company and role typography improvements
+- Salary and deadline display
+- "Applied" chip with date
+- Professional card design
+
+#### 🤖 Modern AI Chat
+- Redesigned message bubbles
+- Suggestion chips for quick prompts
+- Improved empty state
+- Better loading indicators
+- Trial and usage banners
+
+#### 👤 Profile Screen
+- Profile header card with avatar placeholder
+- Information tiles (email, program, year, CGPA)
+- Menu cards with icons
+- Settings shortcut
+- Modern logout button
+
+#### 🧭 Enhanced Bottom Navigation
+- Frosted glass effect
+- Selected/unselected states
+- Subtle animations
+- 5 tabs: Home, Notes, Placements, AI Chat, Profile
+
+### 📦 New Files Created
+- `lib/theme/app_theme.dart` - Design system
+- `lib/widgets/home_widgets.dart` - FeaturedCard, SkillsGrid
+- `lib/widgets/skeleton_loader.dart` - Loading placeholders
+- `lib/widgets/empty_state.dart` - Empty state widget
 
 ---
 
-## 🔮 Upcoming (v6.0 Planned)
+## Version 6.1 - Profile System Enhancement
 
-### UI Redesign
-- Modern Material Design 3
-- New color palette
-- Custom illustrations
-- Animated transitions
-- Dark mode support
+### 🎯 Goal
+Create a robust profile data model and provider for user information management.
 
-### Features
-- Push notifications
-- Alumni network
-- Event management
-- Skill assessments
-- Career resources
+### ✨ Features Added
 
-### Technical
-- Backend optimization
-- Improved caching
-- Better analytics
-- Performance monitoring
-- Automated testing
+#### 📊 StudentProfile Model
+- `uid` - Firebase user ID
+- `personal` - PersonalInfo (email, fullName, phone)
+- `academic` - AcademicInfo (college, program, year, cgpa)
+- `placements` - PlacementInfo (skills, resumeUrl, appliedIds)
+- `isProfileComplete` flag
+- `copyWith()` for immutable updates
+- Firestore serialization
+
+#### 🏗️ ProfileProvider
+- Centralized profile state management
+- Auto-fetches on user login
+- Loading/error state handling
+- `updateProfile()` method
+- `refresh()` for manual reload
+- `reset()` for logout cleanup
+
+#### 🔥 ProfileService
+- Firestore CRUD operations
+- Auto-creates profile on first login
+- `markProfileCompleted()` method
+- Singleton pattern
+
+### 📦 New Files Created
+- `lib/models/student_profile.dart`
+- `lib/providers/profile_provider.dart`
+- `lib/services/firestore/profile_service.dart`
+
+---
+
+## Version 6.2 - Profile Setup & Auth Flow
+
+### 🎯 Goal
+Implement mandatory profile setup for new users with smart auth flow.
+
+### ✨ Features Added
+
+#### 📝 Profile Setup Screen
+- Required fields: Full Name, College, Program, Year, CGPA
+- Email display (from auth, read-only)
+- Phone (optional)
+- Form validation
+- "Complete Setup" button
+- Progress indicator during save
+
+#### 🔐 AuthGuard Widget
+- Checks authentication state
+- Checks email verification
+- Checks profile completion
+- Routes to appropriate screen:
+  - Not logged in → Login
+  - Not verified → Verify Email
+  - Profile incomplete → Profile Setup
+  - All good → Home (NotesView)
+
+#### 🔄 Smart Login Flow
+1. User logs in
+2. Email verified? → Check profile
+3. Profile complete? → Home
+4. Profile incomplete? → Profile Setup
+5. After setup → Home
+
+### 📦 New Files Created
+- `lib/views/profile_setup_view.dart`
+- `lib/views/auth_guard.dart`
+
+---
+
+## Version 6.3 - Edit Profile
+
+### 🎯 Goal
+Allow users to edit their profile information after initial setup.
+
+### ✨ Features Added
+
+#### ✏️ Edit Profile Screen
+- Pre-populated form fields
+- Same validation as setup
+- Save changes to Firestore
+- Success/error feedback
+- Back navigation
+
+#### 🔗 Navigation Integration
+- Edit Profile route added
+- Accessible from Profile screen
+- Profile menu card tap
+
+### 📦 New Files Created
+- `lib/views/edit_profile_view.dart`
+
+### 📦 Routes Updated
+- Added `editProfileRoute = '/edit-profile'`
+
+---
+
+## Version 6.4 - In-App Notifications
+
+### 🎯 Goal
+Add a comprehensive in-app notification system for placement updates and announcements.
+
+### ✨ Features Added
+
+#### 📬 Notification Types
+- `placementApplied` - Application confirmations
+- `statusChange` - Application status updates
+- `announcement` - General announcements
+- `reminder` - Deadline reminders
+- `system` - System messages
+
+#### 🔔 NotificationsProvider
+- Fetches user notifications from Firestore
+- Real-time unread count
+- Mark as read (single/all)
+- Delete notification
+- Clear read notifications
+- Auto-refresh on changes
+
+#### 📱 NotificationsView Screen
+- List of all notifications
+- Unread indicator (blue dot)
+- Swipe to delete
+- "Mark all read" button
+- Pull-to-refresh
+- Empty state
+
+#### 🔴 Notification Badge
+- Shows unread count on bell icon
+- Animated badge
+- In app bar of Home screen
+- Navigates to NotificationsView
+
+#### 🔗 Auto-Notification on Apply
+- When user applies to placement
+- Creates notification automatically
+- Shows in NotificationsView
+
+### 📦 New Files Created
+- `lib/models/app_notification.dart`
+- `lib/providers/notifications_provider.dart`
+- `lib/services/firestore/notifications_service.dart`
+- `lib/views/notifications_view.dart`
+- `lib/views/widgets/notification_badge.dart`
+
+---
+
+## Version 6.5 - Placement Intelligence (Eligibility)
+
+### 🎯 Goal
+Help students understand which placements they're eligible for with smart eligibility checking.
+
+### ✨ Features Added
+
+#### 🧠 Eligibility Engine
+- Rule-based eligibility checking
+- 6 eligibility criteria:
+  1. CGPA requirement
+  2. Year/batch requirement
+  3. Program/branch requirement
+  4. Skills requirement
+  5. Backlog check
+  6. Already applied check
+
+#### 📊 PlacementEligibility Model
+- `isEligible` - Overall eligibility
+- `checks` - List of individual checks
+- `failedChecks` - List of failed criteria
+- `summary` - Human-readable summary
+
+#### 🏷️ EligibilityBadge Widget
+- Green "Eligible" badge
+- Red "Not Eligible" badge
+- Tap for details dialog
+- Shows all criteria results
+
+#### 🔄 Smart Sorting
+- Eligible placements shown first
+- Then by deadline (soonest first)
+- Improves discoverability
+
+#### 🤖 AI Chat Integration
+- Eligibility info in AI context
+- AI can answer "Am I eligible for X?"
+- Personalized career guidance
+
+### 📦 New Files Created
+- `lib/models/placement_eligibility.dart`
+- `lib/services/eligibility/eligibility_service.dart`
+- `lib/views/widgets/eligibility_badge.dart`
+
+---
+
+## Version 6.6 - Personalization & Dark Mode ⭐ Current
+
+### 🎯 Goal
+Add user personalization options without backend complexity - theme, layout, and profile customization.
+
+### ✨ Features Added
+
+#### 🌙 Dark Mode Support
+- Full dark theme implementation
+- System/Light/Dark options
+- Persists across app restarts
+- All screens updated for dark mode
+- Proper contrast ratios
+
+#### 🎨 ThemeProvider
+- `ThemeMode.system` - Follow device setting
+- `ThemeMode.light` - Always light
+- `ThemeMode.dark` - Always dark
+- Persisted via SharedPreferences
+- Real-time theme switching
+
+#### 📐 Layout Density
+- **Comfortable** - Default spacing (16px)
+- **Compact** - Reduced spacing (10-12px)
+- Affects cards, lists, padding
+- Persisted locally
+
+#### ⚙️ Settings Screen
+- **Account Section**
+  - Display Name (editable)
+  - Bio (editable, 120 chars)
+  - Email (read-only)
+- **Appearance Section**
+  - Theme (System/Light/Dark)
+  - Layout Density (Comfortable/Compact)
+- **Notifications Section**
+  - Link to notification settings
+- **About Section**
+  - App version
+  - Privacy Policy
+  - Terms of Service
+
+#### 🎭 InitialsAvatar Widget
+- Displays user initials
+- Deterministic gradient based on UID
+- No image upload needed
+- Privacy-first design
+- Multiple sizes (40px, 64px, 80px)
+
+#### 👤 Profile Enhancements
+- `displayName` field (optional, max 30 chars)
+- `bio` field (optional, max 120 chars)
+- `effectiveDisplayName` getter (falls back to fullName)
+- Shows bio on profile card
+
+#### 🗄️ LocalPreferencesService
+- SharedPreferences wrapper
+- Stores theme preference
+- Stores layout density
+- No Firestore writes for preferences
+
+### 📦 New Files Created
+- `lib/services/local_preferences_service.dart`
+- `lib/providers/theme_provider.dart`
+- `lib/providers/layout_provider.dart`
+- `lib/views/settings_view.dart`
+- `lib/views/widgets/initials_avatar.dart`
+
+### 📦 Files Updated
+- `lib/models/student_profile.dart` - Added displayName, bio
+- `lib/theme/app_theme.dart` - Added darkTheme
+- `lib/main.dart` - Theme/Layout providers
+- All view files - Dark mode support
+
+### 🎯 Dark Mode Coverage
+- ✅ Login/Register screens
+- ✅ Profile Setup screen
+- ✅ Edit Profile screen
+- ✅ Home screen
+- ✅ Notes screen
+- ✅ Placements screen
+- ✅ AI Chat screen
+- ✅ Profile screen
+- ✅ Settings screen
+- ✅ Notifications screen
+- ✅ Bottom navigation bar
+- ✅ All cards and tiles
+- ✅ All form inputs
 
 ---
 
 ## 📊 Feature Comparison Matrix
 
-| Feature | v1.0 | v2.0 | v3.0 | v4.0 | v5.0 | v5.1 | v5.1.1 | v5.1.2 |
-|---------|------|------|------|------|------|------|--------|--------|
-| Auth | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Notes | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Placements List | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Apply to Placements | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| AI Chat Backend | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Trial System | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Usage Tracking | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Provider Architecture | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ |
-| Offline Detection | ❌ | ❌ | ❌ | ❌ | ❌ | ⚠️ Placements | ⚠️ Placements | ✅ App-wide |
-| Network Guards | ❌ | ❌ | ❌ | ❌ | ❌ | ⚠️ Placements | ⚠️ Placements | ✅ App-wide |
-| User-Friendly Errors | ❌ | ⚠️ Auth | ⚠️ Auth | ⚠️ Auth | ⚠️ Auth | ⚠️ Placements | ⚠️ Placements | ✅ App-wide |
-| Analytics | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
-| Provider Lifecycle Fix | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Feature | v1-4 | v5.x | v6.0 | v6.1 | v6.2 | v6.3 | v6.4 | v6.5 | v6.6 |
+|---------|------|------|------|------|------|------|------|------|------|
+| Auth | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Notes | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Placements | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Apply Feature | v3+ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| AI Chat | v4+ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Provider Architecture | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Offline Detection | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Modern UI | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Profile Model | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Profile Setup | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Edit Profile | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ |
+| In-App Notifications | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Eligibility Engine | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Dark Mode | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Theme Settings | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Layout Density | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Settings Screen | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Display Name/Bio | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
 
 Legend:
 - ✅ Fully implemented
-- ⚠️ Partially implemented
 - ❌ Not implemented
 
 ---
@@ -557,49 +855,84 @@ Legend:
 ### v5.1.1 → v5.1.2
 **Lesson:** Consistency matters. If one feature has guardrails, ALL features should have them. Patchwork protection confuses users.
 
+### v5.1.2 → v6.0
+**Lesson:** Design systems pay off. Having centralized theme tokens makes UI updates faster and more consistent.
+
+### v6.0 → v6.4
+**Lesson:** Build incrementally. Profile system, auth flow, and notifications were added one at a time with testing.
+
+### v6.4 → v6.5
+**Lesson:** Smart features add value. Eligibility engine helps students discover relevant opportunities.
+
+### v6.5 → v6.6
+**Lesson:** Personalization matters. Dark mode and layout options make the app feel personal without complex backend changes.
+
 ---
 
 ## 💡 Key Takeaways
 
-### What Makes v5.1.2 Production-Ready
+### What Makes v6.6 Complete
 
-1. **No Technical Errors Exposed**
-   - Every error is translated to user-friendly language
-   - Technical details logged for developers
-   - Users never see "SocketException" or stack traces
+1. **Modern UI**
+   - Professional design system
+   - Consistent spacing and colors
+   - Gradient accents
+   - Card-based layouts
 
-2. **Offline Awareness Everywhere**
-   - Real-time network monitoring in all providers
-   - Visual feedback (orange banner)
-   - Actions blocked when offline
-   - Clear guidance ("Please reconnect")
+2. **Full Dark Mode**
+   - Every screen supports dark mode
+   - Proper contrast ratios
+   - System preference support
+   - Persisted user choice
 
-3. **Consistent Experience**
-   - Same patterns across all features
-   - Predictable behavior
-   - Professional polish
-   - User trust and confidence
+3. **Smart Features**
+   - Eligibility engine for placements
+   - AI chat with context awareness
+   - In-app notifications
+   - Profile personalization
 
-4. **Clean Architecture**
-   - Provider pattern for state
-   - Single source of truth
-   - Proper lifecycle management
-   - Scalable for v6.0 and beyond
+4. **User Control**
+   - Theme preferences
+   - Layout density options
+   - Display name and bio
+   - Edit profile anytime
 
-5. **Developer-Friendly**
-   - Clear patterns to follow
-   - Reusable utilities (ErrorMessages, OfflineBanner)
-   - Well-documented code
-   - Easy to maintain and extend
-
----
-
-**Ready for v6.0 UI Redesign!** 🚀
-
-All guardrails, error handling, and network awareness are now centralized in providers. The UI can be completely redesigned without touching business logic.
+5. **Solid Foundation**
+   - Provider architecture
+   - Offline detection
+   - Error handling
+   - Clean code structure
 
 ---
 
-**Last Updated:** January 21, 2026 (v5.1.2)
+## 🔮 Upcoming Features (v7.0 Planned)
+
+### Push Notifications
+- Firebase Cloud Messaging
+- Placement deadline reminders
+- Application status updates
+- Announcement broadcasts
+
+### Enhanced AI
+- Interview preparation
+- Resume feedback
+- Personalized job matching
+- Career path suggestions
+
+### Social Features
+- Alumni network
+- Peer connections
+- Study groups
+- Event calendar
+
+### Technical Improvements
+- Performance optimization
+- Automated testing
+- Analytics dashboard
+- Admin panel
+
+---
+
+**Last Updated:** January 25, 2026 (v6.6.0)
 
 **Status:** Production-Ready ✅

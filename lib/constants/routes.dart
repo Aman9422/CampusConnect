@@ -6,3 +6,4 @@ const profileRoute = '/profile/';
 const editProfileRoute = '/edit-profile';
 const profileSetupRoute = '/profile-setup';
 const notificationsRoute = '/notifications';
+const settingsRoute = '/settings'; // v6.6

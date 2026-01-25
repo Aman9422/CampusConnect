@@ -5,6 +5,7 @@ import 'package:campusconnect/models/note.dart';
 import 'package:campusconnect/models/placement.dart';
 import 'package:campusconnect/models/placement_eligibility.dart';
 import 'package:campusconnect/providers/ai_usage_provider.dart';
+import 'package:campusconnect/providers/layout_provider.dart';
 import 'package:campusconnect/providers/notifications_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
@@ -14,6 +15,7 @@ import 'package:campusconnect/services/firestore/notes_service.dart';
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/utilities/error_messages.dart';
 import 'package:campusconnect/views/widgets/eligibility_badge.dart';
+import 'package:campusconnect/views/widgets/initials_avatar.dart';
 import 'package:campusconnect/views/widgets/notification_badge.dart';
 import 'package:campusconnect/widgets/empty_state.dart';
 import 'package:campusconnect/widgets/home_widgets.dart';
@@ -51,6 +53,7 @@ class _NotesViewState extends State<NotesView> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       body: IndexedStack(
         index: _selectedIndex,
@@ -64,16 +67,21 @@ class _NotesViewState extends State<NotesView> {
       ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.95),
+          color: isDark ? AppTheme.darkSurface : Colors.white.withOpacity(0.95),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.08),
+              color: Colors.black.withOpacity(isDark ? 0.3 : 0.08),
               blurRadius: 16,
               offset: const Offset(0, -4),
             ),
           ],
           border: Border(
-            top: BorderSide(color: AppTheme.gray200.withOpacity(0.5), width: 1),
+            top: BorderSide(
+              color: isDark
+                  ? AppTheme.gray700
+                  : AppTheme.gray200.withOpacity(0.5),
+              width: 1,
+            ),
           ),
         ),
         child: BottomNavigationBar(
@@ -81,7 +89,7 @@ class _NotesViewState extends State<NotesView> {
           type: BottomNavigationBarType.fixed,
           backgroundColor: Colors.transparent,
           selectedItemColor: AppTheme.primaryBlue,
-          unselectedItemColor: AppTheme.gray500,
+          unselectedItemColor: isDark ? AppTheme.gray400 : AppTheme.gray500,
           selectedLabelStyle: AppTheme.caption.copyWith(
             fontWeight: FontWeight.w600,
           ),
@@ -125,21 +133,28 @@ class _NotesViewState extends State<NotesView> {
   }
 
   Widget _buildHomeScreen() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final layout = context.watch<LayoutProvider>();
+
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
         elevation: 0,
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.school, color: AppTheme.gray900, size: 24),
+            Icon(
+              Icons.school,
+              color: isDark ? Colors.white : AppTheme.gray900,
+              size: 24,
+            ),
             const SizedBox(width: 8),
             Text(
               'CampusConnect',
               style: AppTheme.titleMedium.copyWith(
                 fontWeight: FontWeight.w600,
-                color: AppTheme.gray900,
+                color: isDark ? Colors.white : AppTheme.gray900,
               ),
             ),
           ],
@@ -150,7 +165,10 @@ class _NotesViewState extends State<NotesView> {
             onTap: () => Navigator.pushNamed(context, notificationsRoute),
           ),
           PopupMenuButton<MenuAction>(
-            icon: Icon(Icons.more_vert, color: AppTheme.gray700),
+            icon: Icon(
+              Icons.more_vert,
+              color: isDark ? AppTheme.gray400 : AppTheme.gray700,
+            ),
             onSelected: (value) async {
               switch (value) {
                 case MenuAction.logout:
@@ -181,7 +199,7 @@ class _NotesViewState extends State<NotesView> {
         ],
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(AppTheme.space20),
+        padding: EdgeInsets.all(layout.cardPadding + 4),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -191,28 +209,33 @@ class _NotesViewState extends State<NotesView> {
               style: AppTheme.titleLarge.copyWith(
                 fontSize: 24,
                 fontWeight: FontWeight.w700,
-                color: AppTheme.gray900,
+                color: isDark ? Colors.white : AppTheme.gray900,
               ),
             ),
             const SizedBox(height: AppTheme.space4),
             Text(
               DateFormat('EEEE, d/M/yyyy').format(DateTime.now()),
-              style: AppTheme.bodySmall.copyWith(color: AppTheme.gray600),
+              style: AppTheme.bodySmall.copyWith(
+                color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+              ),
             ),
-            const SizedBox(height: AppTheme.space24),
+            SizedBox(height: layout.itemSpacing + 8),
 
             // Featured Event Card
             const FeaturedCard(),
-            const SizedBox(height: AppTheme.space24),
+            SizedBox(height: layout.itemSpacing + 8),
 
             // Today / This Week Section
             _buildTodaySection(),
-            const SizedBox(height: AppTheme.space24),
+            SizedBox(height: layout.itemSpacing + 8),
 
             // Latest Placements Section
             Text(
               'Latest Placements',
-              style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600),
+              style: AppTheme.titleMedium.copyWith(
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white : AppTheme.gray900,
+              ),
             ),
             const SizedBox(height: AppTheme.space16),
             Consumer<PlacementsProvider>(
@@ -255,6 +278,7 @@ class _NotesViewState extends State<NotesView> {
   }
 
   Widget _buildTodaySection() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -262,16 +286,19 @@ class _NotesViewState extends State<NotesView> {
           'Today / This Week',
           style: AppTheme.bodyLarge.copyWith(
             fontWeight: FontWeight.w600,
-            color: AppTheme.gray900,
+            color: isDark ? Colors.white : AppTheme.gray900,
           ),
         ),
         const SizedBox(height: AppTheme.space12),
         Container(
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: isDark ? AppTheme.darkSurface : Colors.white,
             borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
-            border: Border.all(color: AppTheme.gray200, width: 1),
-            boxShadow: AppTheme.shadowSmall,
+            border: Border.all(
+              color: isDark ? AppTheme.gray700 : AppTheme.gray200,
+              width: 1,
+            ),
+            boxShadow: isDark ? null : AppTheme.shadowSmall,
           ),
           child: Column(
             children: [
@@ -331,24 +358,31 @@ class _NotesViewState extends State<NotesView> {
     required String subtitle,
     required VoidCallback onTap,
   }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final layout = context.watch<LayoutProvider>();
+
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppTheme.space16,
-          vertical: AppTheme.space12,
+        padding: EdgeInsets.symmetric(
+          horizontal: layout.cardPadding,
+          vertical: layout.listItemPadding - 4,
         ),
         child: Row(
           children: [
             Container(
-              padding: const EdgeInsets.all(AppTheme.space8),
+              padding: EdgeInsets.all(layout.isCompact ? 6 : 8),
               decoration: BoxDecoration(
-                color: iconColor.withOpacity(0.1),
+                color: iconColor.withOpacity(isDark ? 0.2 : 0.1),
                 borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
               ),
-              child: Icon(icon, color: iconColor, size: 20),
+              child: Icon(
+                icon,
+                color: iconColor,
+                size: layout.isCompact ? 18 : 20,
+              ),
             ),
-            const SizedBox(width: AppTheme.space12),
+            SizedBox(width: layout.itemSpacing - 4),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -357,13 +391,15 @@ class _NotesViewState extends State<NotesView> {
                     title,
                     style: AppTheme.bodyMedium.copyWith(
                       fontWeight: FontWeight.w600,
-                      color: AppTheme.gray900,
+                      color: isDark ? Colors.white : AppTheme.gray900,
                     ),
                   ),
                   const SizedBox(height: AppTheme.space4),
                   Text(
                     subtitle,
-                    style: AppTheme.bodySmall.copyWith(color: AppTheme.gray600),
+                    style: AppTheme.bodySmall.copyWith(
+                      color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+                    ),
                   ),
                 ],
               ),
@@ -376,24 +412,26 @@ class _NotesViewState extends State<NotesView> {
   }
 
   Widget _buildDivider() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: AppTheme.space16),
       height: 1,
-      color: AppTheme.gray200,
+      color: isDark ? AppTheme.gray700 : AppTheme.gray200,
     );
   }
 
   Widget _buildNotesScreen() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
         elevation: 0,
         title: Text(
           'Lecture Notes',
           style: AppTheme.titleMedium.copyWith(
             fontWeight: FontWeight.w600,
-            color: AppTheme.gray900,
+            color: isDark ? Colors.white : AppTheme.gray900,
           ),
         ),
       ),
@@ -422,8 +460,10 @@ class _NotesViewState extends State<NotesView> {
             );
           }
 
+          final layout = context.watch<LayoutProvider>();
+
           return ListView.builder(
-            padding: const EdgeInsets.all(16),
+            padding: EdgeInsets.all(layout.cardPadding),
             itemCount: notes.length,
             itemBuilder: (context, index) {
               final note = notes[index];
@@ -436,15 +476,22 @@ class _NotesViewState extends State<NotesView> {
   }
 
   Widget _buildNoteCard(Note note) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final layout = context.watch<LayoutProvider>();
+
     return Card(
-      margin: const EdgeInsets.only(bottom: AppTheme.space12),
+      margin: EdgeInsets.only(bottom: layout.itemSpacing - 4),
       elevation: 0,
+      color: isDark ? AppTheme.darkSurface : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
-        side: BorderSide(color: AppTheme.gray200, width: 1),
+        side: BorderSide(
+          color: isDark ? AppTheme.gray700 : AppTheme.gray200,
+          width: 1,
+        ),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(AppTheme.space16),
+        padding: EdgeInsets.all(layout.cardPadding),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -456,6 +503,7 @@ class _NotesViewState extends State<NotesView> {
                     note.title,
                     style: AppTheme.titleMedium.copyWith(
                       fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.white : AppTheme.gray900,
                     ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
@@ -463,7 +511,7 @@ class _NotesViewState extends State<NotesView> {
                 ),
               ],
             ),
-            const SizedBox(height: AppTheme.space12),
+            SizedBox(height: layout.itemSpacing - 4),
             Wrap(
               spacing: AppTheme.space8,
               runSpacing: AppTheme.space8,
@@ -552,16 +600,17 @@ class _NotesViewState extends State<NotesView> {
   }
 
   Widget _buildPlacementsScreen() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
         elevation: 0,
         title: Text(
           'Placements',
           style: AppTheme.titleMedium.copyWith(
             fontWeight: FontWeight.w600,
-            color: AppTheme.gray900,
+            color: isDark ? Colors.white : AppTheme.gray900,
           ),
         ),
         actions: [
@@ -713,24 +762,32 @@ class _NotesViewState extends State<NotesView> {
     Placement placement,
     PlacementEligibility? eligibility,
   ) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final layout = context.watch<LayoutProvider>();
+
     return Card(
-      margin: const EdgeInsets.only(bottom: AppTheme.space16),
+      margin: EdgeInsets.only(bottom: layout.itemSpacing),
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
-        side: BorderSide(color: AppTheme.gray200, width: 1),
+        side: BorderSide(
+          color: isDark ? AppTheme.gray700 : AppTheme.gray200,
+          width: 1,
+        ),
       ),
       child: Container(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
           gradient: LinearGradient(
-            colors: [Colors.white, AppTheme.primaryBlue.withOpacity(0.02)],
+            colors: isDark
+                ? [AppTheme.darkSurface, AppTheme.primaryBlue.withOpacity(0.05)]
+                : [Colors.white, AppTheme.primaryBlue.withOpacity(0.02)],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
         ),
         child: Padding(
-          padding: const EdgeInsets.all(AppTheme.space16),
+          padding: EdgeInsets.all(layout.cardPadding),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -742,12 +799,17 @@ class _NotesViewState extends State<NotesView> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(placement.company, style: AppTheme.titleMedium),
+                        Text(
+                          placement.company,
+                          style: AppTheme.titleMedium.copyWith(
+                            color: isDark ? Colors.white : AppTheme.gray900,
+                          ),
+                        ),
                         const SizedBox(height: AppTheme.space4),
                         Text(
                           placement.role,
                           style: AppTheme.bodyMedium.copyWith(
-                            color: AppTheme.gray600,
+                            color: isDark ? AppTheme.gray400 : AppTheme.gray600,
                           ),
                         ),
                       ],
@@ -829,7 +891,9 @@ class _NotesViewState extends State<NotesView> {
                 placement.description,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: AppTheme.bodySmall.copyWith(color: AppTheme.gray700),
+                style: AppTheme.bodySmall.copyWith(
+                  color: isDark ? AppTheme.gray400 : AppTheme.gray700,
+                ),
               ),
               const SizedBox(height: AppTheme.space16),
               Row(
@@ -843,14 +907,14 @@ class _NotesViewState extends State<NotesView> {
                           Icon(
                             Icons.currency_rupee,
                             size: 14,
-                            color: AppTheme.gray600,
+                            color: isDark ? AppTheme.gray400 : AppTheme.gray600,
                           ),
                           const SizedBox(width: AppTheme.space4),
                           Text(
                             placement.salary,
                             style: AppTheme.bodySmall.copyWith(
                               fontWeight: FontWeight.w600,
-                              color: AppTheme.gray800,
+                              color: isDark ? Colors.white : AppTheme.gray800,
                             ),
                           ),
                         ],
@@ -861,13 +925,15 @@ class _NotesViewState extends State<NotesView> {
                           Icon(
                             Icons.calendar_today_outlined,
                             size: 12,
-                            color: AppTheme.gray500,
+                            color: isDark ? AppTheme.gray500 : AppTheme.gray500,
                           ),
                           const SizedBox(width: AppTheme.space4),
                           Text(
                             'Deadline: ${DateFormat('MMM dd, yyyy').format(placement.deadline)}',
                             style: AppTheme.caption.copyWith(
-                              color: AppTheme.gray600,
+                              color: isDark
+                                  ? AppTheme.gray400
+                                  : AppTheme.gray600,
                             ),
                           ),
                         ],
@@ -1074,14 +1140,18 @@ class _NotesViewState extends State<NotesView> {
 
   Widget _buildChatScreen() {
     final aiProvider = context.watch<AIUsageProvider>();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
         elevation: 0,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: AppTheme.gray900),
+          icon: Icon(
+            Icons.arrow_back,
+            color: isDark ? Colors.white : AppTheme.gray900,
+          ),
           onPressed: () {
             setState(() => _selectedIndex = 0);
           },
@@ -1090,7 +1160,7 @@ class _NotesViewState extends State<NotesView> {
           'CampusConnect AI',
           style: AppTheme.titleMedium.copyWith(
             fontWeight: FontWeight.w600,
-            color: AppTheme.gray900,
+            color: isDark ? Colors.white : AppTheme.gray900,
           ),
         ),
       ),
@@ -1149,6 +1219,7 @@ class _NotesViewState extends State<NotesView> {
   }
 
   Widget _buildEmptyChatState() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(AppTheme.space32),
@@ -1171,13 +1242,18 @@ class _NotesViewState extends State<NotesView> {
             const SizedBox(height: AppTheme.space24),
             Text(
               'CampusConnect AI',
-              style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w700),
+              style: AppTheme.titleLarge.copyWith(
+                fontWeight: FontWeight.w700,
+                color: isDark ? Colors.white : AppTheme.gray900,
+              ),
             ),
             const SizedBox(height: AppTheme.space8),
             Text(
               'Your personal AI mentor for academics and career guidance',
               textAlign: TextAlign.center,
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.gray600),
+              style: AppTheme.bodyMedium.copyWith(
+                color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+              ),
             ),
             const SizedBox(height: AppTheme.space32),
             Wrap(
@@ -1199,6 +1275,7 @@ class _NotesViewState extends State<NotesView> {
   }
 
   Widget _buildSuggestionChip(String text) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return InkWell(
       onTap: () => _handleSendMessage(text),
       borderRadius: BorderRadius.circular(AppTheme.radiusFull),
@@ -1208,19 +1285,18 @@ class _NotesViewState extends State<NotesView> {
           vertical: AppTheme.space12,
         ),
         decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Colors.white, AppTheme.primaryBlue.withOpacity(0.05)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
+          color: isDark ? AppTheme.darkSurface : Colors.white,
           borderRadius: BorderRadius.circular(AppTheme.radiusFull),
-          border: Border.all(color: AppTheme.gray300, width: 1),
-          boxShadow: AppTheme.shadowSmall,
+          border: Border.all(
+            color: isDark ? AppTheme.gray600 : AppTheme.gray300,
+            width: 1,
+          ),
+          boxShadow: isDark ? null : AppTheme.shadowSmall,
         ),
         child: Text(
           text,
           style: AppTheme.bodySmall.copyWith(
-            color: AppTheme.gray700,
+            color: isDark ? Colors.white : AppTheme.gray700,
             fontWeight: FontWeight.w500,
           ),
         ),
@@ -1311,6 +1387,7 @@ class _NotesViewState extends State<NotesView> {
   }
 
   Widget _buildChatInput() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final aiProvider = context.watch<AIUsageProvider>();
     final isDisabled =
         _isLoadingAIResponse ||
@@ -1320,9 +1397,14 @@ class _NotesViewState extends State<NotesView> {
     return Container(
       padding: const EdgeInsets.all(AppTheme.space16),
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: AppTheme.gray200, width: 1)),
-        boxShadow: AppTheme.shadowSmall,
+        color: isDark ? AppTheme.darkSurface : Colors.white,
+        border: Border(
+          top: BorderSide(
+            color: isDark ? AppTheme.gray700 : AppTheme.gray200,
+            width: 1,
+          ),
+        ),
+        boxShadow: isDark ? null : AppTheme.shadowSmall,
       ),
       child: Row(
         children: [
@@ -1332,7 +1414,9 @@ class _NotesViewState extends State<NotesView> {
               enabled: !isDisabled,
               maxLines: null,
               textCapitalization: TextCapitalization.sentences,
-              style: AppTheme.bodyMedium,
+              style: AppTheme.bodyMedium.copyWith(
+                color: isDark ? Colors.white : AppTheme.gray900,
+              ),
               decoration: InputDecoration(
                 hintText: !aiProvider.isOnline
                     ? 'Offline - connect to send messages'
@@ -1340,17 +1424,21 @@ class _NotesViewState extends State<NotesView> {
                     ? 'Daily limit reached'
                     : 'Ask me anything...',
                 hintStyle: AppTheme.bodyMedium.copyWith(
-                  color: AppTheme.gray500,
+                  color: isDark ? AppTheme.gray500 : AppTheme.gray500,
                 ),
                 filled: true,
-                fillColor: AppTheme.gray50,
+                fillColor: isDark ? AppTheme.gray800 : AppTheme.gray50,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(AppTheme.radiusFull),
-                  borderSide: BorderSide(color: AppTheme.gray300),
+                  borderSide: BorderSide(
+                    color: isDark ? AppTheme.gray700 : AppTheme.gray300,
+                  ),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(AppTheme.radiusFull),
-                  borderSide: BorderSide(color: AppTheme.gray300),
+                  borderSide: BorderSide(
+                    color: isDark ? AppTheme.gray700 : AppTheme.gray300,
+                  ),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(AppTheme.radiusFull),
@@ -1489,40 +1577,45 @@ class _NotesViewState extends State<NotesView> {
   /// v6.5: Detect eligibility-related questions and answer from v6.5 intelligence
   String? _handleEligibilityQuestion(String message) {
     final lowerMessage = message.toLowerCase();
-    
+
     // Detect eligibility intent
-    final isEligibilityQuestion = 
+    final isEligibilityQuestion =
         lowerMessage.contains('eligible') ||
         lowerMessage.contains('eligibility') ||
         lowerMessage.contains('can i apply') ||
         lowerMessage.contains('qualify') ||
-        (lowerMessage.contains('which') && lowerMessage.contains('placement')) ||
-        (lowerMessage.contains('what') && lowerMessage.contains('placement') && lowerMessage.contains('for me'));
-    
+        (lowerMessage.contains('which') &&
+            lowerMessage.contains('placement')) ||
+        (lowerMessage.contains('what') &&
+            lowerMessage.contains('placement') &&
+            lowerMessage.contains('for me'));
+
     if (!isEligibilityQuestion) {
       return null; // Not an eligibility question, let AI handle it
     }
-    
+
     // Get data from v6.5 intelligence
     final placementsProvider = context.read<PlacementsProvider>();
     final profileProvider = context.read<ProfileProvider>();
     final profile = profileProvider.profile;
-    
+
     if (profile == null) {
       return "I couldn't find your profile. Please complete your profile setup first to check placement eligibility.";
     }
-    
+
     final eligiblePlacements = placementsProvider.eligiblePlacements;
     final allPlacements = placementsProvider.placements;
-    
+
     if (allPlacements.isEmpty) {
       return "There are no active placements available right now. Check back later for new opportunities!";
     }
-    
+
     if (eligiblePlacements.isEmpty) {
       // Build helpful response explaining why
       final buffer = StringBuffer();
-      buffer.writeln("Based on your profile, you're currently not eligible for any active placements.\n");
+      buffer.writeln(
+        "Based on your profile, you're currently not eligible for any active placements.\n",
+      );
       buffer.writeln("📋 Your Profile:");
       buffer.writeln("• Program: ${profile.academic.program}");
       buffer.writeln("• Year: ${profile.academic.year}");
@@ -1531,39 +1624,49 @@ class _NotesViewState extends State<NotesView> {
       buffer.writeln("• Keep improving your CGPA");
       buffer.writeln("• Build skills in high-demand areas");
       buffer.writeln("• Update your profile regularly\n");
-      buffer.writeln("Check the Placements tab to see all opportunities and their requirements.");
+      buffer.writeln(
+        "Check the Placements tab to see all opportunities and their requirements.",
+      );
       return buffer.toString();
     }
-    
+
     // Build personalized response with eligible placements
     final buffer = StringBuffer();
-    buffer.writeln("🎯 Great news! Based on your profile, you're eligible for ${eligiblePlacements.length} placement${eligiblePlacements.length > 1 ? 's' : ''}:\n");
-    
+    buffer.writeln(
+      "🎯 Great news! Based on your profile, you're eligible for ${eligiblePlacements.length} placement${eligiblePlacements.length > 1 ? 's' : ''}:\n",
+    );
+
     for (int i = 0; i < eligiblePlacements.length && i < 5; i++) {
       final placement = eligiblePlacements[i];
-      final daysUntilDeadline = placement.deadline.difference(DateTime.now()).inDays;
-      
+      final daysUntilDeadline = placement.deadline
+          .difference(DateTime.now())
+          .inDays;
+
       buffer.writeln("${i + 1}. ${placement.company} - ${placement.role}");
       buffer.writeln("   💰 ${placement.salary}");
       if (daysUntilDeadline <= 7) {
-        buffer.writeln("   ⚠️ Deadline: ${daysUntilDeadline} day${daysUntilDeadline != 1 ? 's' : ''} left!");
+        buffer.writeln(
+          "   ⚠️ Deadline: ${daysUntilDeadline} day${daysUntilDeadline != 1 ? 's' : ''} left!",
+        );
       } else {
-        buffer.writeln("   📅 Deadline: ${DateFormat('MMM dd, yyyy').format(placement.deadline)}");
+        buffer.writeln(
+          "   📅 Deadline: ${DateFormat('MMM dd, yyyy').format(placement.deadline)}",
+        );
       }
       buffer.writeln("");
     }
-    
+
     if (eligiblePlacements.length > 5) {
       buffer.writeln("...and ${eligiblePlacements.length - 5} more!\n");
     }
-    
+
     buffer.writeln("📋 Your Profile:");
     buffer.writeln("• Program: ${profile.academic.program}");
     buffer.writeln("• Year: ${profile.academic.year}");
     buffer.writeln("• CGPA: ${profile.academic.cgpa.toStringAsFixed(2)}\n");
-    
+
     buffer.writeln("👉 Go to the Placements tab to apply!");
-    
+
     return buffer.toString();
   }
 
@@ -1582,12 +1685,13 @@ class _NotesViewState extends State<NotesView> {
   // V5.1.2: Trial and usage warnings now shown via banner in chat screen (removed snackbar methods)
 
   Widget _buildProfileScreen() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Consumer<ProfileProvider>(
       builder: (context, profileProvider, child) {
         if (profileProvider.isLoading && !profileProvider.isInitialized) {
-          return const Scaffold(
-            backgroundColor: AppTheme.background,
-            body: Center(child: CircularProgressIndicator()),
+          return Scaffold(
+            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+            body: const Center(child: CircularProgressIndicator()),
           );
         }
 
@@ -1595,21 +1699,30 @@ class _NotesViewState extends State<NotesView> {
         final isIncomplete = profile?.isIncomplete ?? true;
 
         return Scaffold(
-          backgroundColor: AppTheme.background,
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
           appBar: AppBar(
-            backgroundColor: Colors.white,
+            backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
             elevation: 0,
             title: Text(
               'Profile',
               style: AppTheme.titleMedium.copyWith(
                 fontWeight: FontWeight.w600,
-                color: AppTheme.gray900,
+                color: isDark ? Colors.white : AppTheme.gray900,
               ),
             ),
             actions: [
               // V6.4: Notification badge
               NotificationBadge(
                 onTap: () => Navigator.pushNamed(context, notificationsRoute),
+              ),
+              // v6.6: Settings button
+              IconButton(
+                icon: Icon(
+                  Icons.settings_outlined,
+                  color: isDark ? AppTheme.gray400 : AppTheme.gray700,
+                ),
+                onPressed: () => Navigator.pushNamed(context, settingsRoute),
+                tooltip: 'Settings',
               ),
             ],
           ),
@@ -1659,73 +1772,66 @@ class _NotesViewState extends State<NotesView> {
                 Container(
                   padding: const EdgeInsets.all(AppTheme.space20),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: isDark ? AppTheme.darkSurface : Colors.white,
                     borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
-                    border: Border.all(color: AppTheme.gray200, width: 1),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppTheme.gray200.withOpacity(0.5),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
+                    border: Border.all(
+                      color: isDark ? AppTheme.gray700 : AppTheme.gray200,
+                      width: 1,
+                    ),
+                    boxShadow: isDark
+                        ? null
+                        : [
+                            BoxShadow(
+                              color: AppTheme.gray200.withOpacity(0.5),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
                   ),
                   child: Row(
                     children: [
-                      // Avatar with fallback to icon
-                      Container(
-                        width: 64,
-                        height: 64,
-                        decoration: BoxDecoration(
-                          gradient:
-                              (profile?.personal.avatarUrl.isEmpty ?? true)
-                              ? AppTheme.primaryGradient
-                              : null,
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: AppTheme.primaryBlue.withOpacity(0.3),
-                              blurRadius: 12,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
-                          image:
-                              (profile?.personal.avatarUrl.isNotEmpty ?? false)
-                              ? DecorationImage(
-                                  image: NetworkImage(
-                                    profile!.personal.avatarUrl,
-                                  ),
-                                  fit: BoxFit.cover,
-                                )
-                              : null,
-                        ),
-                        child: (profile?.personal.avatarUrl.isEmpty ?? true)
-                            ? const Icon(
-                                Icons.person_rounded,
-                                size: 32,
-                                color: Colors.white,
-                              )
-                            : null,
+                      // v6.6: Smart initials avatar (no image upload)
+                      LargeInitialsAvatar(
+                        name: profile?.personal.effectiveDisplayName ?? 'User',
+                        uid: profile?.uid,
+                        size: 64,
                       ),
                       const SizedBox(width: AppTheme.space16),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
+                            // v6.6: Use effectiveDisplayName with fallback
                             Text(
-                              (profile?.personal.fullName.isEmpty ?? true)
-                                  ? 'Student Name'
-                                  : profile!.personal.fullName,
+                              profile?.personal.effectiveDisplayName ??
+                                  'Student Name',
                               style: AppTheme.titleMedium.copyWith(
                                 fontWeight: FontWeight.w700,
-                                color: AppTheme.gray900,
+                                color: isDark ? Colors.white : AppTheme.gray900,
                               ),
                             ),
+                            // v6.6: Show bio if available
+                            if (profile?.personal.bio.isNotEmpty == true) ...[
+                              const SizedBox(height: AppTheme.space4),
+                              Text(
+                                profile!.personal.bio,
+                                style: AppTheme.bodySmall.copyWith(
+                                  color: isDark
+                                      ? AppTheme.gray400
+                                      : AppTheme.gray600,
+                                  fontStyle: FontStyle.italic,
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
                             const SizedBox(height: AppTheme.space4),
                             Text(
                               profile?.personal.email ?? 'Email',
                               style: AppTheme.bodySmall.copyWith(
-                                color: AppTheme.gray600,
+                                color: isDark
+                                    ? AppTheme.gray400
+                                    : AppTheme.gray600,
                               ),
                             ),
                             Text(
@@ -1733,7 +1839,9 @@ class _NotesViewState extends State<NotesView> {
                                   ? 'Program not set'
                                   : '${profile!.academic.program}, Year ${profile.academic.year}',
                               style: AppTheme.bodySmall.copyWith(
-                                color: AppTheme.gray600,
+                                color: isDark
+                                    ? AppTheme.gray400
+                                    : AppTheme.gray600,
                               ),
                             ),
                           ],
@@ -1749,7 +1857,7 @@ class _NotesViewState extends State<NotesView> {
                   'Contact Information',
                   style: AppTheme.bodyLarge.copyWith(
                     fontWeight: FontWeight.w600,
-                    color: AppTheme.gray900,
+                    color: isDark ? Colors.white : AppTheme.gray900,
                   ),
                 ),
                 const SizedBox(height: AppTheme.space12),
@@ -1772,7 +1880,7 @@ class _NotesViewState extends State<NotesView> {
                   'Academic Information',
                   style: AppTheme.bodyLarge.copyWith(
                     fontWeight: FontWeight.w600,
-                    color: AppTheme.gray900,
+                    color: isDark ? Colors.white : AppTheme.gray900,
                   ),
                 ),
                 const SizedBox(height: AppTheme.space12),
@@ -1815,7 +1923,7 @@ class _NotesViewState extends State<NotesView> {
                   'Settings',
                   style: AppTheme.bodyLarge.copyWith(
                     fontWeight: FontWeight.w600,
-                    color: AppTheme.gray900,
+                    color: isDark ? Colors.white : AppTheme.gray900,
                   ),
                 ),
                 const SizedBox(height: AppTheme.space12),
@@ -1893,22 +2001,28 @@ class _NotesViewState extends State<NotesView> {
     required String subtitle,
     required VoidCallback onTap,
   }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final layout = context.watch<LayoutProvider>();
+
     return Container(
-      margin: const EdgeInsets.only(bottom: AppTheme.space12),
+      margin: EdgeInsets.only(bottom: layout.itemSpacing - 4),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? AppTheme.darkSurface : Colors.white,
         borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
-        border: Border.all(color: AppTheme.gray200, width: 1),
+        border: Border.all(
+          color: isDark ? AppTheme.gray700 : AppTheme.gray200,
+          width: 1,
+        ),
       ),
       child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: AppTheme.space16,
-          vertical: AppTheme.space8,
+        contentPadding: EdgeInsets.symmetric(
+          horizontal: layout.cardPadding,
+          vertical: layout.isCompact ? 4 : 8,
         ),
         leading: Container(
-          padding: const EdgeInsets.all(AppTheme.space8),
+          padding: EdgeInsets.all(layout.isCompact ? 6 : 8),
           decoration: BoxDecoration(
-            color: AppTheme.primaryBlue.withOpacity(0.1),
+            color: AppTheme.primaryBlue.withOpacity(isDark ? 0.2 : 0.1),
             borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
           ),
           child: Icon(icon, color: AppTheme.primaryBlue, size: 20),
@@ -1917,14 +2031,19 @@ class _NotesViewState extends State<NotesView> {
           title,
           style: AppTheme.bodyMedium.copyWith(
             fontWeight: FontWeight.w600,
-            color: AppTheme.gray900,
+            color: isDark ? Colors.white : AppTheme.gray900,
           ),
         ),
         subtitle: Text(
           subtitle,
-          style: AppTheme.bodySmall.copyWith(color: AppTheme.gray600),
+          style: AppTheme.bodySmall.copyWith(
+            color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+          ),
         ),
-        trailing: Icon(Icons.chevron_right, color: AppTheme.gray400),
+        trailing: Icon(
+          Icons.chevron_right,
+          color: isDark ? AppTheme.gray500 : AppTheme.gray400,
+        ),
         onTap: onTap,
       ),
     );
@@ -1936,28 +2055,38 @@ class _NotesViewState extends State<NotesView> {
     required String title,
     required String value,
   }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final layout = context.watch<LayoutProvider>();
+
     return Container(
-      margin: const EdgeInsets.only(bottom: AppTheme.space8),
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppTheme.space16,
-        vertical: AppTheme.space12,
+      margin: EdgeInsets.only(bottom: layout.isCompact ? 6 : 8),
+      padding: EdgeInsets.symmetric(
+        horizontal: layout.cardPadding,
+        vertical: layout.listItemPadding - 4,
       ),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? AppTheme.darkSurface : Colors.white,
         borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
-        border: Border.all(color: AppTheme.gray200, width: 1),
+        border: Border.all(
+          color: isDark ? AppTheme.gray700 : AppTheme.gray200,
+          width: 1,
+        ),
       ),
       child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.all(AppTheme.space8),
+            padding: EdgeInsets.all(layout.isCompact ? 6 : 8),
             decoration: BoxDecoration(
-              color: AppTheme.gray100,
+              color: isDark ? AppTheme.gray800 : AppTheme.gray100,
               borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
             ),
-            child: Icon(icon, color: AppTheme.gray600, size: 18),
+            child: Icon(
+              icon,
+              color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+              size: layout.isCompact ? 16 : 18,
+            ),
           ),
-          const SizedBox(width: AppTheme.space12),
+          SizedBox(width: layout.itemSpacing - 4),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1965,7 +2094,7 @@ class _NotesViewState extends State<NotesView> {
                 Text(
                   title,
                   style: AppTheme.caption.copyWith(
-                    color: AppTheme.gray500,
+                    color: isDark ? AppTheme.gray400 : AppTheme.gray500,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -1973,7 +2102,7 @@ class _NotesViewState extends State<NotesView> {
                 Text(
                   value,
                   style: AppTheme.bodyMedium.copyWith(
-                    color: AppTheme.gray900,
+                    color: isDark ? Colors.white : AppTheme.gray900,
                     fontWeight: FontWeight.w500,
                   ),
                 ),

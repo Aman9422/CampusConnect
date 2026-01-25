@@ -1,13 +1,16 @@
 import 'package:campusconnect/constants/routes.dart';
 import 'package:campusconnect/firebase_options.dart';
 import 'package:campusconnect/providers/ai_usage_provider.dart';
+import 'package:campusconnect/providers/layout_provider.dart';
 import 'package:campusconnect/providers/notifications_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
+import 'package:campusconnect/providers/theme_provider.dart';
 import 'package:campusconnect/services/ai/ai_service.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/services/firestore/notifications_service.dart';
 import 'package:campusconnect/services/firestore/placements_service.dart';
+import 'package:campusconnect/services/local_preferences_service.dart';
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/views/edit_profile_view.dart';
 import 'package:campusconnect/views/login_view.dart';
@@ -16,6 +19,7 @@ import 'package:campusconnect/views/notifications_view.dart';
 import 'package:campusconnect/views/profile_setup_view.dart';
 import 'package:campusconnect/views/profile_view.dart';
 import 'package:campusconnect/views/register_view.dart';
+import 'package:campusconnect/views/settings_view.dart';
 import 'package:campusconnect/views/verify_email_view.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
@@ -24,6 +28,8 @@ import 'package:provider/provider.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  // v6.6: Initialize local preferences service
+  await LocalPreferencesService.instance().init();
   runApp(const MyApp());
 }
 
@@ -33,6 +39,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // V5.1.1: Providers at root level - persist across auth changes
+    // V6.6: Added ThemeProvider and LayoutProvider for personalization
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(
@@ -48,20 +55,30 @@ class MyApp extends StatelessWidget {
           create: (_) =>
               NotificationsProvider(service: NotificationsService.instance()),
         ),
+        // V6.6: Theme and layout providers for personalization
+        ChangeNotifierProvider(create: (_) => ThemeProvider()..init()),
+        ChangeNotifierProvider(create: (_) => LayoutProvider()..init()),
       ],
-      child: MaterialApp(
-        title: 'CampusConnect',
-        theme: AppTheme.lightTheme, // v6.0: Professional design system
-        home: const AuthGuard(),
-        routes: {
-          loginRoute: (context) => const LoginView(),
-          registerRoute: (context) => const RegisterView(),
-          notesRoute: (context) => const NotesView(),
-          verifyEmailRoute: (context) => const VerifyEmailView(),
-          profileRoute: (context) => const ProfileView(),
-          editProfileRoute: (context) => const EditProfileView(),
-          profileSetupRoute: (context) => const ProfileSetupView(),
-          notificationsRoute: (context) => const NotificationsView(),
+      child: Consumer<ThemeProvider>(
+        builder: (context, themeProvider, child) {
+          return MaterialApp(
+            title: 'CampusConnect',
+            theme: AppTheme.lightTheme, // v6.0: Professional design system
+            darkTheme: AppTheme.darkTheme, // v6.6: Dark theme support
+            themeMode: themeProvider.themeMode, // v6.6: User preference
+            home: const AuthGuard(),
+            routes: {
+              loginRoute: (context) => const LoginView(),
+              registerRoute: (context) => const RegisterView(),
+              notesRoute: (context) => const NotesView(),
+              verifyEmailRoute: (context) => const VerifyEmailView(),
+              profileRoute: (context) => const ProfileView(),
+              editProfileRoute: (context) => const EditProfileView(),
+              profileSetupRoute: (context) => const ProfileSetupView(),
+              notificationsRoute: (context) => const NotificationsView(),
+              settingsRoute: (context) => const SettingsView(), // v6.6
+            },
+          );
         },
       ),
     );
@@ -163,7 +180,8 @@ class _AuthGuardState extends State<AuthGuard> {
                 if (profileProvider.hasProfile) {
                   WidgetsBinding.instance.addPostFrameCallback((_) {
                     if (!mounted || _isLoggedOut) return;
-                    final placementsProvider = context.read<PlacementsProvider>();
+                    final placementsProvider = context
+                        .read<PlacementsProvider>();
                     placementsProvider.updateUserProfile(
                       profileProvider.profile!,
                     );

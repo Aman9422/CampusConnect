@@ -44,6 +44,8 @@ dependencies:
   intl: ^0.20.0
   url_launcher: ^6.2.0
   http: ^1.2.0
+  shared_preferences: ^2.3.0  # v6.6: Local preferences storage
+  package_info_plus: ^8.0.0  # v6.6: App version info
 
 dev_dependencies:
   flutter_test:

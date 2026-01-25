@@ -56,6 +56,35 @@ class _EditProfileViewState extends State<EditProfileView> {
     super.dispose();
   }
 
+  InputDecoration _inputDecoration(bool isDark, String? hintText) {
+    return InputDecoration(
+      hintText: hintText,
+      hintStyle: TextStyle(color: isDark ? AppTheme.gray500 : AppTheme.gray500),
+      filled: true,
+      fillColor: isDark ? AppTheme.darkSurface : Colors.white,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+        borderSide: BorderSide(
+          color: isDark ? AppTheme.gray700 : AppTheme.gray300,
+        ),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+        borderSide: BorderSide(
+          color: isDark ? AppTheme.gray700 : AppTheme.gray300,
+        ),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+        borderSide: BorderSide(color: AppTheme.primaryBlue, width: 2),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+        borderSide: BorderSide(color: AppTheme.error),
+      ),
+    );
+  }
+
   Future<void> _saveProfile() async {
     if (!_formKey.currentState!.validate()) {
       return;
@@ -110,20 +139,25 @@ class _EditProfileViewState extends State<EditProfileView> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: isDark ? AppTheme.darkBackground : AppTheme.background,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
         elevation: 0,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: AppTheme.gray900),
+          icon: Icon(
+            Icons.arrow_back,
+            color: isDark ? Colors.white : AppTheme.gray900,
+          ),
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: Text(
           'Edit Profile',
           style: AppTheme.titleMedium.copyWith(
             fontWeight: FontWeight.w600,
-            color: AppTheme.gray900,
+            color: isDark ? Colors.white : AppTheme.gray900,
           ),
         ),
       ),
@@ -141,43 +175,18 @@ class _EditProfileViewState extends State<EditProfileView> {
                     'Full Name',
                     style: AppTheme.label.copyWith(
                       fontWeight: FontWeight.w600,
-                      color: AppTheme.gray800,
+                      color: isDark ? Colors.white : AppTheme.gray800,
                     ),
                   ),
                   const SizedBox(height: AppTheme.space8),
                   TextFormField(
                     controller: _fullNameController,
-                    decoration: InputDecoration(
-                      hintText: 'Enter your full name',
-                      filled: true,
-                      fillColor: Colors.white,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(color: AppTheme.gray300),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(color: AppTheme.gray300),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(
-                          color: AppTheme.primaryBlue,
-                          width: 2,
-                        ),
-                      ),
-                      errorBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(color: AppTheme.error),
-                      ),
+                    style: TextStyle(
+                      color: isDark ? Colors.white : AppTheme.gray900,
+                    ),
+                    decoration: _inputDecoration(
+                      isDark,
+                      'Enter your full name',
                     ),
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) {
@@ -193,44 +202,19 @@ class _EditProfileViewState extends State<EditProfileView> {
                     'Phone Number',
                     style: AppTheme.label.copyWith(
                       fontWeight: FontWeight.w600,
-                      color: AppTheme.gray800,
+                      color: isDark ? Colors.white : AppTheme.gray800,
                     ),
                   ),
                   const SizedBox(height: AppTheme.space8),
                   TextFormField(
                     controller: _phoneController,
                     keyboardType: TextInputType.phone,
-                    decoration: InputDecoration(
-                      hintText: 'Enter your phone number',
-                      filled: true,
-                      fillColor: Colors.white,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(color: AppTheme.gray300),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(color: AppTheme.gray300),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(
-                          color: AppTheme.primaryBlue,
-                          width: 2,
-                        ),
-                      ),
-                      errorBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(color: AppTheme.error),
-                      ),
+                    style: TextStyle(
+                      color: isDark ? Colors.white : AppTheme.gray900,
+                    ),
+                    decoration: _inputDecoration(
+                      isDark,
+                      'Enter your phone number',
                     ),
                     // Phone is optional, no validator required
                   ),
@@ -241,43 +225,18 @@ class _EditProfileViewState extends State<EditProfileView> {
                     'College',
                     style: AppTheme.label.copyWith(
                       fontWeight: FontWeight.w600,
-                      color: AppTheme.gray800,
+                      color: isDark ? Colors.white : AppTheme.gray800,
                     ),
                   ),
                   const SizedBox(height: AppTheme.space8),
                   TextFormField(
                     controller: _collegeController,
-                    decoration: InputDecoration(
-                      hintText: 'Enter your college name',
-                      filled: true,
-                      fillColor: Colors.white,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(color: AppTheme.gray300),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(color: AppTheme.gray300),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(
-                          color: AppTheme.primaryBlue,
-                          width: 2,
-                        ),
-                      ),
-                      errorBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(color: AppTheme.error),
-                      ),
+                    style: TextStyle(
+                      color: isDark ? Colors.white : AppTheme.gray900,
+                    ),
+                    decoration: _inputDecoration(
+                      isDark,
+                      'Enter your college name',
                     ),
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) {
@@ -293,43 +252,18 @@ class _EditProfileViewState extends State<EditProfileView> {
                     'Program',
                     style: AppTheme.label.copyWith(
                       fontWeight: FontWeight.w600,
-                      color: AppTheme.gray800,
+                      color: isDark ? Colors.white : AppTheme.gray800,
                     ),
                   ),
                   const SizedBox(height: AppTheme.space8),
                   TextFormField(
                     controller: _programController,
-                    decoration: InputDecoration(
-                      hintText: 'e.g., Computer Science',
-                      filled: true,
-                      fillColor: Colors.white,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(color: AppTheme.gray300),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(color: AppTheme.gray300),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(
-                          color: AppTheme.primaryBlue,
-                          width: 2,
-                        ),
-                      ),
-                      errorBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(color: AppTheme.error),
-                      ),
+                    style: TextStyle(
+                      color: isDark ? Colors.white : AppTheme.gray900,
+                    ),
+                    decoration: _inputDecoration(
+                      isDark,
+                      'e.g., Computer Science',
                     ),
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) {
@@ -345,42 +279,27 @@ class _EditProfileViewState extends State<EditProfileView> {
                     'Year',
                     style: AppTheme.label.copyWith(
                       fontWeight: FontWeight.w600,
-                      color: AppTheme.gray800,
+                      color: isDark ? Colors.white : AppTheme.gray800,
                     ),
                   ),
                   const SizedBox(height: AppTheme.space8),
                   DropdownButtonFormField<int>(
-                    initialValue: _selectedYear,
-                    decoration: InputDecoration(
-                      filled: true,
-                      fillColor: Colors.white,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(color: AppTheme.gray300),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(color: AppTheme.gray300),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(
-                          color: AppTheme.primaryBlue,
-                          width: 2,
-                        ),
-                      ),
+                    value: _selectedYear,
+                    dropdownColor: isDark ? AppTheme.darkSurface : Colors.white,
+                    style: TextStyle(
+                      color: isDark ? Colors.white : AppTheme.gray900,
                     ),
+                    decoration: _inputDecoration(isDark, null),
                     items: [1, 2, 3, 4]
                         .map(
                           (year) => DropdownMenuItem(
                             value: year,
-                            child: Text('Year $year'),
+                            child: Text(
+                              'Year $year',
+                              style: TextStyle(
+                                color: isDark ? Colors.white : AppTheme.gray900,
+                              ),
+                            ),
                           ),
                         )
                         .toList(),
@@ -397,7 +316,7 @@ class _EditProfileViewState extends State<EditProfileView> {
                     'CGPA',
                     style: AppTheme.label.copyWith(
                       fontWeight: FontWeight.w600,
-                      color: AppTheme.gray800,
+                      color: isDark ? Colors.white : AppTheme.gray800,
                     ),
                   ),
                   const SizedBox(height: AppTheme.space8),
@@ -406,38 +325,10 @@ class _EditProfileViewState extends State<EditProfileView> {
                     keyboardType: const TextInputType.numberWithOptions(
                       decimal: true,
                     ),
-                    decoration: InputDecoration(
-                      hintText: 'e.g., 8.5',
-                      filled: true,
-                      fillColor: Colors.white,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(color: AppTheme.gray300),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(color: AppTheme.gray300),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(
-                          color: AppTheme.primaryBlue,
-                          width: 2,
-                        ),
-                      ),
-                      errorBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(color: AppTheme.error),
-                      ),
+                    style: TextStyle(
+                      color: isDark ? Colors.white : AppTheme.gray900,
                     ),
+                    decoration: _inputDecoration(isDark, 'e.g., 8.5'),
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) {
                         return 'Please enter your CGPA';

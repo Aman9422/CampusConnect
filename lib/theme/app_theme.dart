@@ -387,6 +387,154 @@ class AppTheme {
   }
 
   // ============================================================================
+  // DARK THEME - v6.6
+  // ============================================================================
+
+  /// Dark theme colors
+  static const Color darkBackground = Color(0xFF121212);
+  static const Color darkSurface = Color(0xFF1E1E1E);
+  static const Color darkSurfaceVariant = Color(0xFF2C2C2C);
+
+  static ThemeData get darkTheme {
+    return ThemeData(
+      useMaterial3: true,
+      brightness: Brightness.dark,
+
+      // Color scheme
+      colorScheme: const ColorScheme.dark(
+        primary: primaryBlueLight,
+        secondary: secondaryIndigo,
+        surface: darkSurface,
+        error: errorLight,
+      ),
+
+      // Scaffold
+      scaffoldBackgroundColor: darkBackground,
+
+      // AppBar
+      appBarTheme: AppBarTheme(
+        backgroundColor: darkSurface,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        scrolledUnderElevation: 1,
+        centerTitle: false,
+        titleTextStyle: titleLarge.copyWith(color: Colors.white),
+      ),
+
+      // Card
+      cardTheme: CardThemeData(
+        color: darkSurface,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: const BorderRadius.all(Radius.circular(radiusMedium)),
+          side: BorderSide(color: gray700, width: 1),
+        ),
+        margin: const EdgeInsets.all(0),
+      ),
+
+      // Elevated Button
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: primaryBlueLight,
+          foregroundColor: Colors.white,
+          disabledBackgroundColor: gray700,
+          disabledForegroundColor: gray500,
+          elevation: 0,
+          shadowColor: Colors.transparent,
+          padding: const EdgeInsets.symmetric(
+            horizontal: space20,
+            vertical: space12,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(radiusSmall),
+          ),
+          textStyle: button,
+        ),
+      ),
+
+      // Text Button
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: primaryBlueLight,
+          padding: const EdgeInsets.symmetric(
+            horizontal: space16,
+            vertical: space8,
+          ),
+          textStyle: button,
+        ),
+      ),
+
+      // Input Decoration
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: darkSurfaceVariant,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: space16,
+          vertical: space12,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(radiusSmall),
+          borderSide: BorderSide(color: gray600),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(radiusSmall),
+          borderSide: BorderSide(color: gray600),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(radiusSmall),
+          borderSide: const BorderSide(color: primaryBlueLight, width: 2),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(radiusSmall),
+          borderSide: const BorderSide(color: errorLight),
+        ),
+        hintStyle: TextStyle(color: gray500),
+      ),
+
+      // Chip
+      chipTheme: ChipThemeData(
+        backgroundColor: darkSurfaceVariant,
+        deleteIconColor: gray400,
+        labelStyle: label.copyWith(color: gray300),
+        padding: const EdgeInsets.symmetric(
+          horizontal: space12,
+          vertical: space4,
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(radiusFull),
+        ),
+      ),
+
+      // Divider
+      dividerTheme: DividerThemeData(color: gray700, space: 1, thickness: 1),
+
+      // Bottom Navigation Bar
+      bottomNavigationBarTheme: BottomNavigationBarThemeData(
+        backgroundColor: darkSurface,
+        selectedItemColor: primaryBlueLight,
+        unselectedItemColor: gray500,
+        selectedLabelStyle: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+        ),
+        unselectedLabelStyle: const TextStyle(fontSize: 12),
+        type: BottomNavigationBarType.fixed,
+        elevation: 8,
+      ),
+
+      // Snackbar
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: gray700,
+        contentTextStyle: const TextStyle(color: Colors.white, fontSize: 14),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(radiusSmall),
+        ),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  // ============================================================================
   // COMMON DECORATIONS
   // ============================================================================
 
