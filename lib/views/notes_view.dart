@@ -9,6 +9,7 @@ import 'package:campusconnect/providers/layout_provider.dart';
 import 'package:campusconnect/providers/notifications_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
+import 'package:campusconnect/providers/resume_review_provider.dart'; // v6.7
 import 'package:campusconnect/services/ai/ai_service.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/services/firestore/notes_service.dart';
@@ -179,6 +180,7 @@ class _NotesViewState extends State<NotesView> {
                     context.read<PlacementsProvider>().reset();
                     context.read<AIUsageProvider>().reset();
                     context.read<NotificationsProvider>().reset();
+                    context.read<ResumeReviewProvider>().reset(); // v6.7
                     await AuthService.firebase().logOut();
                     if (!mounted) return;
                     Navigator.of(
@@ -342,6 +344,17 @@ class _NotesViewState extends State<NotesView> {
                 subtitle: 'Get help with your career',
                 onTap: () {
                   setState(() => _selectedIndex = 3);
+                },
+              ),
+              _buildDivider(),
+              // v6.7: Resume Review entry
+              _buildTodayItem(
+                icon: Icons.auto_awesome,
+                iconColor: AppTheme.success,
+                title: 'AI Resume Review',
+                subtitle: 'Get ATS score & improvement tips',
+                onTap: () {
+                  Navigator.of(context).pushNamed(resumeReviewRoute);
                 },
               ),
             ],
@@ -1408,6 +1421,29 @@ class _NotesViewState extends State<NotesView> {
       ),
       child: Row(
         children: [
+          // v6.7: Resume Review quick access button
+          Tooltip(
+            message: 'AI Resume Review',
+            child: InkWell(
+              onTap: () {
+                Navigator.of(context).pushNamed(resumeReviewRoute);
+              },
+              borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+              child: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: isDark ? AppTheme.gray800 : AppTheme.gray100,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.auto_awesome,
+                  color: AppTheme.success,
+                  size: 22,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: AppTheme.space8),
           Expanded(
             child: TextField(
               controller: _chatController,
@@ -2121,6 +2157,8 @@ class _NotesViewState extends State<NotesView> {
       context.read<ProfileProvider>().reset();
       context.read<PlacementsProvider>().reset();
       context.read<AIUsageProvider>().reset();
+      context.read<NotificationsProvider>().reset();
+      context.read<ResumeReviewProvider>().reset(); // v6.7
       await AuthService.firebase().logOut();
       if (!mounted) return;
       Navigator.of(context).pushNamedAndRemoveUntil(loginRoute, (_) => false);

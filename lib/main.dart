@@ -5,8 +5,10 @@ import 'package:campusconnect/providers/layout_provider.dart';
 import 'package:campusconnect/providers/notifications_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
+import 'package:campusconnect/providers/resume_review_provider.dart';
 import 'package:campusconnect/providers/theme_provider.dart';
 import 'package:campusconnect/services/ai/ai_service.dart';
+import 'package:campusconnect/services/ai/resume_review_service.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/services/firestore/notifications_service.dart';
 import 'package:campusconnect/services/firestore/placements_service.dart';
@@ -19,6 +21,7 @@ import 'package:campusconnect/views/notifications_view.dart';
 import 'package:campusconnect/views/profile_setup_view.dart';
 import 'package:campusconnect/views/profile_view.dart';
 import 'package:campusconnect/views/register_view.dart';
+import 'package:campusconnect/views/resume_review_view.dart';
 import 'package:campusconnect/views/settings_view.dart';
 import 'package:campusconnect/views/verify_email_view.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -58,6 +61,11 @@ class MyApp extends StatelessWidget {
         // V6.6: Theme and layout providers for personalization
         ChangeNotifierProvider(create: (_) => ThemeProvider()..init()),
         ChangeNotifierProvider(create: (_) => LayoutProvider()..init()),
+        // V6.7: Resume review provider
+        ChangeNotifierProvider(
+          create: (_) =>
+              ResumeReviewProvider(service: ResumeReviewService.instance()),
+        ),
       ],
       child: Consumer<ThemeProvider>(
         builder: (context, themeProvider, child) {
@@ -77,6 +85,7 @@ class MyApp extends StatelessWidget {
               profileSetupRoute: (context) => const ProfileSetupView(),
               notificationsRoute: (context) => const NotificationsView(),
               settingsRoute: (context) => const SettingsView(), // v6.6
+              resumeReviewRoute: (context) => const ResumeReviewView(), // v6.7
             },
           );
         },
@@ -119,11 +128,13 @@ class _AuthGuardState extends State<AuthGuard> {
     final aiProvider = context.read<AIUsageProvider>();
     final profileProvider = context.read<ProfileProvider>();
     final notificationsProvider = context.read<NotificationsProvider>();
+    final resumeReviewProvider = context.read<ResumeReviewProvider>(); // v6.7
 
     placementsProvider.reset();
     aiProvider.reset();
     profileProvider.reset();
     notificationsProvider.reset();
+    resumeReviewProvider.reset(); // v6.7
   }
 
   @override
@@ -160,10 +171,13 @@ class _AuthGuardState extends State<AuthGuard> {
                     final aiProvider = context.read<AIUsageProvider>();
                     final notificationsProvider = context
                         .read<NotificationsProvider>();
+                    final resumeReviewProvider = context
+                        .read<ResumeReviewProvider>(); // v6.7
 
                     placementsProvider.initWithUser(user.id);
                     aiProvider.initWithUser(user.id);
                     notificationsProvider.initWithUser(user.id);
+                    resumeReviewProvider.initWithUser(user.id); // v6.7
                     profileProvider.initWithUser(
                       user.id,
                       user.email ?? 'noemail@example.com',
