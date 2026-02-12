@@ -1,7 +1,8 @@
-import 'package:campusconnect/constants/routes.dart';
 import 'package:campusconnect/providers/ai_usage_provider.dart';
+import 'package:campusconnect/providers/notifications_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
+import 'package:campusconnect/providers/resume_review_provider.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -41,11 +42,10 @@ class _VerifyEmailViewState extends State<VerifyEmailView> {
               context.read<ProfileProvider>().reset();
               context.read<PlacementsProvider>().reset();
               context.read<AIUsageProvider>().reset();
+              context.read<NotificationsProvider>().reset();
+              context.read<ResumeReviewProvider>().reset(); // v6.7
               await AuthService.firebase().logOut();
-              if (!context.mounted) return;
-              Navigator.of(
-                context,
-              ).pushNamedAndRemoveUntil(loginRoute, (_) => false);
+              // AuthGuard handles navigation via StreamBuilder
             },
             child: Text('Login'),
           ),

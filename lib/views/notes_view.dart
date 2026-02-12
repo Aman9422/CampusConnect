@@ -182,10 +182,7 @@ class _NotesViewState extends State<NotesView> {
                     context.read<NotificationsProvider>().reset();
                     context.read<ResumeReviewProvider>().reset(); // v6.7
                     await AuthService.firebase().logOut();
-                    if (!mounted) return;
-                    Navigator.of(
-                      context,
-                    ).pushNamedAndRemoveUntil(loginRoute, (_) => false);
+                    // AuthGuard handles navigation via StreamBuilder
                   }
               }
             },
@@ -2160,8 +2157,7 @@ class _NotesViewState extends State<NotesView> {
       context.read<NotificationsProvider>().reset();
       context.read<ResumeReviewProvider>().reset(); // v6.7
       await AuthService.firebase().logOut();
-      if (!mounted) return;
-      Navigator.of(context).pushNamedAndRemoveUntil(loginRoute, (_) => false);
+      // AuthGuard handles navigation via StreamBuilder
     }
   }
 

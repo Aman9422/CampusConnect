@@ -104,6 +104,8 @@ class AuthGuard extends StatefulWidget {
 class _AuthGuardState extends State<AuthGuard> {
   bool _isInitialized = false;
   bool _isLoggedOut = false; // V6.3: Track logout to prevent race conditions
+  bool _providerInitScheduled =
+      false; // Prevent double-scheduling init callbacks
 
   @override
   void initState() {
@@ -154,17 +156,22 @@ class _AuthGuardState extends State<AuthGuard> {
 
         final user = snapshot.data;
 
-        if (user != null && !_isLoggedOut) {
-          // Reset logout flag when user logs in
-          _isLoggedOut = false;
+        if (user != null) {
+          // V6.3 fix: Reset logout flag when a valid user is detected
+          if (_isLoggedOut) {
+            _isLoggedOut = false;
+            _providerInitScheduled = false; // Allow fresh init on re-login
+          }
 
           if (user.isEmailVerified) {
             return Consumer<ProfileProvider>(
               builder: (context, profileProvider, child) {
                 // Initialize profile if not done
-                if (!profileProvider.isInitialized) {
+                if (!profileProvider.isInitialized && !_providerInitScheduled) {
+                  _providerInitScheduled = true;
                   WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (_isLoggedOut) return; // V6.3: Don't init if logged out
+                    if (_isLoggedOut || !mounted)
+                      return; // V6.3: Don't init if logged out
 
                     final placementsProvider = context
                         .read<PlacementsProvider>();
@@ -220,9 +227,12 @@ class _AuthGuardState extends State<AuthGuard> {
           }
         } else {
           // V6.3: Reset providers on logout (only once)
+          // Views already call reset() before logOut(), so only reset if not done
           if (!_isLoggedOut && user == null) {
+            _isLoggedOut = true;
+            _providerInitScheduled = false;
             WidgetsBinding.instance.addPostFrameCallback((_) {
-              _handleLogout();
+              if (mounted && _isLoggedOut) _handleLogout();
             });
           }
 
