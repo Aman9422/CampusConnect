@@ -284,7 +284,7 @@ class _EditProfileViewState extends State<EditProfileView> {
                   ),
                   const SizedBox(height: AppTheme.space8),
                   DropdownButtonFormField<int>(
-                    value: _selectedYear,
+                    initialValue: _selectedYear,
                     dropdownColor: isDark ? AppTheme.darkSurface : Colors.white,
                     style: TextStyle(
                       color: isDark ? Colors.white : AppTheme.gray900,

@@ -21,6 +21,8 @@ import 'package:campusconnect/views/notifications_view.dart';
 import 'package:campusconnect/views/profile_setup_view.dart';
 import 'package:campusconnect/views/profile_view.dart';
 import 'package:campusconnect/views/register_view.dart';
+import 'package:campusconnect/views/resume_review_detail_view.dart'; // v6.8
+import 'package:campusconnect/views/resume_review_history_view.dart'; // v6.8
 import 'package:campusconnect/views/resume_review_view.dart';
 import 'package:campusconnect/views/settings_view.dart';
 import 'package:campusconnect/views/verify_email_view.dart';
@@ -75,6 +77,17 @@ class MyApp extends StatelessWidget {
             darkTheme: AppTheme.darkTheme, // v6.6: Dark theme support
             themeMode: themeProvider.themeMode, // v6.6: User preference
             home: const AuthGuard(),
+            onGenerateRoute: (settings) {
+              // v6.8: Handle dynamic routes with arguments
+              if (settings.name == resumeReviewDetailRoute) {
+                final reviewId = settings.arguments as String;
+                return MaterialPageRoute(
+                  builder: (context) =>
+                      ResumeReviewDetailView(reviewId: reviewId),
+                );
+              }
+              return null; // Let routes handle it
+            },
             routes: {
               loginRoute: (context) => const LoginView(),
               registerRoute: (context) => const RegisterView(),
@@ -86,6 +99,8 @@ class MyApp extends StatelessWidget {
               notificationsRoute: (context) => const NotificationsView(),
               settingsRoute: (context) => const SettingsView(), // v6.6
               resumeReviewRoute: (context) => const ResumeReviewView(), // v6.7
+              resumeReviewHistoryRoute: (context) =>
+                  const ResumeReviewHistoryView(), // v6.8
             },
           );
         },
@@ -170,8 +185,9 @@ class _AuthGuardState extends State<AuthGuard> {
                 if (!profileProvider.isInitialized && !_providerInitScheduled) {
                   _providerInitScheduled = true;
                   WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (_isLoggedOut || !mounted)
+                    if (_isLoggedOut || !mounted) {
                       return; // V6.3: Don't init if logged out
+                    }
 
                     final placementsProvider = context
                         .read<PlacementsProvider>();

@@ -1,25 +1,31 @@
 import 'package:campusconnect/models/resume_review.dart';
 import 'package:campusconnect/services/ai/resume_review_service.dart';
+import 'package:campusconnect/services/firestore/resume_history_service.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 
-/// CampusConnect v6.7 - Resume Review Provider
+/// CampusConnect v6.7+ - Resume Review Provider
 ///
-/// State management for AI resume reviews.
-/// Handles:
+/// State management for AI resume reviews./// Handles:
 /// - Review submission and results
 /// - Monthly usage tracking
 /// - Network connectivity awareness
 /// - Loading and error states
+/// v6.8: Added review history support
 
 class ResumeReviewProvider with ChangeNotifier {
   final ResumeReviewService _service;
+  final ResumeHistoryService _historyService; // v6.8
   final Connectivity _connectivity = Connectivity();
 
   String? userId;
 
-  ResumeReviewProvider({required ResumeReviewService service, this.userId})
-    : _service = service;
+  ResumeReviewProvider({
+    required ResumeReviewService service,
+    ResumeHistoryService? historyService, // v6.8
+    this.userId,
+  }) : _service = service,
+       _historyService = historyService ?? ResumeHistoryService.instance();
 
   // === State ===
 
@@ -49,6 +55,19 @@ class ResumeReviewProvider with ChangeNotifier {
   /// Whether provider has been initialized
   bool _isInitialized = false;
   bool get isInitialized => _isInitialized;
+
+  // v6.8: History state
+  List<ResumeReviewHistory> _history = [];
+  List<ResumeReviewHistory> get history => _history;
+
+  bool _isLoadingHistory = false;
+  bool get isLoadingHistory => _isLoadingHistory;
+
+  String? _historyError;
+  String? get historyError => _historyError;
+
+  bool _historyInitialized = false;
+  bool get historyInitialized => _historyInitialized;
 
   // === Computed Getters ===
 
@@ -83,6 +102,10 @@ class ResumeReviewProvider with ChangeNotifier {
     _startConnectivityMonitoring();
     await _loadUsage();
     _isInitialized = true;
+
+    // v6.8: Load history in background (don't block initialization)
+    _loadHistory();
+
     notifyListeners();
   }
 
@@ -94,6 +117,13 @@ class ResumeReviewProvider with ChangeNotifier {
     _isLoading = false;
     _error = null;
     _isInitialized = false;
+
+    // v6.8: Clear history
+    _history = [];
+    _isLoadingHistory = false;
+    _historyError = null;
+    _historyInitialized = false;
+
     notifyListeners();
   }
 
@@ -185,6 +215,14 @@ class ResumeReviewProvider with ChangeNotifier {
         'ResumeReviewProvider: Review complete. ATS Score: ${response.review.atsScore}',
       );
 
+      // v6.8: Save to history
+      if (userId != null) {
+        _saveToHistory(response.review, targetRole).catchError((e) {
+          debugPrint('Failed to save review to history: $e');
+          // Don't fail the operation if history save fails
+        });
+      }
+
       notifyListeners();
       return true;
     } on ResumeReviewQuotaException catch (e) {
@@ -225,5 +263,107 @@ class ResumeReviewProvider with ChangeNotifier {
   /// Refresh usage data from backend
   Future<void> refreshUsage() async {
     await _loadUsage();
+  }
+
+  // === v6.8: History Management ===
+
+  /// Load review history from Firestore
+  Future<void> _loadHistory() async {
+    if (userId == null) return;
+
+    _isLoadingHistory = true;
+    _historyError = null;
+    notifyListeners();
+
+    try {
+      _history = await _historyService.fetchHistory(userId!);
+      _historyInitialized = true;
+      debugPrint(
+        'ResumeReviewProvider: Loaded ${_history.length} history items',
+      );
+    } catch (e) {
+      debugPrint('ResumeReviewProvider: Error loading history: $e');
+      _historyError = 'Failed to load review history';
+    } finally {
+      _isLoadingHistory = false;
+      notifyListeners();
+    }
+  }
+
+  /// Refresh history (pull-to-refresh)
+  Future<void> refreshHistory() async {
+    if (userId == null) return;
+
+    _historyError = null;
+
+    try {
+      _history = await _historyService.fetchHistory(userId!);
+      _historyInitialized = true;
+      debugPrint(
+        'ResumeReviewProvider: Refreshed ${_history.length} history items',
+      );
+      notifyListeners();
+    } catch (e) {
+      debugPrint('ResumeReviewProvider: Error refreshing history: $e');
+      _historyError = 'Failed to refresh history';
+      notifyListeners();
+    }
+  }
+
+  /// Save current review to history
+  Future<void> _saveToHistory(ResumeReview review, String? targetRole) async {
+    if (userId == null) return;
+
+    try {
+      final reviewId = await _historyService.saveReview(
+        userId: userId!,
+        review: review,
+        targetRole: targetRole,
+      );
+
+      debugPrint('ResumeReviewProvider: Saved review to history: $reviewId');
+
+      // Refresh history to include new review
+      await refreshHistory();
+    } catch (e) {
+      debugPrint('ResumeReviewProvider: Failed to save to history: $e');
+      rethrow;
+    }
+  }
+
+  /// Delete a review from history
+  Future<bool> deleteHistoryItem(String reviewId) async {
+    if (userId == null) return false;
+
+    try {
+      await _historyService.deleteReview(userId: userId!, reviewId: reviewId);
+
+      // Remove from local list
+      _history.removeWhere((item) => item.id == reviewId);
+      notifyListeners();
+
+      debugPrint('ResumeReviewProvider: Deleted review $reviewId');
+      return true;
+    } catch (e) {
+      debugPrint('ResumeReviewProvider: Error deleting review: $e');
+      return false;
+    }
+  }
+
+  /// Get a specific review by ID
+  Future<ResumeReviewHistory?> getHistoryItem(String reviewId) async {
+    if (userId == null) return null;
+
+    // Check cache first
+    try {
+      final cached = _history.firstWhere((item) => item.id == reviewId);
+      return cached;
+    } catch (e) {
+      // Not in cache, fetch from Firestore
+      return await _historyService.getReviewById(
+        userId: userId!,
+        reviewId: reviewId,
+      );
+    }
   }
 }

@@ -1,3 +1,4 @@
+import 'package:campusconnect/constants/routes.dart'; // v6.8
 import 'package:campusconnect/models/resume_review.dart';
 import 'package:campusconnect/providers/resume_review_provider.dart';
 import 'package:campusconnect/theme/app_theme.dart';
@@ -20,6 +21,164 @@ class ResumeReviewView extends StatefulWidget {
 
   @override
   State<ResumeReviewView> createState() => _ResumeReviewViewState();
+
+  /// v6.8: Static method to build results view (reusable in history detail)
+  static Widget buildResultsView(ResumeReview review) {
+    return Builder(
+      builder: (context) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return _buildResultsContent(review, isDark);
+      },
+    );
+  }
+
+  static Widget _buildResultsContent(ResumeReview review, bool isDark) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ATS Score Card
+        _ATSScoreCard(score: review.atsScore, isDark: isDark),
+        const SizedBox(height: 16),
+
+        // Hireability Verdict
+        _VerdictCard(verdict: review.hireabilityVerdict, isDark: isDark),
+        const SizedBox(height: 16),
+
+        // Strengths
+        if (review.strengths.isNotEmpty) ...[
+          _SectionCard(
+            title: 'Strengths',
+            icon: Icons.thumb_up,
+            iconColor: Colors.green,
+            isDark: isDark,
+            child: Column(
+              children: review.strengths
+                  .map((s) => _buildListItem(s, Colors.green, isDark))
+                  .toList(),
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+
+        // Missing Keywords
+        if (review.missingKeywords.isNotEmpty) ...[
+          _SectionCard(
+            title: 'Missing Keywords',
+            icon: Icons.search_off,
+            iconColor: Colors.orange,
+            isDark: isDark,
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: review.missingKeywords
+                  .map((k) => _KeywordChip(keyword: k, isDark: isDark))
+                  .toList(),
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+
+        // Format Issues
+        if (review.formatIssues.isNotEmpty) ...[
+          _SectionCard(
+            title: 'Format Issues',
+            icon: Icons.warning_amber,
+            iconColor: Colors.amber,
+            isDark: isDark,
+            child: Column(
+              children: review.formatIssues
+                  .map((i) => _buildListItem(i, Colors.amber, isDark))
+                  .toList(),
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+
+        // Bullet Improvements
+        if (review.bulletImprovements.isNotEmpty) ...[
+          _SectionCard(
+            title: 'Bullet Point Improvements',
+            icon: Icons.auto_fix_high,
+            iconColor: AppTheme.primaryBlue,
+            isDark: isDark,
+            child: Column(
+              children: review.bulletImprovements
+                  .map(
+                    (b) =>
+                        _BulletImprovementCard(improvement: b, isDark: isDark),
+                  )
+                  .toList(),
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+
+        // Section Advice
+        if (review.sectionAdvice.nonNullSections.isNotEmpty) ...[
+          _SectionCard(
+            title: 'Section Advice',
+            icon: Icons.lightbulb_outline,
+            iconColor: AppTheme.success,
+            isDark: isDark,
+            child: Column(
+              children: review.sectionAdvice.nonNullSections.entries
+                  .map(
+                    (e) => _SectionAdviceItem(
+                      sectionName: e.key,
+                      advice: e.value,
+                      isDark: isDark,
+                    ),
+                  )
+                  .toList(),
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+
+        // Overall Advice
+        if (review.overallAdvice.isNotEmpty) ...[
+          _SectionCard(
+            title: 'Overall Advice',
+            icon: Icons.tips_and_updates,
+            iconColor: AppTheme.primaryBlue,
+            isDark: isDark,
+            child: Text(
+              review.overallAdvice,
+              style: TextStyle(
+                fontSize: 14,
+                color: isDark ? AppTheme.gray300 : AppTheme.gray700,
+                height: 1.5,
+              ),
+            ),
+          ),
+        ],
+
+        const SizedBox(height: 32),
+      ],
+    );
+  }
+
+  static Widget _buildListItem(String text, Color color, bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.circle, size: 8, color: color),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontSize: 14,
+                color: isDark ? AppTheme.gray300 : AppTheme.gray700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _ResumeReviewViewState extends State<ResumeReviewView> {
@@ -48,6 +207,15 @@ class _ResumeReviewViewState extends State<ResumeReviewView> {
         foregroundColor: isDark ? Colors.white : AppTheme.gray900,
         elevation: 0,
         actions: [
+          // v6.8: History button
+          IconButton(
+            icon: const Icon(Icons.history),
+            onPressed: () {
+              Navigator.of(context).pushNamed(resumeReviewHistoryRoute);
+            },
+            tooltip: 'Review History',
+          ),
+
           // Usage indicator
           Padding(
             padding: const EdgeInsets.only(right: 16),
@@ -506,148 +674,8 @@ class _ResumeReviewViewState extends State<ResumeReviewView> {
           ),
           const SizedBox(height: 20),
 
-          // ATS Score Card
-          _ATSScoreCard(score: review.atsScore, isDark: isDark),
-          const SizedBox(height: 16),
-
-          // Hireability Verdict
-          _VerdictCard(verdict: review.hireabilityVerdict, isDark: isDark),
-          const SizedBox(height: 16),
-
-          // Strengths
-          if (review.strengths.isNotEmpty) ...[
-            _SectionCard(
-              title: 'Strengths',
-              icon: Icons.thumb_up,
-              iconColor: Colors.green,
-              isDark: isDark,
-              child: Column(
-                children: review.strengths
-                    .map((s) => _buildListItem(s, Colors.green, isDark))
-                    .toList(),
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
-
-          // Missing Keywords
-          if (review.missingKeywords.isNotEmpty) ...[
-            _SectionCard(
-              title: 'Missing Keywords',
-              icon: Icons.search_off,
-              iconColor: Colors.orange,
-              isDark: isDark,
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: review.missingKeywords
-                    .map((k) => _KeywordChip(keyword: k, isDark: isDark))
-                    .toList(),
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
-
-          // Format Issues
-          if (review.formatIssues.isNotEmpty) ...[
-            _SectionCard(
-              title: 'Format Issues',
-              icon: Icons.warning_amber,
-              iconColor: Colors.amber,
-              isDark: isDark,
-              child: Column(
-                children: review.formatIssues
-                    .map((i) => _buildListItem(i, Colors.amber, isDark))
-                    .toList(),
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
-
-          // Bullet Improvements
-          if (review.bulletImprovements.isNotEmpty) ...[
-            _SectionCard(
-              title: 'Bullet Point Improvements',
-              icon: Icons.auto_fix_high,
-              iconColor: AppTheme.primaryBlue,
-              isDark: isDark,
-              child: Column(
-                children: review.bulletImprovements
-                    .map(
-                      (b) => _BulletImprovementCard(
-                        improvement: b,
-                        isDark: isDark,
-                      ),
-                    )
-                    .toList(),
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
-
-          // Section Advice
-          if (review.sectionAdvice.nonNullSections.isNotEmpty) ...[
-            _SectionCard(
-              title: 'Section Advice',
-              icon: Icons.lightbulb_outline,
-              iconColor: AppTheme.success,
-              isDark: isDark,
-              child: Column(
-                children: review.sectionAdvice.nonNullSections.entries
-                    .map(
-                      (e) => _SectionAdviceItem(
-                        sectionName: e.key,
-                        advice: e.value,
-                        isDark: isDark,
-                      ),
-                    )
-                    .toList(),
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
-
-          // Overall Advice
-          if (review.overallAdvice.isNotEmpty) ...[
-            _SectionCard(
-              title: 'Overall Advice',
-              icon: Icons.tips_and_updates,
-              iconColor: AppTheme.primaryBlue,
-              isDark: isDark,
-              child: Text(
-                review.overallAdvice,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: isDark ? AppTheme.gray300 : AppTheme.gray700,
-                  height: 1.5,
-                ),
-              ),
-            ),
-          ],
-
-          const SizedBox(height: 32),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildListItem(String text, Color color, bool isDark) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.circle, size: 8, color: color),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              text,
-              style: TextStyle(
-                fontSize: 14,
-                color: isDark ? AppTheme.gray300 : AppTheme.gray700,
-              ),
-            ),
-          ),
+          // Use static method for results display
+          ResumeReviewView._buildResultsContent(review, isDark),
         ],
       ),
     );

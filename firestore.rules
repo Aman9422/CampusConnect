@@ -30,6 +30,13 @@ service cloud.firestore {
         allow write: if false; // Only Cloud Functions can write
       }
       
+      // v6.8: Resume Review History
+      match /resumeReviews/{reviewId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId);
+        allow update, delete: if isOwner(userId);
+      }
+      
       // All other subcollections under users/{uid}
       match /{subcollection=**} {
         allow read, write: if isOwner(userId);

@@ -1,6 +1,6 @@
-/// CampusConnect v6.7 - Resume Review Model
-///
-/// Represents the AI-generated resume review response.
+// CampusConnect v6.7 - Resume Review Model
+//
+// Represents the AI-generated resume review response.
 
 /// Represents a single bullet point improvement suggestion
 class BulletImprovement {
@@ -187,6 +187,120 @@ class ResumeReview {
 /// Alias for formatting issues (typo fix)
 extension ResumeReviewExtension on ResumeReview {
   List<String> get formatImprovements => formatIssues;
+}
+
+/// v6.8: Stored resume review history item
+class ResumeReviewHistory {
+  final String id;
+  final String userId;
+  final int atsScore;
+  final List<String> strengths;
+  final List<String> missingKeywords;
+  final List<String> formatIssues;
+  final List<BulletImprovement> bulletImprovements;
+  final SectionAdvice sectionAdvice;
+  final String overallAdvice;
+  final String hireabilityVerdict;
+  final String? targetRole;
+  final DateTime createdAt;
+  final String monthKey; // Format: "YYYY-MM"
+
+  const ResumeReviewHistory({
+    required this.id,
+    required this.userId,
+    required this.atsScore,
+    required this.strengths,
+    required this.missingKeywords,
+    required this.formatIssues,
+    required this.bulletImprovements,
+    required this.sectionAdvice,
+    required this.overallAdvice,
+    required this.hireabilityVerdict,
+    this.targetRole,
+    required this.createdAt,
+    required this.monthKey,
+  });
+
+  factory ResumeReviewHistory.fromFirestore(
+    String docId,
+    Map<String, dynamic> data,
+  ) {
+    return ResumeReviewHistory(
+      id: docId,
+      userId: data['userId'] as String? ?? '',
+      atsScore: data['atsScore'] as int? ?? 0,
+      strengths:
+          (data['strengths'] as List<dynamic>?)
+              ?.map((e) => e as String)
+              .toList() ??
+          [],
+      missingKeywords:
+          (data['missingKeywords'] as List<dynamic>?)
+              ?.map((e) => e as String)
+              .toList() ??
+          [],
+      formatIssues:
+          (data['formatIssues'] as List<dynamic>?)
+              ?.map((e) => e as String)
+              .toList() ??
+          [],
+      bulletImprovements:
+          (data['bulletImprovements'] as List<dynamic>?)
+              ?.map(
+                (e) => BulletImprovement.fromJson(e as Map<String, dynamic>),
+              )
+              .toList() ??
+          [],
+      sectionAdvice: data['sectionAdvice'] != null
+          ? SectionAdvice.fromJson(
+              data['sectionAdvice'] as Map<String, dynamic>,
+            )
+          : const SectionAdvice(),
+      overallAdvice: data['overallAdvice'] as String? ?? '',
+      hireabilityVerdict: data['hireabilityVerdict'] as String? ?? '',
+      targetRole: data['targetRole'] as String?,
+      createdAt: (data['createdAt'] as dynamic)?.toDate() ?? DateTime.now(),
+      monthKey: data['monthKey'] as String? ?? '',
+    );
+  }
+
+  Map<String, dynamic> toFirestore() => {
+    'userId': userId,
+    'atsScore': atsScore,
+    'strengths': strengths,
+    'missingKeywords': missingKeywords,
+    'formatIssues': formatIssues,
+    'bulletImprovements': bulletImprovements.map((b) => b.toJson()).toList(),
+    'sectionAdvice': sectionAdvice.toJson(),
+    'overallAdvice': overallAdvice,
+    'hireabilityVerdict': hireabilityVerdict,
+    'targetRole': targetRole,
+    'createdAt': createdAt,
+    'monthKey': monthKey,
+  };
+
+  /// Convert to ResumeReview for display
+  ResumeReview toResumeReview() {
+    return ResumeReview(
+      atsScore: atsScore,
+      strengths: strengths,
+      missingKeywords: missingKeywords,
+      formatIssues: formatIssues,
+      bulletImprovements: bulletImprovements,
+      sectionAdvice: sectionAdvice,
+      overallAdvice: overallAdvice,
+      hireabilityVerdict: hireabilityVerdict,
+      reviewedAt: createdAt,
+    );
+  }
+
+  /// Get score color based on ATS score
+  String get scoreLevel {
+    if (atsScore >= 80) return 'excellent';
+    if (atsScore >= 60) return 'good';
+    if (atsScore >= 40) return 'fair';
+    return 'needsWork';
+  }
 }
 
 /// Usage tracking for resume reviews (monthly limit)
