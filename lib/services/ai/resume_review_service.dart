@@ -10,7 +10,7 @@ import 'package:campusconnect/models/resume_review.dart';
 ///
 /// RULES:
 /// - One-shot request only (no conversation memory)
-/// - Monthly limit enforced (2-3 reviews/month)
+/// - Monthly limit enforced (5 reviews/month)
 /// - Resume text NOT stored permanently
 /// - Requires authenticated user
 
@@ -145,10 +145,10 @@ class ResumeReviewService {
       }
 
       // Return default if check fails
-      return const ResumeReviewUsage(monthlyCount: 0, monthlyLimit: 3);
+      return const ResumeReviewUsage(monthlyCount: 0, monthlyLimit: 5);
     } catch (e) {
       debugPrint('Failed to check usage: $e');
-      return const ResumeReviewUsage(monthlyCount: 0, monthlyLimit: 3);
+      return const ResumeReviewUsage(monthlyCount: 0, monthlyLimit: 5);
     }
   }
 

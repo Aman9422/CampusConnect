@@ -44,6 +44,16 @@ class _ResumeReviewHistoryViewState extends State<ResumeReviewHistoryView> {
         backgroundColor: isDark ? AppTheme.darkSurface : AppTheme.primaryBlue,
         foregroundColor: Colors.white,
         elevation: 0,
+        actions: [
+          // v6.9: Navigate to insights dashboard
+          IconButton(
+            icon: const Icon(Icons.insights),
+            onPressed: () {
+              Navigator.of(context).pushNamed(resumeInsightsRoute);
+            },
+            tooltip: 'Resume Insights',
+          ),
+        ],
       ),
       body: Consumer<ResumeReviewProvider>(
         builder: (context, provider, child) {

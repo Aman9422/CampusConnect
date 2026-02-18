@@ -320,7 +320,7 @@ class ResumeReviewUsage {
   factory ResumeReviewUsage.fromJson(Map<String, dynamic> json) {
     return ResumeReviewUsage(
       monthlyCount: json['monthlyCount'] as int? ?? 0,
-      monthlyLimit: json['monthlyLimit'] as int? ?? 3,
+      monthlyLimit: json['monthlyLimit'] as int? ?? 5,
       lastReviewAt: json['lastReviewAt'] != null
           ? DateTime.tryParse(json['lastReviewAt'] as String)
           : null,
@@ -333,4 +333,68 @@ class ResumeReviewUsage {
   bool get hasReachedLimit => monthlyCount >= monthlyLimit;
   double get usagePercentage =>
       monthlyLimit > 0 ? (monthlyCount / monthlyLimit) : 0.0;
+}
+
+/// v6.9: Resume growth analysis for intelligence dashboard
+class ResumeGrowthAnalysis {
+  /// Average score improvement percentage
+  final double? scoreImprovement;
+
+  /// Current trend direction
+  final String trend; // 'improving', 'stable', 'declining'
+
+  /// Human-readable insights
+  final List<String> insights;
+
+  /// Whether user is consistently above 70
+  final bool consistentlyStrong;
+
+  /// Keyword improvement trend
+  final String keywordTrend; // 'increasing', 'stable', 'decreasing'
+
+  const ResumeGrowthAnalysis({
+    this.scoreImprovement,
+    required this.trend,
+    required this.insights,
+    required this.consistentlyStrong,
+    required this.keywordTrend,
+  });
+}
+
+/// v6.9: Comparison between two resume reviews
+class ResumeComparison {
+  /// First review (older)
+  final ResumeReviewHistory review1;
+
+  /// Second review (newer)
+  final ResumeReviewHistory review2;
+
+  /// Score difference (positive = improvement)
+  final int scoreDifference;
+
+  /// Strengths added in review2
+  final List<String> addedStrengths;
+
+  /// Strengths removed in review2
+  final List<String> removedStrengths;
+
+  /// Format issues resolved
+  final int resolvedFormatIssues;
+
+  /// Missing keywords improvement count
+  final int keywordImprovement;
+
+  /// Overall improvement direction
+  final String direction; // 'improved', 'declined', 'same'
+
+  const ResumeComparison({
+    required this.review1,
+    required this.review2,
+    required this.scoreDifference,
+    required this.addedStrengths,
+    required this.removedStrengths,
+    required this.resolvedFormatIssues,
+    required this.keywordImprovement,
+    required this.direction,
+  });
 }

@@ -1679,7 +1679,7 @@ class _NotesViewState extends State<NotesView> {
       buffer.writeln("   💰 ${placement.salary}");
       if (daysUntilDeadline <= 7) {
         buffer.writeln(
-          "   ⚠️ Deadline: ${daysUntilDeadline} day${daysUntilDeadline != 1 ? 's' : ''} left!",
+          "   ⚠️ Deadline: $daysUntilDeadline day${daysUntilDeadline != 1 ? 's' : ''} left!",
         );
       } else {
         buffer.writeln(

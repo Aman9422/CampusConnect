@@ -36,7 +36,7 @@ class ResumeReviewProvider with ChangeNotifier {
   /// Usage tracking
   ResumeReviewUsage _usage = const ResumeReviewUsage(
     monthlyCount: 0,
-    monthlyLimit: 3,
+    monthlyLimit: 5,
   );
   ResumeReviewUsage get usage => _usage;
 
@@ -92,6 +92,44 @@ class ResumeReviewProvider with ChangeNotifier {
   /// Has active review result?
   bool get hasReview => _currentReview != null;
 
+  // v6.9: Analytics & Intelligence Getters
+
+  /// History sorted by date (oldest to newest) for chart display
+  List<ResumeReviewHistory> get sortedHistory {
+    final sorted = List<ResumeReviewHistory>.from(_history);
+    sorted.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return sorted;
+  }
+
+  /// Average ATS score across all reviews
+  double get averageScore {
+    if (_history.isEmpty) return 0;
+    final sum = _history.fold<int>(0, (sum, review) => sum + review.atsScore);
+    return sum / _history.length;
+  }
+
+  /// Highest ATS score ever achieved
+  int get highestScore {
+    if (_history.isEmpty) return 0;
+    return _history.map((r) => r.atsScore).reduce((a, b) => a > b ? a : b);
+  }
+
+  /// Lowest ATS score ever received
+  int get lowestScore {
+    if (_history.isEmpty) return 0;
+    return _history.map((r) => r.atsScore).reduce((a, b) => a < b ? a : b);
+  }
+
+  /// Total number of reviews
+  int get totalReviews => _history.length;
+
+  /// Number of reviews this month
+  int get reviewsThisMonth {
+    final now = DateTime.now();
+    final currentMonth = '${now.year}-${now.month.toString().padLeft(2, '0')}';
+    return _history.where((r) => r.monthKey == currentMonth).length;
+  }
+
   // === Lifecycle ===
 
   /// Initialize with user ID (call after login)
@@ -113,7 +151,7 @@ class ResumeReviewProvider with ChangeNotifier {
   void reset() {
     userId = null;
     _currentReview = null;
-    _usage = const ResumeReviewUsage(monthlyCount: 0, monthlyLimit: 3);
+    _usage = const ResumeReviewUsage(monthlyCount: 0, monthlyLimit: 5);
     _isLoading = false;
     _error = null;
     _isInitialized = false;
@@ -364,6 +402,163 @@ class ResumeReviewProvider with ChangeNotifier {
         userId: userId!,
         reviewId: reviewId,
       );
+    }
+  }
+
+  // === v6.9: Intelligence & Analytics ===
+
+  /// Generate growth analysis based on review history
+  ResumeGrowthAnalysis generateGrowthAnalysis() {
+    if (_history.isEmpty) {
+      return const ResumeGrowthAnalysis(
+        trend: 'no_data',
+        insights: ['Submit your first resume review to see insights!'],
+        consistentlyStrong: false,
+        keywordTrend: 'no_data',
+      );
+    }
+
+    if (_history.length == 1) {
+      final review = _history.first;
+      return ResumeGrowthAnalysis(
+        trend: review.atsScore >= 70 ? 'strong' : 'needs_improvement',
+        insights: [
+          'You\'ve completed your first review with a score of ${review.atsScore}.',
+          review.atsScore >= 70
+              ? 'Great start! Your resume shows strong ATS compatibility.'
+              : 'Good first step! Review the suggestions to improve your score.',
+        ],
+        consistentlyStrong: review.atsScore >= 70,
+        keywordTrend: review.missingKeywords.isEmpty ? 'good' : 'needs_work',
+      );
+    }
+
+    // Calculate trends for 2+ reviews
+    final sorted = sortedHistory;
+    final latest = sorted.last;
+    final previous = sorted[sorted.length - 2];
+    final scoreDiff = latest.atsScore - previous.atsScore;
+    final scoreImprovement = previous.atsScore > 0
+        ? ((scoreDiff / previous.atsScore) * 100)
+        : 0.0;
+
+    // Determine trend
+    String trend;
+    if (scoreDiff > 5) {
+      trend = 'improving';
+    } else if (scoreDiff < -5) {
+      trend = 'declining';
+    } else {
+      trend = 'stable';
+    }
+
+    // Check consistency (all scores >= 70)
+    final consistentlyStrong = _history.every((r) => r.atsScore >= 70);
+
+    // Keyword trend
+    String keywordTrend;
+    if (latest.missingKeywords.length < previous.missingKeywords.length) {
+      keywordTrend = 'improving';
+    } else if (latest.missingKeywords.length >
+        previous.missingKeywords.length) {
+      keywordTrend = 'declining';
+    } else {
+      keywordTrend = 'stable';
+    }
+
+    // Generate insights
+    final insights = <String>[];
+
+    if (scoreDiff > 0) {
+      insights.add(
+        'Your score improved by ${scoreDiff.abs()} points (${scoreImprovement.abs().toStringAsFixed(1)}%) since last review!',
+      );
+    } else if (scoreDiff < 0) {
+      insights.add(
+        'Your score decreased by ${scoreDiff.abs()} points since last review.',
+      );
+    } else {
+      insights.add('Your score remained stable at ${latest.atsScore}.');
+    }
+
+    if (consistentlyStrong) {
+      insights.add(
+        'You consistently score above 70 — excellent ATS compatibility!',
+      );
+    }
+
+    if (keywordTrend == 'improving') {
+      insights.add('Missing keywords trend is decreasing — great progress!');
+    }
+
+    if (averageScore >= 75) {
+      insights.add(
+        'Your average score is ${averageScore.toStringAsFixed(1)} — well above industry standards.',
+      );
+    }
+
+    return ResumeGrowthAnalysis(
+      scoreImprovement: scoreImprovement,
+      trend: trend,
+      insights: insights,
+      consistentlyStrong: consistentlyStrong,
+      keywordTrend: keywordTrend,
+    );
+  }
+
+  /// Compare two reviews to show improvement
+  ResumeComparison? compareReviews(String reviewId1, String reviewId2) {
+    try {
+      final review1 = _history.firstWhere((r) => r.id == reviewId1);
+      final review2 = _history.firstWhere((r) => r.id == reviewId2);
+
+      // Ensure review1 is older (for consistent comparison)
+      final older = review1.createdAt.isBefore(review2.createdAt)
+          ? review1
+          : review2;
+      final newer = review1.createdAt.isBefore(review2.createdAt)
+          ? review2
+          : review1;
+
+      final scoreDiff = newer.atsScore - older.atsScore;
+
+      // Find added/removed strengths
+      final oldStrengths = Set<String>.from(older.strengths);
+      final newStrengths = Set<String>.from(newer.strengths);
+      final added = newStrengths.difference(oldStrengths).toList();
+      final removed = oldStrengths.difference(newStrengths).toList();
+
+      // Calculate format issues resolved
+      final resolvedIssues =
+          older.formatIssues.length - newer.formatIssues.length;
+
+      // Calculate keyword improvement
+      final keywordImprovement =
+          older.missingKeywords.length - newer.missingKeywords.length;
+
+      // Determine direction
+      String direction;
+      if (scoreDiff > 5) {
+        direction = 'improved';
+      } else if (scoreDiff < -5) {
+        direction = 'declined';
+      } else {
+        direction = 'same';
+      }
+
+      return ResumeComparison(
+        review1: older,
+        review2: newer,
+        scoreDifference: scoreDiff,
+        addedStrengths: added,
+        removedStrengths: removed,
+        resolvedFormatIssues: resolvedIssues.clamp(0, 999),
+        keywordImprovement: keywordImprovement,
+        direction: direction,
+      );
+    } catch (e) {
+      debugPrint('ResumeReviewProvider: Error comparing reviews: $e');
+      return null;
     }
   }
 }

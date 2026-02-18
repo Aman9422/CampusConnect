@@ -359,7 +359,7 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
                 ),
                 const SizedBox(height: AppTheme.space8),
                 DropdownButtonFormField<int>(
-                  value: _selectedYear,
+                  initialValue: _selectedYear,
                   dropdownColor: isDark ? AppTheme.darkSurface : Colors.white,
                   style: TextStyle(
                     color: isDark ? Colors.white : AppTheme.gray900,

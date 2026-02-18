@@ -793,7 +793,7 @@ exports.logPlacementApplication = onCall(
 // VERSION 6.7: RESUME REVIEW CLOUD FUNCTION
 // ===============================================
 
-const RESUME_MONTHLY_LIMIT = 3; // Free reviews per month
+const RESUME_MONTHLY_LIMIT = 5; // Free reviews per month
 const RESUME_MAX_LENGTH = 5000; // Maximum resume characters
 const RESUME_MIN_LENGTH = 100; // Minimum resume characters
 

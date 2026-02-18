@@ -23,6 +23,7 @@ import 'package:campusconnect/views/profile_view.dart';
 import 'package:campusconnect/views/register_view.dart';
 import 'package:campusconnect/views/resume_review_detail_view.dart'; // v6.8
 import 'package:campusconnect/views/resume_review_history_view.dart'; // v6.8
+import 'package:campusconnect/views/resume_insights_view.dart'; // v6.9
 import 'package:campusconnect/views/resume_review_view.dart';
 import 'package:campusconnect/views/settings_view.dart';
 import 'package:campusconnect/views/verify_email_view.dart';
@@ -101,6 +102,8 @@ class MyApp extends StatelessWidget {
               resumeReviewRoute: (context) => const ResumeReviewView(), // v6.7
               resumeReviewHistoryRoute: (context) =>
                   const ResumeReviewHistoryView(), // v6.8
+              resumeInsightsRoute: (context) =>
+                  const ResumeInsightsView(), // v6.9
             },
           );
         },

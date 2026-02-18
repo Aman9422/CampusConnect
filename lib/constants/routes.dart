@@ -10,3 +10,4 @@ const settingsRoute = '/settings'; // v6.6
 const resumeReviewRoute = '/resume-review'; // v6.7
 const resumeReviewHistoryRoute = '/resume-review/history'; // v6.8
 const resumeReviewDetailRoute = '/resume-review/detail'; // v6.8
+const resumeInsightsRoute = '/resume-review/insights'; // v6.9
