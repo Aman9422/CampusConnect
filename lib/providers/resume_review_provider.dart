@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'package:campusconnect/models/resume_review.dart';
 import 'package:campusconnect/services/ai/resume_review_service.dart';
 import 'package:campusconnect/services/firestore/resume_history_service.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 
@@ -68,6 +70,22 @@ class ResumeReviewProvider with ChangeNotifier {
 
   bool _historyInitialized = false;
   bool get historyInitialized => _historyInitialized;
+
+  // v6.95: AI Deep Analysis state
+  AIAnalysis? _aiAnalysis;
+  AIAnalysis? get aiAnalysis => _aiAnalysis;
+
+  bool _isAILoading = false;
+  bool get isAILoading => _isAILoading;
+
+  String? _aiError;
+  String? get aiError => _aiError;
+
+  AIAnalysisUsage _aiUsage = const AIAnalysisUsage();
+  AIAnalysisUsage get aiUsage => _aiUsage;
+
+  String? _aiProviderUsed;
+  String? get aiProviderUsed => _aiProviderUsed;
 
   // === Computed Getters ===
 
@@ -161,6 +179,13 @@ class ResumeReviewProvider with ChangeNotifier {
     _isLoadingHistory = false;
     _historyError = null;
     _historyInitialized = false;
+
+    // v6.95: Clear AI analysis state
+    _aiAnalysis = null;
+    _isAILoading = false;
+    _aiError = null;
+    _aiUsage = const AIAnalysisUsage();
+    _aiProviderUsed = null;
 
     notifyListeners();
   }
@@ -560,5 +585,213 @@ class ResumeReviewProvider with ChangeNotifier {
       debugPrint('ResumeReviewProvider: Error comparing reviews: $e');
       return null;
     }
+  }
+
+  // === v6.95: AI Deep Analysis ===
+
+  /// Whether AI analysis is available for a given review
+  bool hasAIAnalysis(String reviewId) {
+    try {
+      final review = _history.firstWhere((r) => r.id == reviewId);
+      return review.aiAnalysis != null;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Get cached AI analysis for a specific review
+  AIAnalysis? getAIAnalysisForReview(String reviewId) {
+    try {
+      final review = _history.firstWhere((r) => r.id == reviewId);
+      return review.aiAnalysis;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Whether user can request AI analysis (has remaining quota and online)
+  bool get canRequestAIAnalysis =>
+      _isOnline && !_isAILoading && !_aiUsage.hasReachedLimit && userId != null;
+
+  /// User-friendly reason for AI analysis block
+  String? get aiBlockedReason {
+    if (!_isOnline) return "You're offline. Please reconnect.";
+    if (_aiUsage.hasReachedLimit) {
+      return 'AI analysis limit reached (${_aiUsage.aiMonthlyLimit}/month). '
+          'Resets next month.';
+    }
+    if (userId == null) return 'Please log in.';
+    return null;
+  }
+
+  /// AI analyses remaining this month
+  int get aiAnalysesRemaining => _aiUsage.remaining;
+
+  /// Request AI deep analysis for a specific resume review
+  ///
+  /// Calls the `generateResumeAnalysis` Cloud Function which:
+  /// 1. Checks usage limits
+  /// 2. Calls Groq/HuggingFace AI provider
+  /// 3. Saves result to Firestore
+  /// 4. Returns structured analysis
+  ///
+  /// [reviewId] - ID of the review to analyze
+  /// [resumeText] - Original resume text (needed for AI input)
+  /// [targetRole] - Target job role for tailored advice
+  ///
+  /// Returns true on success, false on failure
+  Future<bool> requestAIAnalysis({
+    required String reviewId,
+    required String resumeText,
+    String? targetRole,
+  }) async {
+    if (userId == null) {
+      _aiError = 'Please log in to use AI analysis.';
+      notifyListeners();
+      return false;
+    }
+
+    if (!_isOnline) {
+      _aiError = "You're offline. Please reconnect and try again.";
+      notifyListeners();
+      return false;
+    }
+
+    if (_isAILoading) return false;
+
+    // Check if already analyzed (return cached)
+    final existing = getAIAnalysisForReview(reviewId);
+    if (existing != null) {
+      _aiAnalysis = existing;
+      _aiError = null;
+      notifyListeners();
+      return true;
+    }
+
+    _isAILoading = true;
+    _aiError = null;
+    _aiAnalysis = null;
+    notifyListeners();
+
+    try {
+      debugPrint('ResumeReviewProvider: Requesting AI analysis for $reviewId');
+
+      final callable = FirebaseFunctions.instance.httpsCallable(
+        'generateResumeAnalysis',
+        options: HttpsCallableOptions(timeout: const Duration(seconds: 120)),
+      );
+
+      final result = await callable.call<Map<String, dynamic>>({
+        'reviewId': reviewId,
+        'resumeText': resumeText,
+        'targetRole': targetRole ?? 'General / Entry Level',
+      });
+
+      final data = result.data;
+
+      if (data['success'] == true && data['analysis'] != null) {
+        // Deep-convert to Map<String, dynamic> — Firebase SDK returns
+        // nested maps as Map<Object?, Object?> which fails type casts.
+        final analysisMap = Map<String, dynamic>.from(
+          jsonDecode(jsonEncode(data['analysis'])) as Map,
+        );
+        _aiAnalysis = AIAnalysis.fromJson(analysisMap);
+        _aiProviderUsed = data['providerUsed'] as String?;
+
+        // Update usage if present
+        if (data['usage'] != null) {
+          final usageMap = Map<String, dynamic>.from(
+            jsonDecode(jsonEncode(data['usage'])) as Map,
+          );
+          _aiUsage = AIAnalysisUsage.fromJson(usageMap);
+        }
+
+        // Update local history cache with AI analysis
+        _updateHistoryWithAI(reviewId, _aiAnalysis!, _aiProviderUsed);
+
+        debugPrint(
+          'ResumeReviewProvider: AI analysis received. '
+          'Provider: $_aiProviderUsed, Cached: ${data['cached']}',
+        );
+
+        notifyListeners();
+        return true;
+      } else {
+        _aiError = 'AI analysis returned an unexpected response.';
+        notifyListeners();
+        return false;
+      }
+    } on FirebaseFunctionsException catch (e) {
+      debugPrint(
+        'ResumeReviewProvider: AI function error: ${e.code} - ${e.message}',
+      );
+
+      switch (e.code) {
+        case 'resource-exhausted':
+          _aiError =
+              e.message ?? 'AI analysis limit reached. Resets next month.';
+          break;
+        case 'not-found':
+          _aiError = 'Resume review not found. Please refresh and try again.';
+          break;
+        case 'unauthenticated':
+          _aiError = 'Please log in to use AI analysis.';
+          break;
+        case 'invalid-argument':
+          _aiError = e.message ?? 'Invalid request. Please try again.';
+          break;
+        default:
+          _aiError = e.message ?? 'AI analysis failed. Please try again.';
+      }
+
+      notifyListeners();
+      return false;
+    } catch (e) {
+      debugPrint('ResumeReviewProvider: AI analysis error: $e');
+      _aiError = 'Something went wrong with AI analysis. Please try again.';
+      notifyListeners();
+      return false;
+    } finally {
+      _isAILoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Clear AI analysis state (e.g., when switching reviews)
+  void clearAIAnalysis() {
+    _aiAnalysis = null;
+    _aiError = null;
+    _aiProviderUsed = null;
+    notifyListeners();
+  }
+
+  /// Update local history cache when AI analysis is received
+  void _updateHistoryWithAI(
+    String reviewId,
+    AIAnalysis analysis,
+    String? providerUsed,
+  ) {
+    final index = _history.indexWhere((r) => r.id == reviewId);
+    if (index == -1) return;
+
+    final old = _history[index];
+    _history[index] = ResumeReviewHistory(
+      id: old.id,
+      userId: old.userId,
+      atsScore: old.atsScore,
+      strengths: old.strengths,
+      missingKeywords: old.missingKeywords,
+      formatIssues: old.formatIssues,
+      bulletImprovements: old.bulletImprovements,
+      sectionAdvice: old.sectionAdvice,
+      overallAdvice: old.overallAdvice,
+      hireabilityVerdict: old.hireabilityVerdict,
+      targetRole: old.targetRole,
+      createdAt: old.createdAt,
+      monthKey: old.monthKey,
+      aiAnalysis: analysis,
+      aiGeneratedAt: DateTime.now(),
+      aiProviderUsed: providerUsed,
+    );
   }
 }

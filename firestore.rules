@@ -31,6 +31,8 @@ service cloud.firestore {
       }
       
       // v6.8: Resume Review History
+      // v6.95: Added aiAnalysis, aiGeneratedAt, aiProviderUsed fields
+      //        (written by Cloud Function generateResumeAnalysis)
       match /resumeReviews/{reviewId} {
         allow read: if isOwner(userId);
         allow create: if isOwner(userId);
@@ -97,6 +99,14 @@ service cloud.firestore {
     match /ai_spam_check/{userId} {
       allow read: if isOwner(userId);
       allow write: if false;
+    }
+
+    // ===============================================
+    // RESUME USAGE (Cloud Functions managed)
+    // ===============================================
+    match /resume_usage/{userId} {
+      allow read: if isOwner(userId);
+      allow write: if false; // Only Cloud Functions can write
     }
 
     // ===============================================

@@ -1,5 +1,6 @@
 const {onRequest, onCall} = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
+const { generateAIResponse, generateChatResponse, generateResumeReviewAI } = require("./ai/aiProvider");
 
 admin.initializeApp();
 
@@ -139,12 +140,19 @@ exports.askAI = onRequest(
             });
 
         // ===============================================
-        // AI RESPONSE LOGIC
+        // AI RESPONSE LOGIC (Real AI via Groq/HuggingFace)
         // ===============================================
-        // For Version 3/4, we use intelligent mock responses
-        // Replace this section with actual AI API calls in production
-        
-        const aiResponse = generateMockAIResponse(trimmedMessage);
+        let aiResponse;
+        try {
+          const aiResult = await generateChatResponse(trimmedMessage);
+          aiResponse = aiResult.response;
+          console.log(`AI chat response from provider: ${aiResult.providerUsed}`);
+        } catch (aiError) {
+          console.error("AI provider error in askAI:", aiError);
+          aiResponse = "I'm having a bit of trouble thinking right now. 🤔\n\n" +
+                       "Please try again in a moment. If this persists, " +
+                       "the AI service may be temporarily unavailable.";
+        }
 
         // Store AI response in Firestore
         await admin.firestore()
@@ -194,116 +202,6 @@ exports.askAI = onRequest(
       }
     }
 );
-
-/**
- * Generate intelligent mock AI response based on message content
- * 
- * This function analyzes the user's message and provides contextual responses.
- * In production, replace this with actual AI API integration.
- * 
- * @param {string} message - User's message
- * @return {string} AI-generated response
- */
-function generateMockAIResponse(message) {
-  const lowerMessage = message.toLowerCase();
-
-  // Academic help responses
-  if (lowerMessage.includes("placement") || 
-      lowerMessage.includes("job") || 
-      lowerMessage.includes("interview")) {
-    return "For placement preparation, focus on:\n\n" +
-           "1. Technical Skills: Practice coding on platforms like " +
-           "LeetCode and HackerRank\n" +
-           "2. Resume: Highlight projects and relevant experience\n" +
-           "3. Mock Interviews: Practice with peers or use online platforms\n" +
-           "4. Company Research: Understand the company culture and values\n\n" +
-           "Check the Placements tab for current opportunities!";
-  }
-
-  if (lowerMessage.includes("resume") || lowerMessage.includes("cv")) {
-    return "Creating a strong resume:\n\n" +
-           "✓ Keep it to 1-2 pages\n" +
-           "✓ Use action verbs (developed, implemented, led)\n" +
-           "✓ Quantify achievements (increased by 30%, reduced time by 50%)\n" +
-           "✓ Include relevant projects and skills\n" +
-           "✓ Proofread carefully\n\n" +
-           "Would you like specific tips for any section?";
-  }
-
-  if (lowerMessage.includes("study") || 
-      lowerMessage.includes("exam") || 
-      lowerMessage.includes("test")) {
-    return "Effective study strategies:\n\n" +
-           "1. Create a study schedule and stick to it\n" +
-           "2. Use active recall (test yourself frequently)\n" +
-           "3. Take regular breaks (Pomodoro technique)\n" +
-           "4. Form study groups for difficult topics\n" +
-           "5. Review notes within 24 hours of class\n\n" +
-           "Check the Notes section for study materials!";
-  }
-
-  if (lowerMessage.includes("project") || lowerMessage.includes("idea")) {
-    return "Great project ideas for your portfolio:\n\n" +
-           "• Web/Mobile App: Task manager, budget tracker, social platform\n" +
-           "• Data Science: Predictive models, data visualization dashboards\n" +
-           "• DevOps: CI/CD pipeline, containerized applications\n" +
-           "• AI/ML: Chatbot, recommendation system, image classifier\n\n" +
-           "Choose something you're passionate about!";
-  }
-
-  if (lowerMessage.includes("career") || lowerMessage.includes("future")) {
-    return "Building a successful career:\n\n" +
-           "1. Continuous Learning: Stay updated with industry trends\n" +
-           "2. Networking: Connect with professionals on LinkedIn\n" +
-           "3. Internships: Gain real-world experience\n" +
-           "4. Personal Projects: Build a strong portfolio\n" +
-           "5. Soft Skills: Communication and teamwork matter\n\n" +
-           "Remember, it's a marathon, not a sprint!";
-  }
-
-  if (lowerMessage.includes("skill") || lowerMessage.includes("learn")) {
-    return "Top skills to develop:\n\n" +
-           "Technical:\n" +
-           "• Programming (Python, Java, JavaScript)\n" +
-           "• Data Structures & Algorithms\n" +
-           "• Web Development (React, Node.js)\n" +
-           "• Cloud platforms (AWS, Azure, GCP)\n\n" +
-           "Soft Skills:\n" +
-           "• Problem-solving\n" +
-           "• Communication\n" +
-           "• Time management\n" +
-           "• Teamwork\n\n" +
-           "Which area interests you most?";
-  }
-
-  if (lowerMessage.includes("hello") || 
-      lowerMessage.includes("hi") || 
-      lowerMessage.includes("hey")) {
-    return "Hello! I'm your CampusConnect AI Assistant. 👋\n\n" +
-           "I can help you with:\n" +
-           "• Placement and interview preparation\n" +
-           "• Resume and career guidance\n" +
-           "• Study tips and academic advice\n" +
-           "• Project ideas and skill development\n\n" +
-           "What would you like to know today?";
-  }
-
-  if (lowerMessage.includes("thank")) {
-    return "You're welcome! I'm always here to help. " +
-           "Feel free to ask me anything about academics, " +
-           "placements, or career guidance. Good luck! 🌟";
-  }
-
-  // Default helpful response
-  return "I understand you're asking about: \"" + message + "\"\n\n" +
-         "I'm here to help with:\n" +
-         "• Academic guidance and study tips\n" +
-         "• Placement and interview preparation\n" +
-         "• Resume building and career advice\n" +
-         "• Project ideas and skill development\n\n" +
-         "Could you provide more details about what you'd like to know? " +
-         "I'll do my best to assist you!";
-}
 
 // ===============================================
 // VERSION 4: HELPER FUNCTIONS
@@ -886,12 +784,22 @@ exports.reviewResume = onRequest(
         // Increment usage count (only after quota check passes)
         const usageData = await trackResumeUsage(userId);
 
-        // Generate AI review (mock implementation - replace with actual AI API)
-        const reviewResult = await generateResumeReview(
-            trimmedResume,
-            targetRole || "General / Entry Level",
-            experienceLevel || "Student / Fresher"
-        );
+        // Generate AI review (Real AI via Groq/HuggingFace)
+        let reviewResult;
+        try {
+          const aiResult = await generateResumeReviewAI(
+              trimmedResume,
+              targetRole || "General / Entry Level",
+              experienceLevel || "Student / Fresher"
+          );
+          reviewResult = aiResult.review;
+          console.log(`Resume review from provider: ${aiResult.providerUsed}`);
+        } catch (aiError) {
+          console.error("AI provider error in reviewResume:", aiError);
+          return response.status(500).json({
+            error: "AI analysis failed. Please try again later.",
+          });
+        }
 
         // Log analytics event
         await logAnalyticsEvent({
@@ -1043,202 +951,216 @@ async function getResumeUsage(userId) {
   }
 }
 
+// ===============================================
+// VERSION 6.95: AI DEEP ANALYSIS (CALLABLE)
+// ===============================================
+
+const AI_MONTHLY_LIMIT = 3; // AI deep analysis calls per month
+const AI_MAX_RESUME_LENGTH = 5000; // Max resume chars for AI input
+
 /**
- * Generate AI resume review (mock implementation)
- * 
- * This function analyzes the resume and provides structured feedback.
- * In production, replace with actual AI API call (OpenAI, Google AI, etc.)
- * 
- * @param {string} resumeText - The resume content
- * @param {string} targetRole - Target job role
- * @param {string} experienceLevel - Experience level
- * @return {object} Resume review analysis
+ * generateResumeAnalysis - Firebase Callable Function (v6.95)
+ *
+ * Sends resume text to a real AI provider (Groq/HuggingFace) for
+ * deep analysis including strengths, weaknesses, skill gaps,
+ * career suggestions, and improvement roadmap.
+ *
+ * Flow:
+ * 1. Validate auth
+ * 2. Check AI usage limit (3/month)
+ * 3. Check if analysis already exists for this review
+ * 4. Call selected AI provider via abstraction layer
+ * 5. Normalize response into structured JSON
+ * 6. Save to Firestore (resumeReviews/{id}.aiAnalysis)
+ * 7. Update user AI usage counter
+ * 8. Return structured result
+ *
+ * Security:
+ * - Auth required (uid from Firebase Auth context)
+ * - API keys stored server-side only (env vars)
+ * - Resume input sanitized and length-limited
+ * - Usage limiting prevents abuse
  */
-async function generateResumeReview(resumeText, targetRole, experienceLevel) {
-  const lowerResume = resumeText.toLowerCase();
-  
-  // === ATS SCORE CALCULATION ===
-  let atsScore = 50; // Base score
-  
-  // Check for key sections
-  const hasSummary = lowerResume.includes("summary") || lowerResume.includes("objective") || lowerResume.includes("about");
-  const hasSkills = lowerResume.includes("skills") || lowerResume.includes("technologies");
-  const hasExperience = lowerResume.includes("experience") || lowerResume.includes("work history");
-  const hasEducation = lowerResume.includes("education") || lowerResume.includes("academic");
-  const hasProjects = lowerResume.includes("projects") || lowerResume.includes("portfolio");
-  
-  if (hasSummary) atsScore += 8;
-  if (hasSkills) atsScore += 10;
-  if (hasExperience) atsScore += 8;
-  if (hasEducation) atsScore += 8;
-  if (hasProjects) atsScore += 6;
-  
-  // Check for action verbs
-  const actionVerbs = ["developed", "created", "implemented", "designed", "managed", "led", "built", "improved", "achieved", "increased", "reduced", "optimized"];
-  const actionVerbCount = actionVerbs.filter(v => lowerResume.includes(v)).length;
-  atsScore += Math.min(actionVerbCount * 2, 10);
-  
-  // Check for quantifiable results
-  const hasNumbers = /\d+%|\d+\+|\$\d+|\d+ (users|projects|clients|team)/i.test(resumeText);
-  if (hasNumbers) atsScore += 8;
-  
-  // Penalize issues
-  if (resumeText.length < 500) atsScore -= 10; // Too short
-  if (lowerResume.includes("responsibilities include")) atsScore -= 5; // Weak phrasing
-  if (!/@/.test(resumeText)) atsScore -= 3; // No email
-  
-  // Cap score
-  atsScore = Math.max(20, Math.min(95, atsScore));
-  
-  // === IDENTIFY STRENGTHS ===
-  const strengths = [];
-  if (hasSummary) strengths.push("Clear professional summary present");
-  if (hasSkills) strengths.push("Dedicated skills section included");
-  if (hasProjects) strengths.push("Projects section demonstrates practical experience");
-  if (actionVerbCount >= 3) strengths.push("Good use of action verbs");
-  if (hasNumbers) strengths.push("Includes quantifiable achievements");
-  if (hasEducation) strengths.push("Education details properly listed");
-  if (strengths.length === 0) strengths.push("Resume is structured and readable");
-  
-  // === MISSING KEYWORDS ===
-  const commonKeywords = [
-    "problem-solving", "communication", "teamwork", "leadership",
-    "analytical", "detail-oriented", "time management", "adaptable",
-  ];
-  const techKeywords = [
-    "git", "agile", "api", "database", "testing", "debugging",
-    "cloud", "deployment", "documentation",
-  ];
-  
-  const missingKeywords = [];
-  
-  // Check common keywords
-  commonKeywords.forEach(kw => {
-    if (!lowerResume.includes(kw.toLowerCase())) {
-      if (missingKeywords.length < 5) {
-        missingKeywords.push(kw);
+exports.generateResumeAnalysis = onCall(
+    {
+      cors: true,
+      maxInstances: 5,
+      timeoutSeconds: 120,
+      // Memory: 256MB is sufficient for API relay
+      memory: "256MiB",
+    },
+    async (request) => {
+      // === 1. Validate Authentication ===
+      const uid = request.auth?.uid;
+
+      if (!uid) {
+        throw new (require("firebase-functions/v2/https").HttpsError)(
+            "unauthenticated",
+            "You must be logged in to use AI analysis."
+        );
       }
-    }
-  });
-  
-  // Check tech keywords for tech roles
-  if (targetRole.toLowerCase().includes("software") || 
-      targetRole.toLowerCase().includes("developer") ||
-      targetRole.toLowerCase().includes("engineer")) {
-    techKeywords.forEach(kw => {
-      if (!lowerResume.includes(kw.toLowerCase())) {
-        if (missingKeywords.length < 8) {
-          missingKeywords.push(kw);
+
+      const { reviewId, resumeText, targetRole } = request.data;
+
+      // Validate required fields
+      if (!reviewId || typeof reviewId !== "string") {
+        throw new (require("firebase-functions/v2/https").HttpsError)(
+            "invalid-argument",
+            "Missing or invalid reviewId."
+        );
+      }
+
+      if (!resumeText || typeof resumeText !== "string") {
+        throw new (require("firebase-functions/v2/https").HttpsError)(
+            "invalid-argument",
+            "Resume text is required."
+        );
+      }
+
+      // Sanitize resume input
+      const sanitizedResume = resumeText.trim().substring(0, AI_MAX_RESUME_LENGTH);
+
+      if (sanitizedResume.length < 100) {
+        throw new (require("firebase-functions/v2/https").HttpsError)(
+            "invalid-argument",
+            "Resume text is too short for meaningful analysis (min 100 chars)."
+        );
+      }
+
+      const safeTargetRole = (targetRole || "General / Entry Level")
+          .substring(0, 100)
+          .trim();
+
+      console.log(`generateResumeAnalysis: uid=${uid}, reviewId=${reviewId}, ` +
+          `resumeLength=${sanitizedResume.length}, role="${safeTargetRole}"`);
+
+      try {
+        // === 2. Check if AI analysis already exists ===
+        const reviewRef = admin.firestore()
+            .collection("users")
+            .doc(uid)
+            .collection("resumeReviews")
+            .doc(reviewId);
+
+        const reviewDoc = await reviewRef.get();
+
+        if (!reviewDoc.exists) {
+          throw new (require("firebase-functions/v2/https").HttpsError)(
+              "not-found",
+              "Resume review not found. Please submit a review first."
+          );
         }
+
+        const reviewData = reviewDoc.data();
+
+        // If AI analysis already exists, return cached result
+        if (reviewData.aiAnalysis) {
+          console.log(`generateResumeAnalysis: Returning cached analysis for ${reviewId}`);
+          return {
+            success: true,
+            cached: true,
+            analysis: reviewData.aiAnalysis,
+            providerUsed: reviewData.aiProviderUsed || "unknown",
+            generatedAt: reviewData.aiGeneratedAt?.toDate?.()?.toISOString() || null,
+          };
+        }
+
+        // === 3. Check AI usage limit ===
+        const userRef = admin.firestore().collection("users").doc(uid);
+        const userDoc = await userRef.get();
+        const userData = userDoc.exists ? userDoc.data() : {};
+
+        const now = new Date();
+        const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+
+        let aiUsageCount = userData.aiUsageCount || 0;
+        const aiUsageResetDate = userData.aiUsageResetDate || "";
+
+        // Reset counter if new month
+        if (aiUsageResetDate !== currentMonth) {
+          aiUsageCount = 0;
+        }
+
+        if (aiUsageCount >= AI_MONTHLY_LIMIT) {
+          throw new (require("firebase-functions/v2/https").HttpsError)(
+              "resource-exhausted",
+              `AI analysis limit reached (${AI_MONTHLY_LIMIT} per month). Resets next month.`
+          );
+        }
+
+        // === 4. Call AI Provider ===
+        console.log(`generateResumeAnalysis: Calling AI provider...`);
+        const aiResult = await generateAIResponse(sanitizedResume, safeTargetRole);
+        console.log(`generateResumeAnalysis: AI response received from "${aiResult.providerUsed}"`);
+
+        // === 5. Save to Firestore ===
+        const aiAnalysis = {
+          summary: aiResult.summary,
+          strengths: aiResult.strengths,
+          weaknesses: aiResult.weaknesses,
+          missingSkills: aiResult.missingSkills,
+          careerSuggestions: aiResult.careerSuggestions,
+          improvementRoadmap: aiResult.improvementRoadmap,
+        };
+
+        const aiGeneratedAt = admin.firestore.Timestamp.now();
+
+        // Update the resume review document with AI analysis
+        await reviewRef.update({
+          aiAnalysis: aiAnalysis,
+          aiGeneratedAt: aiGeneratedAt,
+          aiProviderUsed: aiResult.providerUsed,
+        });
+
+        // === 6. Update user AI usage counter ===
+        await userRef.set(
+            {
+              aiUsageCount: aiUsageCount + 1,
+              aiUsageResetDate: currentMonth,
+            },
+            { merge: true }
+        );
+
+        // === 7. Log analytics ===
+        await logAnalyticsEvent({
+          eventType: "ai_resume_analysis_generated",
+          userId: uid,
+          metadata: {
+            reviewId: reviewId,
+            provider: aiResult.providerUsed,
+            resumeLength: sanitizedResume.length,
+            targetRole: safeTargetRole,
+            monthlyUsage: aiUsageCount + 1,
+          },
+        });
+
+        console.log(`generateResumeAnalysis: Success. Provider: ${aiResult.providerUsed}, ` +
+            `Usage: ${aiUsageCount + 1}/${AI_MONTHLY_LIMIT}`);
+
+        // === 8. Return result ===
+        return {
+          success: true,
+          cached: false,
+          analysis: aiAnalysis,
+          providerUsed: aiResult.providerUsed,
+          generatedAt: aiGeneratedAt.toDate().toISOString(),
+          usage: {
+            aiUsageCount: aiUsageCount + 1,
+            aiMonthlyLimit: AI_MONTHLY_LIMIT,
+            aiUsageResetDate: currentMonth,
+          },
+        };
+      } catch (error) {
+        // Re-throw HttpsError as-is
+        if (error.code && error.httpErrorCode) {
+          throw error;
+        }
+
+        console.error("generateResumeAnalysis error:", error);
+        throw new (require("firebase-functions/v2/https").HttpsError)(
+            "internal",
+            `AI analysis failed: ${error.message || "Unknown error"}`
+        );
       }
-    });
-  }
-  
-  // === FORMAT ISSUES ===
-  const formatIssues = [];
-  if (!hasSummary) formatIssues.push("Consider adding a professional summary or objective statement");
-  if (!hasSkills) formatIssues.push("Add a dedicated skills section for ATS scanning");
-  if (resumeText.length < 500) formatIssues.push("Resume appears too brief - consider adding more detail");
-  if (resumeText.length > 4000) formatIssues.push("Resume may be too long - consider condensing to 1-2 pages");
-  if (lowerResume.includes("responsibilities include")) formatIssues.push("Replace 'Responsibilities include' with action verbs");
-  if (!/@/.test(resumeText)) formatIssues.push("Ensure contact email is included");
-  if (!/\d{10}|\d{3}[-.\s]\d{3}[-.\s]\d{4}/.test(resumeText)) formatIssues.push("Consider adding a phone number for contact");
-  
-  // === BULLET IMPROVEMENTS ===
-  const bulletImprovements = [];
-  
-  // Find weak bullet patterns and suggest improvements
-  const weakPatterns = [
-    {
-      pattern: /responsible for/gi,
-      original: "Responsible for managing team tasks",
-      improved: "Led a team of 5 members, coordinating daily tasks and improving delivery time by 20%",
-      reason: "Use action verbs and quantify impact instead of passive phrasing",
-    },
-    {
-      pattern: /helped with/gi,
-      original: "Helped with project development",
-      improved: "Contributed to the development of 3 key features, reducing user onboarding time",
-      reason: "Be specific about your contribution and its impact",
-    },
-    {
-      pattern: /worked on/gi,
-      original: "Worked on various coding projects",
-      improved: "Developed and deployed 5+ full-stack applications using React and Node.js",
-      reason: "Specify technologies used and quantify your work",
-    },
-  ];
-  
-  weakPatterns.forEach(wp => {
-    if (wp.pattern.test(resumeText)) {
-      bulletImprovements.push({
-        original: wp.original,
-        improved: wp.improved,
-        reason: wp.reason,
-      });
     }
-  });
-  
-  // Add generic improvement if resume lacks metrics
-  if (!hasNumbers && bulletImprovements.length < 3) {
-    bulletImprovements.push({
-      original: "Developed web applications for clients",
-      improved: "Developed 3 web applications serving 500+ users, achieving 99.9% uptime",
-      reason: "Add specific numbers and metrics to demonstrate impact",
-    });
-  }
-  
-  // === SECTION ADVICE ===
-  const sectionAdvice = {
-    summary: hasSummary 
-        ? "Good summary present. Consider tailoring it for each application."
-        : "Add a 2-3 line professional summary highlighting your key strengths and career goals.",
-    skills: hasSkills
-        ? "Skills section present. Organize by category (Languages, Frameworks, Tools) for better readability."
-        : "Add a dedicated skills section. List technical and soft skills relevant to your target role.",
-    projects: hasProjects
-        ? "Projects section adds value. Include links to live demos or GitHub repositories."
-        : "Add 2-3 relevant projects with brief descriptions, technologies used, and your role.",
-    experience: hasExperience
-        ? "Experience section found. Focus on achievements over responsibilities."
-        : "Include internships, freelance work, or relevant volunteer experience.",
-    education: hasEducation
-        ? "Education properly listed. Include relevant coursework or certifications."
-        : "Add your educational background with degree, institution, and graduation year.",
-  };
-  
-  // === OVERALL ADVICE ===
-  let overallAdvice = "";
-  if (atsScore >= 80) {
-    overallAdvice = "Your resume is well-optimized for ATS. Focus on tailoring it for specific job descriptions by including keywords from the job posting. Consider having someone review it for any typos or grammatical errors.";
-  } else if (atsScore >= 60) {
-    overallAdvice = "Your resume has a good foundation but needs some improvements. Focus on adding more quantifiable achievements and ensuring all key sections are present. Use strong action verbs to start each bullet point.";
-  } else if (atsScore >= 40) {
-    overallAdvice = "Your resume needs significant improvements for ATS compatibility. Add missing sections (summary, skills), include more specific achievements with numbers, and ensure proper formatting. Review the section advice above.";
-  } else {
-    overallAdvice = "Your resume requires substantial revision. Start by adding all essential sections: Summary, Skills, Experience, Education, and Projects. Focus on quantifiable achievements and use industry-relevant keywords.";
-  }
-  
-  // === HIREABILITY VERDICT ===
-  let hireabilityVerdict = "";
-  if (atsScore >= 80) {
-    hireabilityVerdict = "Strong candidate - This resume is likely to pass ATS screening and make a positive impression.";
-  } else if (atsScore >= 60) {
-    hireabilityVerdict = "Competitive candidate - With minor improvements, this resume will stand out to recruiters.";
-  } else if (atsScore >= 40) {
-    hireabilityVerdict = "Average candidate - Resume may pass some ATS systems but needs work to be competitive.";
-  } else {
-    hireabilityVerdict = "Needs improvement - This resume may struggle with ATS screening. Follow the suggestions above.";
-  }
-  
-  return {
-    atsScore,
-    strengths,
-    missingKeywords,
-    formatIssues,
-    bulletImprovements,
-    sectionAdvice,
-    overallAdvice,
-    hireabilityVerdict,
-  };
-}
+);

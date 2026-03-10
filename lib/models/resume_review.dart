@@ -205,6 +205,11 @@ class ResumeReviewHistory {
   final DateTime createdAt;
   final String monthKey; // Format: "YYYY-MM"
 
+  // v6.95: AI deep analysis (nullable - only present after AI analysis)
+  final AIAnalysis? aiAnalysis;
+  final DateTime? aiGeneratedAt;
+  final String? aiProviderUsed;
+
   const ResumeReviewHistory({
     required this.id,
     required this.userId,
@@ -219,6 +224,9 @@ class ResumeReviewHistory {
     this.targetRole,
     required this.createdAt,
     required this.monthKey,
+    this.aiAnalysis,
+    this.aiGeneratedAt,
+    this.aiProviderUsed,
   });
 
   factory ResumeReviewHistory.fromFirestore(
@@ -261,6 +269,12 @@ class ResumeReviewHistory {
       targetRole: data['targetRole'] as String?,
       createdAt: (data['createdAt'] as dynamic)?.toDate() ?? DateTime.now(),
       monthKey: data['monthKey'] as String? ?? '',
+      // v6.95: AI analysis fields
+      aiAnalysis: data['aiAnalysis'] != null
+          ? AIAnalysis.fromJson(data['aiAnalysis'] as Map<String, dynamic>)
+          : null,
+      aiGeneratedAt: (data['aiGeneratedAt'] as dynamic)?.toDate(),
+      aiProviderUsed: data['aiProviderUsed'] as String?,
     );
   }
 
@@ -277,6 +291,10 @@ class ResumeReviewHistory {
     'targetRole': targetRole,
     'createdAt': createdAt,
     'monthKey': monthKey,
+    // v6.95: AI analysis fields
+    if (aiAnalysis != null) 'aiAnalysis': aiAnalysis!.toJson(),
+    if (aiGeneratedAt != null) 'aiGeneratedAt': aiGeneratedAt,
+    if (aiProviderUsed != null) 'aiProviderUsed': aiProviderUsed,
   };
 
   /// Convert to ResumeReview for display
@@ -397,4 +415,148 @@ class ResumeComparison {
     required this.keywordImprovement,
     required this.direction,
   });
+}
+
+// ============================================================================
+// v6.95: AI Deep Analysis Models
+// ============================================================================
+
+/// Improvement roadmap with time-based milestones
+class ImprovementRoadmap {
+  final List<String> thirtyDays;
+  final List<String> sixtyDays;
+
+  const ImprovementRoadmap({
+    this.thirtyDays = const [],
+    this.sixtyDays = const [],
+  });
+
+  factory ImprovementRoadmap.fromJson(Map<String, dynamic> json) {
+    return ImprovementRoadmap(
+      thirtyDays:
+          (json['30_days'] as List<dynamic>?)
+              ?.map((e) => e as String)
+              .toList() ??
+          [],
+      sixtyDays:
+          (json['60_days'] as List<dynamic>?)
+              ?.map((e) => e as String)
+              .toList() ??
+          [],
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    '30_days': thirtyDays,
+    '60_days': sixtyDays,
+  };
+
+  bool get isEmpty => thirtyDays.isEmpty && sixtyDays.isEmpty;
+}
+
+/// v6.95: AI-generated deep resume analysis
+///
+/// Produced by Cloud Function `generateResumeAnalysis` using
+/// Groq or HuggingFace LLM providers.
+class AIAnalysis {
+  /// Human-readable summary of resume quality
+  final String summary;
+
+  /// Key strengths identified by AI
+  final List<String> strengths;
+
+  /// Weaknesses / areas for improvement
+  final List<String> weaknesses;
+
+  /// Skills missing for the target role
+  final List<String> missingSkills;
+
+  /// Career path suggestions
+  final List<String> careerSuggestions;
+
+  /// Time-based improvement roadmap
+  final ImprovementRoadmap improvementRoadmap;
+
+  /// Which AI provider was used (groq, huggingface)
+  final String? providerUsed;
+
+  /// When the analysis was generated
+  final DateTime? generatedAt;
+
+  const AIAnalysis({
+    required this.summary,
+    this.strengths = const [],
+    this.weaknesses = const [],
+    this.missingSkills = const [],
+    this.careerSuggestions = const [],
+    this.improvementRoadmap = const ImprovementRoadmap(),
+    this.providerUsed,
+    this.generatedAt,
+  });
+
+  factory AIAnalysis.fromJson(Map<String, dynamic> json) {
+    return AIAnalysis(
+      summary: json['summary'] as String? ?? '',
+      strengths:
+          (json['strengths'] as List<dynamic>?)
+              ?.map((e) => e as String)
+              .toList() ??
+          [],
+      weaknesses:
+          (json['weaknesses'] as List<dynamic>?)
+              ?.map((e) => e as String)
+              .toList() ??
+          [],
+      missingSkills:
+          (json['missingSkills'] as List<dynamic>?)
+              ?.map((e) => e as String)
+              .toList() ??
+          [],
+      careerSuggestions:
+          (json['careerSuggestions'] as List<dynamic>?)
+              ?.map((e) => e as String)
+              .toList() ??
+          [],
+      improvementRoadmap: json['improvementRoadmap'] != null
+          ? ImprovementRoadmap.fromJson(
+              json['improvementRoadmap'] as Map<String, dynamic>,
+            )
+          : const ImprovementRoadmap(),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'summary': summary,
+    'strengths': strengths,
+    'weaknesses': weaknesses,
+    'missingSkills': missingSkills,
+    'careerSuggestions': careerSuggestions,
+    'improvementRoadmap': improvementRoadmap.toJson(),
+  };
+
+  bool get isEmpty => summary.isEmpty && strengths.isEmpty;
+}
+
+/// v6.95: AI usage tracking for the user
+class AIAnalysisUsage {
+  final int aiUsageCount;
+  final int aiMonthlyLimit;
+  final String? aiUsageResetDate;
+
+  const AIAnalysisUsage({
+    this.aiUsageCount = 0,
+    this.aiMonthlyLimit = 3,
+    this.aiUsageResetDate,
+  });
+
+  factory AIAnalysisUsage.fromJson(Map<String, dynamic> json) {
+    return AIAnalysisUsage(
+      aiUsageCount: json['aiUsageCount'] as int? ?? 0,
+      aiMonthlyLimit: json['aiMonthlyLimit'] as int? ?? 3,
+      aiUsageResetDate: json['aiUsageResetDate'] as String?,
+    );
+  }
+
+  int get remaining => (aiMonthlyLimit - aiUsageCount).clamp(0, aiMonthlyLimit);
+  bool get hasReachedLimit => aiUsageCount >= aiMonthlyLimit;
 }
