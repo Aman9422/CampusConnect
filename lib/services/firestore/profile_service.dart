@@ -1,3 +1,4 @@
+import 'package:campusconnect/enums/user_role.dart';
 import 'package:campusconnect/models/student_profile.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
@@ -100,6 +101,19 @@ class ProfileService {
     } catch (e) {
       debugPrint('Error checking profile existence: $e');
       return false;
+    }
+  }
+
+  /// v7.1: Update user role
+  Future<void> updateUserRole(String uid, UserRole role) async {
+    try {
+      await _usersCollection.doc(uid).set({
+        'role': role.name,
+        'metadata': {'updatedAt': Timestamp.fromDate(DateTime.now())},
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Error updating user role: $e');
+      rethrow;
     }
   }
 

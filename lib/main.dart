@@ -1,4 +1,5 @@
 import 'package:campusconnect/constants/routes.dart';
+import 'package:campusconnect/enums/user_role.dart';
 import 'package:campusconnect/firebase_options.dart';
 import 'package:campusconnect/providers/ai_usage_provider.dart';
 import 'package:campusconnect/providers/layout_provider.dart';
@@ -6,6 +7,7 @@ import 'package:campusconnect/providers/notifications_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
 import 'package:campusconnect/providers/resume_review_provider.dart';
+import 'package:campusconnect/providers/role_provider.dart';
 import 'package:campusconnect/providers/theme_provider.dart';
 import 'package:campusconnect/services/ai/ai_service.dart';
 import 'package:campusconnect/services/ai/resume_review_service.dart';
@@ -14,6 +16,9 @@ import 'package:campusconnect/services/firestore/notifications_service.dart';
 import 'package:campusconnect/services/firestore/placements_service.dart';
 import 'package:campusconnect/services/local_preferences_service.dart';
 import 'package:campusconnect/theme/app_theme.dart';
+import 'package:campusconnect/views/dashboards/alumni_dashboard_view.dart';
+import 'package:campusconnect/views/dashboards/student_dashboard_view.dart';
+import 'package:campusconnect/views/dashboards/teacher_dashboard_view.dart';
 import 'package:campusconnect/views/edit_profile_view.dart';
 import 'package:campusconnect/views/login_view.dart';
 import 'package:campusconnect/views/notes_view.dart';
@@ -46,6 +51,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     // V5.1.1: Providers at root level - persist across auth changes
     // V6.6: Added ThemeProvider and LayoutProvider for personalization
+    // V7.1: Added RoleProvider for role-based routing
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(
@@ -69,6 +75,8 @@ class MyApp extends StatelessWidget {
           create: (_) =>
               ResumeReviewProvider(service: ResumeReviewService.instance()),
         ),
+        // V7.1: Role provider
+        ChangeNotifierProvider(create: (_) => RoleProvider()),
       ],
       child: Consumer<ThemeProvider>(
         builder: (context, themeProvider, child) {
@@ -104,6 +112,10 @@ class MyApp extends StatelessWidget {
                   const ResumeReviewHistoryView(), // v6.8
               resumeInsightsRoute: (context) =>
                   const ResumeInsightsView(), // v6.9
+              // v7.1: Role-based dashboard routes
+              studentDashboardRoute: (context) => const StudentDashboardView(),
+              alumniDashboardRoute: (context) => const AlumniDashboardView(),
+              teacherDashboardRoute: (context) => const TeacherDashboardView(),
             },
           );
         },
@@ -140,21 +152,18 @@ class _AuthGuardState extends State<AuthGuard> {
     }
   }
 
-  void _handleLogout() {
-    // V6.3: Set flag BEFORE resetting providers to prevent re-init
-    _isLoggedOut = true;
-
-    final placementsProvider = context.read<PlacementsProvider>();
-    final aiProvider = context.read<AIUsageProvider>();
-    final profileProvider = context.read<ProfileProvider>();
-    final notificationsProvider = context.read<NotificationsProvider>();
-    final resumeReviewProvider = context.read<ResumeReviewProvider>(); // v6.7
-
-    placementsProvider.reset();
-    aiProvider.reset();
-    profileProvider.reset();
-    notificationsProvider.reset();
-    resumeReviewProvider.reset(); // v6.7
+  /// v7.1: Route to the correct dashboard based on user role
+  Widget _buildDashboardForRole(UserRole? role) {
+    switch (role) {
+      case UserRole.alumni:
+        return const AlumniDashboardView();
+      case UserRole.teacher:
+        return const TeacherDashboardView();
+      case UserRole.student:
+      case null:
+        // Default to student dashboard (backward compatible for existing users without role)
+        return const StudentDashboardView();
+    }
   }
 
   @override
@@ -182,9 +191,9 @@ class _AuthGuardState extends State<AuthGuard> {
           }
 
           if (user.isEmailVerified) {
-            return Consumer<ProfileProvider>(
-              builder: (context, profileProvider, child) {
-                // Initialize profile if not done
+            return Consumer2<ProfileProvider, RoleProvider>(
+              builder: (context, profileProvider, roleProvider, child) {
+                // Initialize profile and role if not done
                 if (!profileProvider.isInitialized && !_providerInitScheduled) {
                   _providerInitScheduled = true;
                   WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -199,11 +208,13 @@ class _AuthGuardState extends State<AuthGuard> {
                         .read<NotificationsProvider>();
                     final resumeReviewProvider = context
                         .read<ResumeReviewProvider>(); // v6.7
+                    final rp = context.read<RoleProvider>(); // v7.1
 
                     placementsProvider.initWithUser(user.id);
                     aiProvider.initWithUser(user.id);
                     notificationsProvider.initWithUser(user.id);
                     resumeReviewProvider.initWithUser(user.id); // v6.7
+                    rp.initWithUser(user.id); // v7.1
                     profileProvider.initWithUser(
                       user.id,
                       user.email ?? 'noemail@example.com',
@@ -228,7 +239,7 @@ class _AuthGuardState extends State<AuthGuard> {
                   });
                 }
 
-                if (profileProvider.isLoading) {
+                if (profileProvider.isLoading || roleProvider.isLoading) {
                   return const Scaffold(
                     body: Center(child: CircularProgressIndicator()),
                   );
@@ -238,7 +249,8 @@ class _AuthGuardState extends State<AuthGuard> {
                   return const ProfileSetupView();
                 }
 
-                return const NotesView();
+                // v7.1: Route based on role
+                return _buildDashboardForRole(roleProvider.role);
               },
             );
           } else {
@@ -246,12 +258,18 @@ class _AuthGuardState extends State<AuthGuard> {
           }
         } else {
           // V6.3: Reset providers on logout (only once)
-          // Views already call reset() before logOut(), so only reset if not done
-          if (!_isLoggedOut && user == null) {
+          if (!_isLoggedOut) {
             _isLoggedOut = true;
             _providerInitScheduled = false;
+            // Safety net: reset providers in case logout didn't come from a view
             WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted && _isLoggedOut) _handleLogout();
+              if (!mounted || !_isLoggedOut) return;
+              context.read<ProfileProvider>().reset();
+              context.read<PlacementsProvider>().reset();
+              context.read<AIUsageProvider>().reset();
+              context.read<NotificationsProvider>().reset();
+              context.read<ResumeReviewProvider>().reset();
+              context.read<RoleProvider>().reset();
             });
           }
 

@@ -1,3 +1,4 @@
+import 'package:campusconnect/enums/user_role.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class StudentProfile {
@@ -7,6 +8,17 @@ class StudentProfile {
   final CareerInfo career;
   final ProfileMetadata metadata;
   final bool profileCompleted; // Root level per Firestore spec
+  final UserRole? role; // v7.1: Role-based access
+
+  // v7.1: Role-specific optional fields (stored at root level in Firestore)
+  final String? department;
+  final int? graduationYear;
+  final List<String>? skills;
+  final String? careerInterest;
+  final String? company;
+  final String? jobRole;
+  final String? linkedinProfile;
+  final String? designation;
 
   StudentProfile({
     required this.uid,
@@ -15,10 +27,19 @@ class StudentProfile {
     required this.career,
     required this.metadata,
     this.profileCompleted = false,
+    this.role,
+    this.department,
+    this.graduationYear,
+    this.skills,
+    this.careerInterest,
+    this.company,
+    this.jobRole,
+    this.linkedinProfile,
+    this.designation,
   });
 
   // Create a default/empty profile
-  factory StudentProfile.empty(String uid, String email) {
+  factory StudentProfile.empty(String uid, String email, {UserRole? role}) {
     return StudentProfile(
       uid: uid,
       personal: PersonalInfo(
@@ -34,6 +55,7 @@ class StudentProfile {
         updatedAt: DateTime.now(),
       ),
       profileCompleted: false,
+      role: role,
     );
   }
 
@@ -52,18 +74,42 @@ class StudentProfile {
           data['profileCompleted'] ??
           (data['metadata'] as Map<String, dynamic>?)?['profileCompleted'] ??
           false,
+      // v7.1: Role
+      role: UserRole.fromString(data['role'] as String?),
+      // v7.1: Role-specific fields
+      department: data['department'] as String?,
+      graduationYear: data['graduationYear'] as int?,
+      skills: (data['skills'] as List<dynamic>?)?.cast<String>(),
+      careerInterest: data['careerInterest'] as String?,
+      company: data['company'] as String?,
+      jobRole: data['jobRole'] as String?,
+      linkedinProfile: data['linkedinProfile'] as String?,
+      designation: data['designation'] as String?,
     );
   }
 
   // Convert to Firestore document
   Map<String, dynamic> toFirestore() {
-    return {
+    final map = <String, dynamic>{
       'personal': personal.toMap(),
       'academic': academic.toMap(),
       'career': career.toMap(),
       'metadata': metadata.toMap(),
       'profileCompleted': profileCompleted, // Root level per Firestore spec
     };
+
+    // v7.1: Only write role fields if set
+    if (role != null) map['role'] = role!.name;
+    if (department != null) map['department'] = department;
+    if (graduationYear != null) map['graduationYear'] = graduationYear;
+    if (skills != null) map['skills'] = skills;
+    if (careerInterest != null) map['careerInterest'] = careerInterest;
+    if (company != null) map['company'] = company;
+    if (jobRole != null) map['jobRole'] = jobRole;
+    if (linkedinProfile != null) map['linkedinProfile'] = linkedinProfile;
+    if (designation != null) map['designation'] = designation;
+
+    return map;
   }
 
   // Check if profile is incomplete
@@ -81,6 +127,15 @@ class StudentProfile {
     CareerInfo? career,
     ProfileMetadata? metadata,
     bool? profileCompleted,
+    UserRole? role,
+    String? department,
+    int? graduationYear,
+    List<String>? skills,
+    String? careerInterest,
+    String? company,
+    String? jobRole,
+    String? linkedinProfile,
+    String? designation,
   }) {
     return StudentProfile(
       uid: uid,
@@ -89,6 +144,15 @@ class StudentProfile {
       career: career ?? this.career,
       metadata: metadata ?? this.metadata,
       profileCompleted: profileCompleted ?? this.profileCompleted,
+      role: role ?? this.role,
+      department: department ?? this.department,
+      graduationYear: graduationYear ?? this.graduationYear,
+      skills: skills ?? this.skills,
+      careerInterest: careerInterest ?? this.careerInterest,
+      company: company ?? this.company,
+      jobRole: jobRole ?? this.jobRole,
+      linkedinProfile: linkedinProfile ?? this.linkedinProfile,
+      designation: designation ?? this.designation,
     );
   }
 }

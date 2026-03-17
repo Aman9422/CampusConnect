@@ -12,22 +12,75 @@ class LoginView extends StatefulWidget {
   State<LoginView> createState() => _LoginViewState();
 }
 
-class _LoginViewState extends State<LoginView> {
+class _LoginViewState extends State<LoginView>
+    with SingleTickerProviderStateMixin {
   late final TextEditingController _email;
   late final TextEditingController _password;
+  late final AnimationController _animController;
+  late final Animation<double> _fadeIn;
+  late final Animation<Offset> _slideUp;
+  bool _obscurePassword = true;
+  bool _isLoading = false;
 
   @override
   void initState() {
+    super.initState();
     _email = TextEditingController();
     _password = TextEditingController();
-    super.initState();
+    _animController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+    _fadeIn = CurvedAnimation(parent: _animController, curve: Curves.easeOut);
+    _slideUp = Tween<Offset>(
+      begin: const Offset(0, 0.15),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _animController, curve: Curves.easeOut));
+    _animController.forward();
   }
 
   @override
   void dispose() {
     _email.dispose();
     _password.dispose();
+    _animController.dispose();
     super.dispose();
+  }
+
+  Future<void> _handleLogin() async {
+    final email = _email.text.trim();
+    final password = _password.text.trim();
+
+    if (email.isEmpty || password.isEmpty) {
+      if (!mounted) return;
+      await showErrorDialog(context, 'Email and password cannot be empty.');
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      await AuthService.firebase().logIn(email: email, password: password);
+      // AuthGuard StreamBuilder will detect auth state change and re-render
+      // No manual navigation needed — the StreamBuilder handles routing
+    } on UserNotFoundAuthException {
+      if (!mounted) return;
+      await showErrorDialog(context, 'No account found for that email.');
+    } on WrongPasswordAuthException {
+      if (!mounted) return;
+      await showErrorDialog(context, 'Incorrect password.');
+    } on InvalidEmailAuthException {
+      if (!mounted) return;
+      await showErrorDialog(context, 'Incorrect email or password.');
+    } on InvalidCredentialAuthException {
+      if (!mounted) return;
+      await showErrorDialog(context, 'Invalid credentials provided.');
+    } on GenericAuthException {
+      if (!mounted) return;
+      await showErrorDialog(context, 'Authentication error. Please try again.');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   @override
@@ -39,281 +92,282 @@ class _LoginViewState extends State<LoginView> {
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: isDark
-                ? [
-                    AppTheme.primaryBlue.withOpacity(0.1),
-                    AppTheme.darkBackground,
-                  ]
+                ? [const Color(0xFF0F172A), AppTheme.darkBackground]
                 : [
-                    AppTheme.primaryBlue.withOpacity(0.05),
-                    AppTheme.primaryBlueLight.withOpacity(0.02),
+                    const Color(0xFFF0F4FF),
+                    const Color(0xFFF8FAFC),
                     Colors.white,
                   ],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
           ),
         ),
         child: SafeArea(
           child: Center(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.all(AppTheme.space24),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Logo/Title with gradient background
-                  Container(
-                    padding: const EdgeInsets.all(AppTheme.space20),
-                    decoration: BoxDecoration(
-                      gradient: AppTheme.primaryGradient,
-                      shape: BoxShape.circle,
-                      boxShadow: AppTheme.shadowColored,
-                    ),
-                    child: const Icon(
-                      Icons.school_rounded,
-                      size: 48,
-                      color: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: AppTheme.space24),
-                  Text(
-                    'Welcome Back',
-                    textAlign: TextAlign.center,
-                    style: AppTheme.titleLarge.copyWith(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w700,
-                      color: isDark ? Colors.white : AppTheme.gray900,
-                    ),
-                  ),
-                  const SizedBox(height: AppTheme.space8),
-                  Text(
-                    'Sign in to continue to CampusConnect',
-                    textAlign: TextAlign.center,
-                    style: AppTheme.bodyMedium.copyWith(
-                      color: isDark ? AppTheme.gray400 : AppTheme.gray600,
-                    ),
-                  ),
-                  const SizedBox(height: AppTheme.space40),
-
-                  // Email field
-                  TextField(
-                    controller: _email,
-                    enableSuggestions: false,
-                    autocorrect: false,
-                    keyboardType: TextInputType.emailAddress,
-                    style: AppTheme.bodyMedium.copyWith(
-                      color: isDark ? Colors.white : AppTheme.gray900,
-                    ),
-                    decoration: InputDecoration(
-                      hintText: 'Email',
-                      hintStyle: AppTheme.bodyMedium.copyWith(
-                        color: isDark ? AppTheme.gray500 : AppTheme.gray500,
-                      ),
-                      prefixIcon: Icon(
-                        Icons.email_outlined,
-                        color: isDark ? AppTheme.gray400 : AppTheme.gray500,
-                      ),
-                      filled: true,
-                      fillColor: isDark ? AppTheme.darkSurface : Colors.white,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(
-                          color: isDark ? AppTheme.gray700 : AppTheme.gray300,
-                        ),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(
-                          color: isDark ? AppTheme.gray700 : AppTheme.gray300,
-                        ),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(
-                          color: AppTheme.primaryBlue,
-                          width: 2,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: AppTheme.space16),
-
-                  // Password field
-                  TextField(
-                    controller: _password,
-                    obscureText: true,
-                    enableSuggestions: false,
-                    autocorrect: false,
-                    style: AppTheme.bodyMedium.copyWith(
-                      color: isDark ? Colors.white : AppTheme.gray900,
-                    ),
-                    decoration: InputDecoration(
-                      hintText: 'Password',
-                      hintStyle: AppTheme.bodyMedium.copyWith(
-                        color: isDark ? AppTheme.gray500 : AppTheme.gray500,
-                      ),
-                      prefixIcon: Icon(
-                        Icons.lock_outline,
-                        color: isDark ? AppTheme.gray400 : AppTheme.gray500,
-                      ),
-                      filled: true,
-                      fillColor: isDark ? AppTheme.darkSurface : Colors.white,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(
-                          color: isDark ? AppTheme.gray700 : AppTheme.gray300,
-                        ),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(
-                          color: isDark ? AppTheme.gray700 : AppTheme.gray300,
-                        ),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                        borderSide: BorderSide(
-                          color: AppTheme.primaryBlue,
-                          width: 2,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: AppTheme.space24),
-
-                  // Login button
-                  ElevatedButton(
-                    onPressed: () async {
-                      final email = _email.text.trim();
-                      final password = _password.text.trim();
-
-                      if (email.isEmpty || password.isEmpty) {
-                        if (!context.mounted) return;
-                        await showErrorDialog(
-                          context,
-                          'Email and password cannot be empty.',
-                        );
-                        return;
-                      }
-
-                      try {
-                        await AuthService.firebase().logIn(
-                          email: email,
-                          password: password,
-                        );
-
-                        final user = AuthService.firebase().currentUser;
-
-                        if (!context.mounted) return;
-
-                        if (user?.isEmailVerified ?? false) {
-                          // Navigate to root - AuthGuard will check profile completion
-                          Navigator.of(
-                            context,
-                          ).pushNamedAndRemoveUntil('/', (_) => false);
-                        } else {
-                          Navigator.of(context).pushNamedAndRemoveUntil(
-                            verifyEmailRoute,
-                            (_) => false,
-                          );
-                        }
-                      } on UserNotFoundAuthException {
-                        await showErrorDialog(
-                          context,
-                          'No account found for that email.',
-                        );
-                      } on WrongPasswordAuthException {
-                        await showErrorDialog(context, 'Incorrect password.');
-                      } on InvalidEmailAuthException {
-                        if (!context.mounted) return;
-                        await showErrorDialog(
-                          context,
-                          'Incorrect email or password.',
-                        );
-                      } on InvalidCredentialAuthException {
-                        if (!context.mounted) return;
-                        await showErrorDialog(
-                          context,
-                          'Invalid credentials provided.',
-                        );
-                      } on GenericAuthException {
-                        if (!context.mounted) return;
-                        await showErrorDialog(
-                          context,
-                          'Authentication error. Please try again.',
-                        );
-                      }
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.primaryBlue,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      padding: const EdgeInsets.symmetric(
-                        vertical: AppTheme.space16,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusMedium,
-                        ),
-                      ),
-                    ),
-                    child: Text(
-                      'Login',
-                      style: AppTheme.bodyLarge.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: AppTheme.space16),
-
-                  // Register link
-                  Row(
+              padding: const EdgeInsets.symmetric(horizontal: 28),
+              child: FadeTransition(
+                opacity: _fadeIn,
+                child: SlideTransition(
+                  position: _slideUp,
+                  child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
+                      const SizedBox(height: AppTheme.space24),
+
+                      // Brand icon
+                      Container(
+                        width: 72,
+                        height: 72,
+                        decoration: BoxDecoration(
+                          gradient: AppTheme.primaryGradient,
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppTheme.primaryBlue.withOpacity(0.3),
+                              blurRadius: 20,
+                              offset: const Offset(0, 8),
+                            ),
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.school_rounded,
+                          size: 36,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(height: AppTheme.space24),
+
+                      // Title
                       Text(
-                        'Don\'t have an account? ',
-                        style: AppTheme.bodyMedium.copyWith(
-                          color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+                        'CampusConnect',
+                        style: AppTheme.titleLarge.copyWith(
+                          fontSize: 26,
+                          fontWeight: FontWeight.w700,
+                          color: isDark ? Colors.white : AppTheme.gray900,
+                          letterSpacing: -0.8,
                         ),
                       ),
-                      TextButton(
-                        onPressed: () {
-                          Navigator.of(context).pushNamedAndRemoveUntil(
-                            registerRoute,
-                            (_) => false,
-                          );
-                        },
-                        style: TextButton.styleFrom(
-                          foregroundColor: AppTheme.primaryBlue,
-                          padding: EdgeInsets.zero,
-                          minimumSize: const Size(0, 0),
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      const SizedBox(height: 6),
+                      Text(
+                        'AI-Powered Campus Ecosystem',
+                        style: AppTheme.bodySmall.copyWith(
+                          color: isDark ? AppTheme.gray400 : AppTheme.gray500,
+                          letterSpacing: 0.5,
                         ),
-                        child: Text(
-                          'Register',
-                          style: AppTheme.bodyMedium.copyWith(
-                            color: AppTheme.primaryBlue,
-                            fontWeight: FontWeight.w600,
+                      ),
+                      const SizedBox(height: AppTheme.space40),
+
+                      // Card
+                      Container(
+                        padding: const EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          color: isDark ? AppTheme.darkSurface : Colors.white,
+                          borderRadius: BorderRadius.circular(
+                            AppTheme.radiusXLarge,
                           ),
+                          border: Border.all(
+                            color: isDark
+                                ? AppTheme.gray700.withOpacity(0.5)
+                                : AppTheme.gray200,
+                          ),
+                          boxShadow: isDark
+                              ? []
+                              : [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.04),
+                                    blurRadius: 24,
+                                    offset: const Offset(0, 8),
+                                  ),
+                                ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Welcome back',
+                              style: AppTheme.titleMedium.copyWith(
+                                fontWeight: FontWeight.w600,
+                                color: isDark ? Colors.white : AppTheme.gray900,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Sign in to your account',
+                              style: AppTheme.bodySmall.copyWith(
+                                color: isDark
+                                    ? AppTheme.gray400
+                                    : AppTheme.gray500,
+                              ),
+                            ),
+                            const SizedBox(height: AppTheme.space24),
+
+                            // Email field
+                            _buildTextField(
+                              controller: _email,
+                              hint: 'Email address',
+                              icon: Icons.mail_outline_rounded,
+                              keyboardType: TextInputType.emailAddress,
+                              isDark: isDark,
+                            ),
+                            const SizedBox(height: AppTheme.space16),
+
+                            // Password field
+                            _buildTextField(
+                              controller: _password,
+                              hint: 'Password',
+                              icon: Icons.lock_outline_rounded,
+                              obscureText: _obscurePassword,
+                              isDark: isDark,
+                              suffixIcon: IconButton(
+                                icon: Icon(
+                                  _obscurePassword
+                                      ? Icons.visibility_off_outlined
+                                      : Icons.visibility_outlined,
+                                  size: 20,
+                                  color: isDark
+                                      ? AppTheme.gray400
+                                      : AppTheme.gray500,
+                                ),
+                                onPressed: () {
+                                  setState(
+                                    () => _obscurePassword = !_obscurePassword,
+                                  );
+                                },
+                              ),
+                            ),
+                            const SizedBox(height: AppTheme.space24),
+
+                            // Login button
+                            SizedBox(
+                              width: double.infinity,
+                              height: 50,
+                              child: ElevatedButton(
+                                onPressed: _isLoading ? null : _handleLogin,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppTheme.primaryBlue,
+                                  foregroundColor: Colors.white,
+                                  elevation: 0,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                ),
+                                child: _isLoading
+                                    ? const SizedBox(
+                                        height: 20,
+                                        width: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          valueColor:
+                                              AlwaysStoppedAnimation<Color>(
+                                                Colors.white,
+                                              ),
+                                        ),
+                                      )
+                                    : Text(
+                                        'Sign In',
+                                        style: AppTheme.button.copyWith(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 15,
+                                        ),
+                                      ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
+
+                      const SizedBox(height: AppTheme.space24),
+
+                      // Register link
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            "Don't have an account? ",
+                            style: AppTheme.bodySmall.copyWith(
+                              color: isDark
+                                  ? AppTheme.gray400
+                                  : AppTheme.gray500,
+                            ),
+                          ),
+                          GestureDetector(
+                            onTap: () {
+                              Navigator.of(context).pushNamed(registerRoute);
+                            },
+                            child: Text(
+                              'Register',
+                              style: AppTheme.bodySmall.copyWith(
+                                color: AppTheme.primaryBlue,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: AppTheme.space32),
                     ],
                   ),
-                ],
+                ),
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String hint,
+    required IconData icon,
+    required bool isDark,
+    TextInputType? keyboardType,
+    bool obscureText = false,
+    Widget? suffixIcon,
+  }) {
+    return TextField(
+      controller: controller,
+      keyboardType: keyboardType,
+      obscureText: obscureText,
+      enableSuggestions: false,
+      autocorrect: false,
+      style: AppTheme.bodyMedium.copyWith(
+        color: isDark ? Colors.white : AppTheme.gray900,
+      ),
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: AppTheme.bodyMedium.copyWith(
+          color: isDark ? AppTheme.gray500 : AppTheme.gray400,
+        ),
+        prefixIcon: Icon(
+          icon,
+          size: 20,
+          color: isDark ? AppTheme.gray400 : AppTheme.gray500,
+        ),
+        suffixIcon: suffixIcon,
+        filled: true,
+        fillColor: isDark ? AppTheme.darkSurfaceVariant : AppTheme.gray50,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 14,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+            color: isDark ? AppTheme.gray700 : AppTheme.gray200,
+          ),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+            color: isDark ? AppTheme.gray700 : AppTheme.gray200,
+          ),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppTheme.primaryBlue, width: 1.5),
         ),
       ),
     );

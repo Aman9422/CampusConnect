@@ -10,6 +10,7 @@ import 'package:campusconnect/providers/notifications_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
 import 'package:campusconnect/providers/resume_review_provider.dart'; // v6.7
+import 'package:campusconnect/providers/role_provider.dart'; // v7.1
 import 'package:campusconnect/services/ai/ai_service.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/services/firestore/notes_service.dart';
@@ -181,7 +182,12 @@ class _NotesViewState extends State<NotesView> {
                     context.read<AIUsageProvider>().reset();
                     context.read<NotificationsProvider>().reset();
                     context.read<ResumeReviewProvider>().reset(); // v6.7
-                    await AuthService.firebase().logOut();
+                    context.read<RoleProvider>().reset(); // v7.1
+                    try {
+                      await AuthService.firebase().logOut();
+                    } catch (_) {
+                      // AuthGuard will handle the state
+                    }
                     // AuthGuard handles navigation via StreamBuilder
                   }
               }
@@ -1679,7 +1685,7 @@ class _NotesViewState extends State<NotesView> {
       buffer.writeln("   💰 ${placement.salary}");
       if (daysUntilDeadline <= 7) {
         buffer.writeln(
-          "   ⚠️ Deadline: $daysUntilDeadline day${daysUntilDeadline != 1 ? 's' : ''} left!",
+          "   ⚠️ Deadline: ${daysUntilDeadline} day${daysUntilDeadline != 1 ? 's' : ''} left!",
         );
       } else {
         buffer.writeln(
@@ -2156,7 +2162,12 @@ class _NotesViewState extends State<NotesView> {
       context.read<AIUsageProvider>().reset();
       context.read<NotificationsProvider>().reset();
       context.read<ResumeReviewProvider>().reset(); // v6.7
-      await AuthService.firebase().logOut();
+      context.read<RoleProvider>().reset(); // v7.1
+      try {
+        await AuthService.firebase().logOut();
+      } catch (_) {
+        // AuthGuard will handle the state
+      }
       // AuthGuard handles navigation via StreamBuilder
     }
   }

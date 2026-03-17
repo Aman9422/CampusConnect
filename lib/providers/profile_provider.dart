@@ -35,7 +35,7 @@ class ProfileProvider extends ChangeNotifier {
     if (_isInitialized && _profile?.uid == userId) {
       return;
     }
-
+    
     _isDisposed = false; // V6.3: Reset disposed flag
 
     _isLoading = true;
