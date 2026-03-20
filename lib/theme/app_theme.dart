@@ -113,13 +113,13 @@ class AppTheme {
 
   static List<BoxShadow> get shadowSmall => [
     BoxShadow(
-      color: Colors.black.withOpacity(0.04),
+      color: Colors.black.withValues(alpha: 0.04),
       blurRadius: 6,
       offset: const Offset(0, 2),
       spreadRadius: 0,
     ),
     BoxShadow(
-      color: Colors.black.withOpacity(0.02),
+      color: Colors.black.withValues(alpha: 0.02),
       blurRadius: 3,
       offset: const Offset(0, 1),
       spreadRadius: 0,
@@ -128,13 +128,13 @@ class AppTheme {
 
   static List<BoxShadow> get shadowMedium => [
     BoxShadow(
-      color: Colors.black.withOpacity(0.06),
+      color: Colors.black.withValues(alpha: 0.06),
       blurRadius: 12,
       offset: const Offset(0, 4),
       spreadRadius: 0,
     ),
     BoxShadow(
-      color: Colors.black.withOpacity(0.03),
+      color: Colors.black.withValues(alpha: 0.03),
       blurRadius: 6,
       offset: const Offset(0, 2),
       spreadRadius: 0,
@@ -143,13 +143,13 @@ class AppTheme {
 
   static List<BoxShadow> get shadowLarge => [
     BoxShadow(
-      color: Colors.black.withOpacity(0.08),
+      color: Colors.black.withValues(alpha: 0.08),
       blurRadius: 24,
       offset: const Offset(0, 8),
       spreadRadius: 0,
     ),
     BoxShadow(
-      color: Colors.black.withOpacity(0.04),
+      color: Colors.black.withValues(alpha: 0.04),
       blurRadius: 12,
       offset: const Offset(0, 4),
       spreadRadius: 0,
@@ -159,7 +159,7 @@ class AppTheme {
   /// Colored shadow for elevated cards
   static List<BoxShadow> get shadowColored => [
     BoxShadow(
-      color: primaryBlue.withOpacity(0.12),
+      color: primaryBlue.withValues(alpha: 0.12),
       blurRadius: 16,
       offset: const Offset(0, 4),
       spreadRadius: -2,
@@ -555,9 +555,9 @@ class AppTheme {
 
   /// Glass morphism effect for modern overlays
   static BoxDecoration get glassDecoration => BoxDecoration(
-    color: surface.withOpacity(0.85),
+    color: surface.withValues(alpha: 0.85),
     borderRadius: BorderRadius.circular(radiusMedium),
-    border: Border.all(color: Colors.white.withOpacity(0.2), width: 1.5),
+    border: Border.all(color: Colors.white.withValues(alpha: 0.2), width: 1.5),
     boxShadow: shadowLarge,
   );
 

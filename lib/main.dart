@@ -9,15 +9,21 @@ import 'package:campusconnect/providers/profile_provider.dart';
 import 'package:campusconnect/providers/resume_review_provider.dart';
 import 'package:campusconnect/providers/role_provider.dart';
 import 'package:campusconnect/providers/theme_provider.dart';
+// v7.2: Multi-role ecosystem providers
+import 'package:campusconnect/providers/alumni_directory_provider.dart';
+import 'package:campusconnect/providers/mentorship_provider.dart';
+import 'package:campusconnect/providers/opportunity_provider.dart';
 import 'package:campusconnect/services/ai/ai_service.dart';
 import 'package:campusconnect/services/ai/resume_review_service.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/services/firestore/notifications_service.dart';
 import 'package:campusconnect/services/firestore/placements_service.dart';
+import 'package:campusconnect/services/firestore/alumni_directory_service.dart';
+import 'package:campusconnect/services/firestore/mentorship_service.dart';
+import 'package:campusconnect/services/firestore/opportunity_service.dart';
 import 'package:campusconnect/services/local_preferences_service.dart';
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/views/dashboards/alumni_dashboard_view.dart';
-import 'package:campusconnect/views/dashboards/student_dashboard_view.dart';
 import 'package:campusconnect/views/dashboards/teacher_dashboard_view.dart';
 import 'package:campusconnect/views/edit_profile_view.dart';
 import 'package:campusconnect/views/login_view.dart';
@@ -32,6 +38,16 @@ import 'package:campusconnect/views/resume_insights_view.dart'; // v6.9
 import 'package:campusconnect/views/resume_review_view.dart';
 import 'package:campusconnect/views/settings_view.dart';
 import 'package:campusconnect/views/verify_email_view.dart';
+// v7.2: Multi-role ecosystem views
+import 'package:campusconnect/views/alumni_directory_view.dart';
+import 'package:campusconnect/views/alumni_profile_view.dart';
+import 'package:campusconnect/views/mentorship/mentorship_requests_view.dart';
+import 'package:campusconnect/views/mentorship/create_mentorship_request_view.dart';
+import 'package:campusconnect/views/mentorship/mentorship_request_detail_view.dart';
+import 'package:campusconnect/views/opportunities/opportunities_view.dart';
+import 'package:campusconnect/views/opportunities/create_opportunity_view.dart';
+import 'package:campusconnect/views/opportunities/opportunity_detail_view.dart';
+import 'package:campusconnect/views/teacher/student_analytics_view.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -77,6 +93,19 @@ class MyApp extends StatelessWidget {
         ),
         // V7.1: Role provider
         ChangeNotifierProvider(create: (_) => RoleProvider()),
+        // V7.2: Multi-role ecosystem providers
+        ChangeNotifierProvider(
+          create: (_) =>
+              MentorshipProvider(service: MentorshipService.instance()),
+        ),
+        ChangeNotifierProvider(
+          create: (_) =>
+              OpportunityProvider(service: OpportunityService.instance()),
+        ),
+        ChangeNotifierProvider(
+          create: (_) =>
+              AlumniDirectoryProvider(service: AlumniDirectoryService.instance()),
+        ),
       ],
       child: Consumer<ThemeProvider>(
         builder: (context, themeProvider, child) {
@@ -113,9 +142,19 @@ class MyApp extends StatelessWidget {
               resumeInsightsRoute: (context) =>
                   const ResumeInsightsView(), // v6.9
               // v7.1: Role-based dashboard routes
-              studentDashboardRoute: (context) => const StudentDashboardView(),
+              studentDashboardRoute: (context) => const NotesView(), // v7.2: Redirect to Notes
               alumniDashboardRoute: (context) => const AlumniDashboardView(),
               teacherDashboardRoute: (context) => const TeacherDashboardView(),
+              // v7.2: Multi-role ecosystem routes
+              alumniDirectoryRoute: (context) => const AlumniDirectoryView(),
+              alumniProfileRoute: (context) => const AlumniProfileView(),
+              mentorshipRequestsRoute: (context) => const MentorshipRequestsView(),
+              createMentorshipRequestRoute: (context) => const CreateMentorshipRequestView(),
+              mentorshipRequestDetailRoute: (context) => const MentorshipRequestDetailView(),
+              opportunitiesRoute: (context) => const OpportunitiesView(),
+              createOpportunityRoute: (context) => const CreateOpportunityView(),
+              opportunityDetailRoute: (context) => const OpportunityDetailView(),
+              studentAnalyticsRoute: (context) => const StudentAnalyticsView(),
             },
           );
         },
@@ -153,6 +192,7 @@ class _AuthGuardState extends State<AuthGuard> {
   }
 
   /// v7.1: Route to the correct dashboard based on user role
+  /// v7.2: Students use enhanced NotesView as main dashboard with Connect & Grow features
   Widget _buildDashboardForRole(UserRole? role) {
     switch (role) {
       case UserRole.alumni:
@@ -161,8 +201,8 @@ class _AuthGuardState extends State<AuthGuard> {
         return const TeacherDashboardView();
       case UserRole.student:
       case null:
-        // Default to student dashboard (backward compatible for existing users without role)
-        return const StudentDashboardView();
+        // v7.2: Students use enhanced NotesView with Connect & Grow ecosystem
+        return const NotesView();
     }
   }
 
@@ -215,6 +255,8 @@ class _AuthGuardState extends State<AuthGuard> {
                     notificationsProvider.initWithUser(user.id);
                     resumeReviewProvider.initWithUser(user.id); // v6.7
                     rp.initWithUser(user.id); // v7.1
+                    // v7.2: Initialize ecosystem providers after role is loaded
+                    // This will be done in a separate callback below
                     profileProvider.initWithUser(
                       user.id,
                       user.email ?? 'noemail@example.com',
@@ -236,6 +278,24 @@ class _AuthGuardState extends State<AuthGuard> {
                     placementsProvider.updateUserProfile(
                       profileProvider.profile!,
                     );
+                  });
+                }
+
+                // v7.2: Initialize ecosystem providers after role is loaded
+                if (profileProvider.hasProfile && roleProvider.hasRole) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (!mounted || _isLoggedOut) return;
+                    final mentorshipProvider = context.read<MentorshipProvider>();
+                    final opportunityProvider = context.read<OpportunityProvider>();
+
+                    final roleString = roleProvider.role?.name ?? 'student';
+
+                    if (!mentorshipProvider.isInitialized) {
+                      mentorshipProvider.initWithUser(user.id, roleString);
+                    }
+                    if (!opportunityProvider.isInitialized) {
+                      opportunityProvider.initWithUser(user.id, roleString);
+                    }
                   });
                 }
 
@@ -270,6 +330,10 @@ class _AuthGuardState extends State<AuthGuard> {
               context.read<NotificationsProvider>().reset();
               context.read<ResumeReviewProvider>().reset();
               context.read<RoleProvider>().reset();
+              // v7.2: Reset ecosystem providers
+              context.read<MentorshipProvider>().reset();
+              context.read<OpportunityProvider>().reset();
+              context.read<AlumniDirectoryProvider>().reset();
             });
           }
 

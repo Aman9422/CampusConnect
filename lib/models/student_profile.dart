@@ -1,6 +1,7 @@
 import 'package:campusconnect/enums/user_role.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+
 class StudentProfile {
   final String uid;
   final PersonalInfo personal;
@@ -59,16 +60,52 @@ class StudentProfile {
     );
   }
 
-  // Create from Firestore document
+  // Create from Firestore document (v7.2: Backward compatible with flat data)
   factory StudentProfile.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
 
+    // v7.2: Backward compatibility - handle both nested and flat data structures
+    final personalData = data['personal'] as Map<String, dynamic>?;
+    final academicData = data['academic'] as Map<String, dynamic>?;
+    final careerData = data['career'] as Map<String, dynamic>?;
+    final metadataData = data['metadata'] as Map<String, dynamic>?;
+
     return StudentProfile(
       uid: doc.id,
-      personal: PersonalInfo.fromMap(data['personal'] ?? {}),
-      academic: AcademicInfo.fromMap(data['academic'] ?? {}),
-      career: CareerInfo.fromMap(data['career'] ?? {}),
-      metadata: ProfileMetadata.fromMap(data['metadata'] ?? {}),
+      // Personal info - fallback to flat fields if nested doesn't exist
+      personal: personalData != null
+          ? PersonalInfo.fromMap(personalData)
+          : PersonalInfo(
+              fullName: data['fullName'] ?? '',
+              email: data['email'] ?? '',
+              phone: data['phone'] ?? '',
+              avatarUrl: data['avatarUrl'] ?? '',
+              displayName: data['displayName'] ?? '',
+              bio: data['bio'] ?? '',
+            ),
+      // Academic info - fallback to flat fields or defaults
+      academic: academicData != null
+          ? AcademicInfo.fromMap(academicData)
+          : AcademicInfo(
+              college: data['college'] ?? '',
+              program: data['program'] ?? '',
+              year: data['year'] ?? 0,
+              cgpa: (data['cgpa'] ?? 0.0).toDouble(),
+            ),
+      // Career info - fallback to flat fields or defaults
+      career: careerData != null
+          ? CareerInfo.fromMap(careerData)
+          : CareerInfo(
+              interests: (data['interests'] as List<dynamic>?)?.cast<String>() ?? [],
+              preferredRoles: (data['preferredRoles'] as List<dynamic>?)?.cast<String>() ?? [],
+            ),
+      // Metadata - fallback to current timestamp if not available
+      metadata: metadataData != null
+          ? ProfileMetadata.fromMap(metadataData)
+          : ProfileMetadata(
+              createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+              updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+            ),
       // Read from root level (fallback to metadata for backward compatibility)
       profileCompleted:
           data['profileCompleted'] ??

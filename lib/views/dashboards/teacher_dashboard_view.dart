@@ -1,3 +1,8 @@
+import 'package:campusconnect/constants/routes.dart';
+// v7.2: Import new providers
+import 'package:campusconnect/providers/alumni_directory_provider.dart';
+import 'package:campusconnect/providers/mentorship_provider.dart';
+import 'package:campusconnect/providers/opportunity_provider.dart';
 import 'package:campusconnect/providers/ai_usage_provider.dart';
 import 'package:campusconnect/providers/notifications_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
@@ -21,7 +26,9 @@ class TeacherDashboardView extends StatelessWidget {
     final name = profile?.personal.effectiveDisplayName ?? 'Professor';
 
     return Scaffold(
-      backgroundColor: isDark ? AppTheme.darkBackground : const Color(0xFFF8FAFC),
+      backgroundColor: isDark
+          ? AppTheme.darkBackground
+          : const Color(0xFFF8FAFC),
       appBar: AppBar(
         title: Text(
           'Teacher Dashboard',
@@ -103,6 +110,7 @@ class TeacherDashboardView extends StatelessWidget {
               subtitle: 'View placement stats and academic trends',
               color: AppTheme.primaryBlue,
               isDark: isDark,
+              onTap: () => Navigator.pushNamed(context, studentAnalyticsRoute),
             ),
             const SizedBox(height: 12),
             _featureTile(
@@ -111,14 +119,16 @@ class TeacherDashboardView extends StatelessWidget {
               subtitle: 'Share lecture materials with students',
               color: AppTheme.success,
               isDark: isDark,
+              onTap: () => Navigator.pushNamed(context, notesRoute),
             ),
             const SizedBox(height: 12),
             _featureTile(
               icon: Icons.campaign_outlined,
               title: 'Announcements',
-              subtitle: 'Post updates for your department',
+              subtitle: 'Share updates via lecture notes',
               color: AppTheme.warning,
               isDark: isDark,
+              onTap: () => Navigator.pushNamed(context, notesRoute),
             ),
             const SizedBox(height: 12),
             _featureTile(
@@ -127,6 +137,7 @@ class TeacherDashboardView extends StatelessWidget {
               subtitle: 'Access placement analytics dashboard',
               color: AppTheme.secondaryIndigo,
               isDark: isDark,
+              onTap: () => Navigator.pushNamed(context, studentAnalyticsRoute),
             ),
           ],
         ),
@@ -140,55 +151,62 @@ class TeacherDashboardView extends StatelessWidget {
     required String subtitle,
     required Color color,
     required bool isDark,
+    VoidCallback? onTap,
   }) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isDark ? AppTheme.darkSurface : Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: isDark ? AppTheme.gray700.withOpacity(0.5) : AppTheme.gray200,
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: isDark ? AppTheme.darkSurface : Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: isDark
+                ? AppTheme.gray700.withOpacity(0.5)
+                : AppTheme.gray200,
+          ),
         ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: color.withOpacity(isDark ? 0.15 : 0.08),
-              borderRadius: BorderRadius.circular(12),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: color.withOpacity(isDark ? 0.15 : 0.08),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: color, size: 22),
             ),
-            child: Icon(icon, color: color, size: 22),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: AppTheme.titleSmall.copyWith(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: isDark ? Colors.white : AppTheme.gray900,
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: AppTheme.titleSmall.copyWith(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.white : AppTheme.gray900,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: AppTheme.caption.copyWith(
-                    color: isDark ? AppTheme.gray400 : AppTheme.gray500,
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: AppTheme.caption.copyWith(
+                      color: isDark ? AppTheme.gray400 : AppTheme.gray500,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          Icon(
-            Icons.chevron_right_rounded,
-            color: isDark ? AppTheme.gray500 : AppTheme.gray400,
-          ),
-        ],
+            Icon(
+              Icons.chevron_right_rounded,
+              color: isDark ? AppTheme.gray500 : AppTheme.gray400,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -200,6 +218,10 @@ class TeacherDashboardView extends StatelessWidget {
     context.read<NotificationsProvider>().reset();
     context.read<ResumeReviewProvider>().reset();
     context.read<RoleProvider>().reset();
+    // v7.2: Reset ecosystem providers
+    context.read<MentorshipProvider>().reset();
+    context.read<OpportunityProvider>().reset();
+    context.read<AlumniDirectoryProvider>().reset();
     try {
       await AuthService.firebase().logOut();
     } catch (_) {

@@ -99,9 +99,9 @@ class _NotesViewState extends State<NotesView> {
           elevation: 0,
           items: const [
             BottomNavigationBarItem(
-              icon: Icon(Icons.home_outlined),
-              activeIcon: Icon(Icons.home),
-              label: 'Home',
+              icon: Icon(Icons.dashboard_outlined),
+              activeIcon: Icon(Icons.dashboard),
+              label: 'Dashboard',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.note_outlined),
@@ -153,7 +153,7 @@ class _NotesViewState extends State<NotesView> {
             ),
             const SizedBox(width: 8),
             Text(
-              'CampusConnect',
+              'Student Dashboard',
               style: AppTheme.titleMedium.copyWith(
                 fontWeight: FontWeight.w600,
                 color: isDark ? Colors.white : AppTheme.gray900,
@@ -232,6 +232,10 @@ class _NotesViewState extends State<NotesView> {
 
             // Today / This Week Section
             _buildTodaySection(),
+            SizedBox(height: layout.itemSpacing + 8),
+
+            // v7.2: Quick Access Cards for Multi-Role Ecosystem
+            _buildQuickAccessSection(),
             SizedBox(height: layout.itemSpacing + 8),
 
             // Latest Placements Section
@@ -2196,6 +2200,143 @@ class _NotesViewState extends State<NotesView> {
         );
       },
     ).then((value) => value ?? false);
+  }
+
+  // v7.2: Connect & Grow Section - Full feature set
+  Widget _buildQuickAccessSection() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Connect & Grow',
+          style: AppTheme.titleMedium.copyWith(
+            fontWeight: FontWeight.w600,
+            color: isDark ? Colors.white : AppTheme.gray900,
+          ),
+        ),
+        const SizedBox(height: AppTheme.space16),
+        // First row
+        Row(
+          children: [
+            Expanded(
+              child: _buildQuickAccessCard(
+                title: 'Alumni Directory',
+                subtitle: 'Connect with alumni',
+                icon: Icons.people,
+                onTap: () {
+                  Navigator.pushNamed(context, alumniDirectoryRoute);
+                },
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _buildQuickAccessCard(
+                title: 'Mentorships',
+                subtitle: 'Request mentorship',
+                icon: Icons.school,
+                onTap: () {
+                  Navigator.pushNamed(context, mentorshipRequestsRoute);
+                },
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        // Second row
+        Row(
+          children: [
+            Expanded(
+              child: _buildQuickAccessCard(
+                title: 'Job Opportunities',
+                subtitle: 'Explore career paths',
+                icon: Icons.work,
+                onTap: () {
+                  Navigator.pushNamed(context, opportunitiesRoute);
+                },
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _buildQuickAccessCard(
+                title: 'AI Career Chat',
+                subtitle: 'Get career insights',
+                icon: Icons.psychology,
+                onTap: () {
+                  setState(() {
+                    _selectedIndex = 3; // Switch to AI Chat tab
+                  });
+                },
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildQuickAccessCard({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          color: isDark ? AppTheme.darkSurface : Colors.white,
+          border: Border.all(
+            color: isDark ? AppTheme.gray600 : AppTheme.gray300,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: isDark
+                  ? Colors.black.withValues(alpha: 0.3)
+                  : Colors.black.withValues(alpha: 0.08),
+              offset: const Offset(0, 2),
+              blurRadius: 8,
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryBlue.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(
+                icon,
+                color: AppTheme.primaryBlue,
+                size: 20,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              title,
+              style: AppTheme.bodyMedium.copyWith(
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white : AppTheme.gray900,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              style: AppTheme.bodySmall.copyWith(
+                color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

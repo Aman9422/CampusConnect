@@ -16,3 +16,14 @@ const resumeInsightsRoute = '/resume-review/insights'; // v6.9
 const studentDashboardRoute = '/student-dashboard';
 const alumniDashboardRoute = '/alumni-dashboard';
 const teacherDashboardRoute = '/teacher-dashboard';
+
+// v7.2: Multi-role ecosystem routes
+const alumniDirectoryRoute = '/alumni-directory';
+const alumniProfileRoute = '/alumni-profile';
+const mentorshipRequestsRoute = '/mentorship-requests';
+const createMentorshipRequestRoute = '/create-mentorship-request';
+const mentorshipRequestDetailRoute = '/mentorship-request-detail';
+const opportunitiesRoute = '/opportunities';
+const createOpportunityRoute = '/create-opportunity';
+const opportunityDetailRoute = '/opportunity-detail';
+const studentAnalyticsRoute = '/student-analytics';

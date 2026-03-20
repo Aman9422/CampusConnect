@@ -18,6 +18,7 @@ class RoleProvider extends ChangeNotifier {
 
   // Getters
   UserRole? get role => _role;
+  UserRole? get userRole => _role; // Alias for compatibility
   bool get isLoading => _isLoading;
   bool get isInitialized => _isInitialized;
   bool get hasRole => _role != null;

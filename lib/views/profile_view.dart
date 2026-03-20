@@ -1,3 +1,4 @@
+import 'package:campusconnect/constants/routes.dart';
 import 'package:campusconnect/providers/ai_usage_provider.dart';
 import 'package:campusconnect/providers/notifications_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
@@ -89,14 +90,8 @@ class _ProfileViewState extends State<ProfileView> {
             ListTile(
               leading: const Icon(Icons.notifications_none),
               title: const Text('Notifications'),
-              subtitle: const Text('Manage your notifications'),
-              onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Notification settings coming soon'),
-                  ),
-                );
-              },
+              subtitle: const Text('View and manage notifications'),
+              onTap: () => Navigator.pushNamed(context, notificationsRoute),
             ),
             const SizedBox(height: 32),
 
