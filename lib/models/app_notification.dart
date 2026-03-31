@@ -1,12 +1,18 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-/// Notification types for CampusConnect v6.4
+/// Notification types for CampusConnect v7.3
 enum NotificationType {
   placementApplied, // User applied for a placement
   statusChange, // Application status changed
   announcement, // Admin broadcast notification
   reminder, // Deadline reminders
   system, // System notifications
+  // v7.3: New types
+  mentorshipRequested, // Student requests mentorship
+  mentorshipAccepted, // Alumni accepts request
+  mentorshipRejected, // Alumni rejects request
+  newMessage, // Chat message received
+  newJobPost, // New opportunity posted
 }
 
 /// AppNotification model for in-app notifications
@@ -74,6 +80,17 @@ class AppNotification {
         return NotificationType.reminder;
       case 'system':
         return NotificationType.system;
+      // v7.3: New types
+      case 'mentorshipRequested':
+        return NotificationType.mentorshipRequested;
+      case 'mentorshipAccepted':
+        return NotificationType.mentorshipAccepted;
+      case 'mentorshipRejected':
+        return NotificationType.mentorshipRejected;
+      case 'newMessage':
+        return NotificationType.newMessage;
+      case 'newJobPost':
+        return NotificationType.newJobPost;
       default:
         return NotificationType.system;
     }
@@ -181,6 +198,89 @@ class AppNotification {
     );
   }
 
+  /// v7.3: Factory for mentorship requested notification
+  factory AppNotification.mentorshipRequested({
+    required String requestId,
+    required String studentName,
+  }) {
+    return AppNotification(
+      id: '',
+      type: NotificationType.mentorshipRequested,
+      title: 'New Mentorship Request',
+      body: '$studentName has requested your mentorship',
+      data: {'requestId': requestId},
+      isRead: false,
+      createdAt: DateTime.now(),
+    );
+  }
+
+  /// v7.3: Factory for mentorship accepted notification
+  factory AppNotification.mentorshipAccepted({
+    required String requestId,
+    required String alumniName,
+    required String chatId,
+  }) {
+    return AppNotification(
+      id: '',
+      type: NotificationType.mentorshipAccepted,
+      title: 'Mentorship Request Accepted!',
+      body: '$alumniName has accepted your mentorship request',
+      data: {'requestId': requestId, 'chatId': chatId},
+      isRead: false,
+      createdAt: DateTime.now(),
+    );
+  }
+
+  /// v7.3: Factory for mentorship rejected notification
+  factory AppNotification.mentorshipRejected({
+    required String requestId,
+    required String alumniName,
+  }) {
+    return AppNotification(
+      id: '',
+      type: NotificationType.mentorshipRejected,
+      title: 'Mentorship Request Response',
+      body: '$alumniName has declined your mentorship request',
+      data: {'requestId': requestId},
+      isRead: false,
+      createdAt: DateTime.now(),
+    );
+  }
+
+  /// v7.3: Factory for new message notification
+  factory AppNotification.newMessage({
+    required String chatId,
+    required String senderName,
+    required String messagePreview,
+  }) {
+    return AppNotification(
+      id: '',
+      type: NotificationType.newMessage,
+      title: 'New Message from $senderName',
+      body: messagePreview,
+      data: {'chatId': chatId},
+      isRead: false,
+      createdAt: DateTime.now(),
+    );
+  }
+
+  /// v7.3: Factory for new job post notification
+  factory AppNotification.newJobPost({
+    required String opportunityId,
+    required String title,
+    required String company,
+  }) {
+    return AppNotification(
+      id: '',
+      type: NotificationType.newJobPost,
+      title: 'New Job Opportunity',
+      body: '$title at $company',
+      data: {'opportunityId': opportunityId},
+      isRead: false,
+      createdAt: DateTime.now(),
+    );
+  }
+
   /// Get icon for notification type
   String get iconName {
     switch (type) {
@@ -194,6 +294,17 @@ class AppNotification {
         return 'alarm';
       case NotificationType.system:
         return 'info';
+      // v7.3: New type icons
+      case NotificationType.mentorshipRequested:
+        return 'school';
+      case NotificationType.mentorshipAccepted:
+        return 'handshake';
+      case NotificationType.mentorshipRejected:
+        return 'cancel';
+      case NotificationType.newMessage:
+        return 'message';
+      case NotificationType.newJobPost:
+        return 'work';
     }
   }
 

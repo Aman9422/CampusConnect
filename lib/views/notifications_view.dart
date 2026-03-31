@@ -1,5 +1,6 @@
 import 'package:campusconnect/models/app_notification.dart';
 import 'package:campusconnect/providers/notifications_provider.dart';
+import 'package:campusconnect/constants/routes.dart'; // v7.3
 import 'package:campusconnect/views/widgets/empty_state_widget.dart';
 import 'package:campusconnect/views/widgets/loading_widget.dart';
 import 'package:flutter/material.dart';
@@ -166,6 +167,40 @@ class NotificationsView extends StatelessWidget {
       case NotificationType.announcement:
         _showAnnouncementDetail(context, notification);
         break;
+      // v7.3: New notification types
+      case NotificationType.mentorshipAccepted:
+        final chatId = notification.data?['chatId'] as String?;
+        if (chatId != null) {
+          Navigator.pushNamed(context, chatRoute, arguments: chatId);
+        }
+        break;
+      case NotificationType.mentorshipRequested:
+      case NotificationType.mentorshipRejected:
+        final requestId = notification.data?['requestId'] as String?;
+        if (requestId != null) {
+          Navigator.pushNamed(
+            context,
+            mentorshipRequestDetailRoute,
+            arguments: requestId,
+          );
+        }
+        break;
+      case NotificationType.newMessage:
+        final chatId = notification.data?['chatId'] as String?;
+        if (chatId != null) {
+          Navigator.pushNamed(context, chatRoute, arguments: chatId);
+        }
+        break;
+      case NotificationType.newJobPost:
+        final opportunityId = notification.data?['opportunityId'] as String?;
+        if (opportunityId != null) {
+          Navigator.pushNamed(
+            context,
+            opportunityDetailRoute,
+            arguments: opportunityId,
+          );
+        }
+        break;
       default:
         break;
     }
@@ -293,6 +328,17 @@ class _NotificationTile extends StatelessWidget {
         return Icons.alarm;
       case NotificationType.system:
         return Icons.info;
+      // v7.3: New notification types
+      case NotificationType.mentorshipRequested:
+        return Icons.school;
+      case NotificationType.mentorshipAccepted:
+        return Icons.handshake;
+      case NotificationType.mentorshipRejected:
+        return Icons.cancel;
+      case NotificationType.newMessage:
+        return Icons.message;
+      case NotificationType.newJobPost:
+        return Icons.work;
     }
   }
 }

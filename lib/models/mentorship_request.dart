@@ -23,6 +23,12 @@ class MentorshipRequest {
   final String? alumniCompany;
   final String? alumniJobRole;
 
+  // v7.3: Chat integration and completion fields
+  final String? chatId; // Link to chat conversation (set when accepted)
+  final DateTime? completedAt; // When mentorship was marked as completed
+  final int? rating; // 1-5 star rating
+  final String? feedback; // Completion feedback
+
   MentorshipRequest({
     required this.id,
     required this.studentId,
@@ -39,6 +45,10 @@ class MentorshipRequest {
     this.responseMessage,
     this.alumniCompany,
     this.alumniJobRole,
+    this.chatId,
+    this.completedAt,
+    this.rating,
+    this.feedback,
   });
 
   /// Create from Firestore document
@@ -61,6 +71,10 @@ class MentorshipRequest {
       alumniName: data['alumniName'] ?? '',
       alumniCompany: data['alumniCompany'] as String?,
       alumniJobRole: data['alumniJobRole'] as String?,
+      chatId: data['chatId'] as String?,
+      completedAt: (data['completedAt'] as Timestamp?)?.toDate(),
+      rating: data['rating'] as int?,
+      feedback: data['feedback'] as String?,
     );
   }
 
@@ -86,6 +100,13 @@ class MentorshipRequest {
     if (responseMessage != null) map['responseMessage'] = responseMessage;
     if (alumniCompany != null) map['alumniCompany'] = alumniCompany;
     if (alumniJobRole != null) map['alumniJobRole'] = alumniJobRole;
+    // v7.3: New optional fields
+    if (chatId != null) map['chatId'] = chatId;
+    if (completedAt != null) {
+      map['completedAt'] = Timestamp.fromDate(completedAt!);
+    }
+    if (rating != null) map['rating'] = rating;
+    if (feedback != null) map['feedback'] = feedback;
 
     return map;
   }
@@ -103,6 +124,10 @@ class MentorshipRequest {
     String? alumniName,
     String? alumniCompany,
     String? alumniJobRole,
+    String? chatId,
+    DateTime? completedAt,
+    int? rating,
+    String? feedback,
   }) {
     return MentorshipRequest(
       id: id,
@@ -120,6 +145,10 @@ class MentorshipRequest {
       alumniName: alumniName ?? this.alumniName,
       alumniCompany: alumniCompany ?? this.alumniCompany,
       alumniJobRole: alumniJobRole ?? this.alumniJobRole,
+      chatId: chatId ?? this.chatId,
+      completedAt: completedAt ?? this.completedAt,
+      rating: rating ?? this.rating,
+      feedback: feedback ?? this.feedback,
     );
   }
 

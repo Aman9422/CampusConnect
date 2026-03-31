@@ -12,6 +12,13 @@ const resumeReviewHistoryRoute = '/resume-review/history'; // v6.8
 const resumeReviewDetailRoute = '/resume-review/detail'; // v6.8
 const resumeInsightsRoute = '/resume-review/insights'; // v6.9
 
+// v7.3: Feature-specific routes (extracted from NotesView monolith)
+const notesListRoute = '/notes-list';
+const uploadNotesRoute = '/upload-notes';
+const placementsListRoute = '/placements-list';
+const aiChatRoute = '/ai-chat';
+const profileViewRoute = '/profile-view';
+
 // v7.1: Role-based dashboard routes
 const studentDashboardRoute = '/student-dashboard';
 const alumniDashboardRoute = '/alumni-dashboard';
@@ -23,7 +30,13 @@ const alumniProfileRoute = '/alumni-profile';
 const mentorshipRequestsRoute = '/mentorship-requests';
 const createMentorshipRequestRoute = '/create-mentorship-request';
 const mentorshipRequestDetailRoute = '/mentorship-request-detail';
+const completeMentorshipRoute = '/complete-mentorship'; // v7.3
 const opportunitiesRoute = '/opportunities';
 const createOpportunityRoute = '/create-opportunity';
 const opportunityDetailRoute = '/opportunity-detail';
 const studentAnalyticsRoute = '/student-analytics';
+
+// v7.3: Chat routes
+const chatsListRoute = '/chats';
+const chatRoute = '/chat';
+const chatDetailRoute = '/chat-detail';

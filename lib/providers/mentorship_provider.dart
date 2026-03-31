@@ -145,7 +145,8 @@ class MentorshipProvider extends ChangeNotifier {
 
   /// Alumni Operations
   /// Respond to a mentorship request
-  Future<bool> respondToRequest({
+  /// v7.3: Returns chatId for navigation after acceptance
+  Future<String?> respondToRequest({
     required String requestId,
     required bool accepted,
     String? responseMessage,
@@ -155,7 +156,7 @@ class MentorshipProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await _mentorshipService.respondToRequest(
+      final chatId = await _mentorshipService.respondToRequest(
         requestId: requestId,
         accepted: accepted,
         responseMessage: responseMessage,
@@ -171,6 +172,7 @@ class MentorshipProvider extends ChangeNotifier {
                 : MentorshipRequestStatus.rejected,
             respondedAt: DateTime.now(),
             responseMessage: responseMessage,
+            chatId: chatId, // v7.3: Include chatId
           );
           _requests![requestIndex] = updatedRequest;
         }
@@ -184,13 +186,13 @@ class MentorshipProvider extends ChangeNotifier {
       _isResponding = false;
       _error = null;
       notifyListeners();
-      return true;
+      return chatId; // Return chatId for UI navigation
     } catch (e) {
       _isResponding = false;
       _error = 'Failed to respond to request';
       debugPrint('MentorshipProvider respond error: $e');
       notifyListeners();
-      return false;
+      return null;
     }
   }
 
@@ -216,10 +218,19 @@ class MentorshipProvider extends ChangeNotifier {
     }
   }
 
-  /// Mark mentorship as completed
-  Future<bool> markCompleted(String requestId) async {
+  /// Mark mentorship as completed with optional rating and feedback
+  /// v7.3: Enhanced with completion data
+  Future<bool> markCompleted(
+    String requestId, {
+    int? rating,
+    String? feedback,
+  }) async {
     try {
-      await _mentorshipService.markCompleted(requestId);
+      await _mentorshipService.markCompleted(
+        requestId,
+        rating: rating,
+        feedback: feedback,
+      );
 
       // Update local state
       if (_requests != null) {
@@ -227,6 +238,9 @@ class MentorshipProvider extends ChangeNotifier {
         if (requestIndex != -1) {
           final updatedRequest = _requests![requestIndex].copyWith(
             status: MentorshipRequestStatus.completed,
+            completedAt: DateTime.now(),
+            rating: rating,
+            feedback: feedback,
           );
           _requests![requestIndex] = updatedRequest;
         }

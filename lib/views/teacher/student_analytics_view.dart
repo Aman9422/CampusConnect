@@ -1,6 +1,7 @@
 import 'package:campusconnect/models/placement.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/providers/resume_review_provider.dart';
+import 'package:campusconnect/providers/teacher_analytics_provider.dart'; // v7.3
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/views/widgets/empty_state_widget.dart';
 import 'package:campusconnect/widgets/skeleton_loader.dart';
@@ -30,6 +31,8 @@ class _StudentAnalyticsViewState extends State<StudentAnalyticsView> {
     // Load data from existing providers
     context.read<PlacementsProvider>().refresh();
     context.read<ResumeReviewProvider>().refreshHistory();
+    // v7.3: Load teacher analytics
+    context.read<TeacherAnalyticsProvider>().loadAnalytics();
   }
 
   @override
@@ -58,43 +61,65 @@ class _StudentAnalyticsViewState extends State<StudentAnalyticsView> {
           ),
         ],
       ),
-      body: Consumer2<PlacementsProvider, ResumeReviewProvider>(
-        builder: (context, placementsProvider, resumeProvider, child) {
-          if (placementsProvider.isLoading || resumeProvider.isLoading) {
-            return _buildSkeletonLoader();
-          }
+      body:
+          Consumer3<
+            PlacementsProvider,
+            ResumeReviewProvider,
+            TeacherAnalyticsProvider
+          >(
+            builder:
+                (
+                  context,
+                  placementsProvider,
+                  resumeProvider,
+                  analyticsProvider,
+                  child,
+                ) {
+                  if (placementsProvider.isLoading ||
+                      resumeProvider.isLoading ||
+                      analyticsProvider.isLoading) {
+                    return _buildSkeletonLoader();
+                  }
 
-          return RefreshIndicator(
-            onRefresh: () async => _loadAnalytics(),
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Overview metrics
-                  _buildOverviewMetrics(
-                    placementsProvider,
-                    resumeProvider,
-                    isDark,
-                  ),
-                  const SizedBox(height: 20),
+                  return RefreshIndicator(
+                    onRefresh: () async => _loadAnalytics(),
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Overview metrics
+                          _buildOverviewMetrics(
+                            placementsProvider,
+                            resumeProvider,
+                            isDark,
+                          ),
+                          const SizedBox(height: 20),
 
-                  // Placement trends chart
-                  _buildPlacementTrends(placementsProvider, isDark),
-                  const SizedBox(height: 20),
+                          // Placement trends chart
+                          _buildPlacementTrends(placementsProvider, isDark),
+                          const SizedBox(height: 20),
 
-                  // Resume review insights
-                  _buildResumeInsights(resumeProvider, isDark),
-                  const SizedBox(height: 20),
+                          // Resume review insights
+                          _buildResumeInsights(resumeProvider, isDark),
+                          const SizedBox(height: 20),
 
-                  // Department-wise breakdown
-                  _buildDepartmentBreakdown(placementsProvider, isDark),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
+                          // v7.3: Resume Review Aggregates
+                          _buildResumeAggregates(analyticsProvider, isDark),
+                          const SizedBox(height: 20),
+
+                          // v7.3: Student Resume Leaderboard
+                          _buildStudentLeaderboard(analyticsProvider, isDark),
+                          const SizedBox(height: 20),
+
+                          // Department-wise breakdown
+                          _buildDepartmentBreakdown(placementsProvider, isDark),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+          ),
     );
   }
 
@@ -512,6 +537,310 @@ class _StudentAnalyticsViewState extends State<StudentAnalyticsView> {
     );
   }
 
+  /// v7.3: Resume Review Aggregates Section
+  Widget _buildResumeAggregates(
+    TeacherAnalyticsProvider provider,
+    bool isDark,
+  ) {
+    if (!provider.hasData) {
+      return const SizedBox.shrink();
+    }
+
+    return _buildSection(
+      'Resume Review Analytics',
+      isDark,
+      child: Column(
+        children: [
+          // Metric cards
+          Row(
+            children: [
+              Expanded(
+                child: _buildMetricCard(
+                  'Total Reviews',
+                  provider.totalReviews.toString(),
+                  Icons.assessment_outlined,
+                  AppTheme.primaryBlue,
+                  isDark,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildMetricCard(
+                  'Avg Score',
+                  '${provider.averageScore.round()}/100',
+                  Icons.grade_outlined,
+                  AppTheme.success,
+                  isDark,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+
+          // Score distribution pie chart
+          SizedBox(
+            height: 200,
+            child: Row(
+              children: [
+                Expanded(
+                  flex: 2,
+                  child: PieChart(
+                    PieChartData(
+                      sectionsSpace: 2,
+                      centerSpaceRadius: 40,
+                      sections: _buildPieChartSections(provider),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _buildPieChartLegend(
+                        'Excellent (80+)',
+                        provider.excellentCount,
+                        const Color(0xFF059669),
+                        isDark,
+                      ),
+                      const SizedBox(height: 8),
+                      _buildPieChartLegend(
+                        'Good (60-79)',
+                        provider.goodCount,
+                        const Color(0xFF0891B2),
+                        isDark,
+                      ),
+                      const SizedBox(height: 8),
+                      _buildPieChartLegend(
+                        'Fair (40-59)',
+                        provider.fairCount,
+                        const Color(0xFFEA580C),
+                        isDark,
+                      ),
+                      const SizedBox(height: 8),
+                      _buildPieChartLegend(
+                        'Poor (<40)',
+                        provider.poorCount,
+                        const Color(0xFFDC2626),
+                        isDark,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// v7.3: Student Resume Leaderboard Section
+  Widget _buildStudentLeaderboard(
+    TeacherAnalyticsProvider provider,
+    bool isDark,
+  ) {
+    if (!provider.hasData || provider.studentData!.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final topStudents = provider.getTopStudents(10);
+
+    return _buildSection(
+      'Top Students by Resume Score',
+      isDark,
+      child: Column(
+        children: topStudents.asMap().entries.map((entry) {
+          final index = entry.key;
+          final student = entry.value;
+          final score = student['latestScore'] as int;
+          final name = student['studentName'] as String;
+          final reviewCount = student['reviewCount'] as int;
+
+          return Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: index < 3
+                  ? provider.getScoreColor(score).withOpacity(0.05)
+                  : (isDark ? AppTheme.gray800 : AppTheme.gray50),
+              borderRadius: BorderRadius.circular(8),
+              border: index < 3
+                  ? Border.all(
+                      color: provider.getScoreColor(score).withOpacity(0.3),
+                    )
+                  : null,
+            ),
+            child: Row(
+              children: [
+                // Rank
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: index < 3
+                        ? provider.getScoreColor(score)
+                        : (isDark ? AppTheme.gray600 : AppTheme.gray400),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Center(
+                    child: Text(
+                      '${index + 1}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+
+                // Student info
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name,
+                        style: AppTheme.titleSmall.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? Colors.white : AppTheme.gray900,
+                        ),
+                      ),
+                      Text(
+                        '$reviewCount review${reviewCount != 1 ? 's' : ''}',
+                        style: AppTheme.caption.copyWith(
+                          color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Score badge
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: provider.getScoreColor(score),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '$score/100',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  List<PieChartSectionData> _buildPieChartSections(
+    TeacherAnalyticsProvider provider,
+  ) {
+    final total = provider.totalReviews;
+    if (total == 0) return [];
+
+    return [
+      PieChartSectionData(
+        color: const Color(0xFF059669),
+        value: provider.excellentCount / total * 100,
+        title: '${provider.excellentCount}',
+        radius: 60,
+        titleStyle: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.bold,
+          color: Colors.white,
+        ),
+      ),
+      PieChartSectionData(
+        color: const Color(0xFF0891B2),
+        value: provider.goodCount / total * 100,
+        title: '${provider.goodCount}',
+        radius: 60,
+        titleStyle: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.bold,
+          color: Colors.white,
+        ),
+      ),
+      PieChartSectionData(
+        color: const Color(0xFFEA580C),
+        value: provider.fairCount / total * 100,
+        title: '${provider.fairCount}',
+        radius: 60,
+        titleStyle: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.bold,
+          color: Colors.white,
+        ),
+      ),
+      PieChartSectionData(
+        color: const Color(0xFFDC2626),
+        value: provider.poorCount / total * 100,
+        title: '${provider.poorCount}',
+        radius: 60,
+        titleStyle: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.bold,
+          color: Colors.white,
+        ),
+      ),
+    ];
+  }
+
+  Widget _buildPieChartLegend(
+    String label,
+    int count,
+    Color color,
+    bool isDark,
+  ) {
+    return Row(
+      children: [
+        Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(6),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: AppTheme.caption.copyWith(
+                  color: isDark ? AppTheme.gray300 : AppTheme.gray700,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              Text(
+                '$count',
+                style: AppTheme.caption.copyWith(
+                  color: isDark ? Colors.white : AppTheme.gray900,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildSkeletonLoader() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -534,6 +863,36 @@ class _StudentAnalyticsViewState extends State<StudentAnalyticsView> {
             height: 150,
             borderRadius: BorderRadius.circular(12),
           ),
+        ],
+      ),
+    );
+  }
+
+  /// Helper method to build a consistent section layout
+  Widget _buildSection(String title, bool isDark, {required Widget child}) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: isDark ? AppTheme.darkSurface : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark
+              ? AppTheme.gray700.withValues(alpha: 0.3)
+              : AppTheme.gray200,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: AppTheme.titleMedium.copyWith(
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white : AppTheme.gray900,
+            ),
+          ),
+          const SizedBox(height: 16),
+          child,
         ],
       ),
     );

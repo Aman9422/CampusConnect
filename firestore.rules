@@ -25,8 +25,10 @@ service cloud.firestore {
         resource.data.profileCompleted == true;
       
       // Notifications subcollection
+      // v7.3: Enhanced - allow system notifications creation
       match /notifications/{notificationId} {
-        allow read, write: if isOwner(userId);
+        allow read, update: if isOwner(userId);
+        allow create: if isAuthenticated(); // System can create notifications
       }
       
       // v6.5: AI Insights (read-only, Cloud Functions write)
@@ -135,7 +137,7 @@ service cloud.firestore {
     // MULTI-ROLE ECOSYSTEM (v7.2)
     // ===============================================
 
-    // Mentorship requests - students create, alumni respond
+    // Mentorship requests - students create, alumni respond, both can complete
     match /mentorship_requests/{requestId} {
       allow read: if isAuthenticated() &&
         (resource.data.studentId == request.auth.uid ||
@@ -143,10 +145,17 @@ service cloud.firestore {
       allow create: if isAuthenticated() &&
         request.resource.data.studentId == request.auth.uid;
       allow update: if isAuthenticated() &&
-        resource.data.alumniId == request.auth.uid &&
-        // Only allow alumni to update status and response fields
-        request.resource.data.diff(resource.data).affectedKeys()
-        .hasOnly(['status', 'respondedAt', 'responseMessage']);
+        (
+          // Alumni can respond to requests
+          (resource.data.alumniId == request.auth.uid &&
+           request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(['status', 'respondedAt', 'responseMessage', 'chatId'])) ||
+          // Both participants can mark as completed (v7.3)
+          ((resource.data.studentId == request.auth.uid ||
+            resource.data.alumniId == request.auth.uid) &&
+           request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(['status', 'completedAt', 'rating', 'feedback']))
+        );
       allow delete: if isAuthenticated() &&
         resource.data.studentId == request.auth.uid;
     }
@@ -163,6 +172,30 @@ service cloud.firestore {
     }
 
     // Alumni directory - handled in users collection above ✓
+
+    // ===============================================
+    // REAL-TIME CHAT SYSTEM (v7.3)
+    // ===============================================
+
+    // Chat conversations - only participants can access
+    match /chats/{chatId} {
+      // Participants can read/write their chats
+      allow read, write: if isAuthenticated() &&
+                          request.auth.uid in resource.data.participantIds;
+
+      // For creating chats, check if user is in the participant list
+      allow create: if isAuthenticated() &&
+                    request.auth.uid in request.resource.data.participantIds;
+
+      // Chat messages subcollection
+      match /messages/{messageId} {
+        // Only participants can read/write messages
+        allow read, write: if isAuthenticated() &&
+                            request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
+        allow create: if isAuthenticated() &&
+                      request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
+      }
+    }
 
     // ===============================================
     // DENY EVERYTHING ELSE

@@ -1,5 +1,6 @@
 import 'package:campusconnect/models/opportunity.dart';
 import 'package:campusconnect/models/student_profile.dart';
+import 'package:campusconnect/models/app_notification.dart'; // v7.3
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
@@ -64,6 +65,43 @@ class OpportunityService {
       );
 
       await docRef.set(opportunity.toFirestore());
+
+      // v7.3: Notify all students of new job opportunity
+      try {
+        final usersSnapshot = await _firestore
+            .collection('users')
+            .where('role', isEqualTo: 'student')
+            .get();
+
+        if (usersSnapshot.docs.isNotEmpty) {
+          final batch = _firestore.batch();
+
+          for (final userDoc in usersSnapshot.docs) {
+            final notification = AppNotification.newJobPost(
+              opportunityId: docRef.id,
+              title: title,
+              company: company,
+            );
+
+            final notifRef = _firestore
+                .collection('users')
+                .doc(userDoc.id)
+                .collection('notifications')
+                .doc();
+
+            batch.set(notifRef, notification.toFirestore());
+          }
+
+          await batch.commit();
+          debugPrint(
+            'Notified ${usersSnapshot.docs.length} students of new job post',
+          );
+        }
+      } catch (e) {
+        debugPrint('Error creating job post notifications: $e');
+        // Don't fail job posting if notifications fail
+      }
+
       return docRef.id;
     } catch (e) {
       debugPrint('Error creating opportunity: $e');

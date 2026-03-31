@@ -3,6 +3,7 @@ import 'package:campusconnect/models/mentorship_request.dart';
 import 'package:campusconnect/providers/mentorship_provider.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
 import 'package:campusconnect/providers/role_provider.dart';
+import 'package:campusconnect/constants/routes.dart'; // v7.3
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/views/widgets/empty_state_widget.dart';
 import 'package:campusconnect/views/widgets/initials_avatar.dart';
@@ -77,11 +78,12 @@ class _MentorshipRequestsViewState extends State<MentorshipRequestsView> {
     );
   }
 
-  Widget _buildRequestsList(MentorshipProvider mentorshipProvider, bool isDark) {
+  Widget _buildRequestsList(
+    MentorshipProvider mentorshipProvider,
+    bool isDark,
+  ) {
     if (mentorshipProvider.isLoading) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
+      return const Center(child: CircularProgressIndicator());
     }
 
     if (mentorshipProvider.error != null) {
@@ -89,11 +91,7 @@ class _MentorshipRequestsViewState extends State<MentorshipRequestsView> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.error_outline,
-              color: AppTheme.error,
-              size: 48,
-            ),
+            Icon(Icons.error_outline, color: AppTheme.error, size: 48),
             const SizedBox(height: 16),
             Text(
               'Error loading requests',
@@ -133,10 +131,7 @@ class _MentorshipRequestsViewState extends State<MentorshipRequestsView> {
           style: ElevatedButton.styleFrom(
             backgroundColor: AppTheme.primaryBlue,
             foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(
-              horizontal: 24,
-              vertical: 12,
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8),
             ),
@@ -197,7 +192,10 @@ class _MentorshipRequestsViewState extends State<MentorshipRequestsView> {
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: _getStatusColor(request.status).withOpacity(0.1),
                     borderRadius: BorderRadius.circular(12),
@@ -239,19 +237,27 @@ class _MentorshipRequestsViewState extends State<MentorshipRequestsView> {
               Wrap(
                 spacing: 6,
                 runSpacing: 6,
-                children: request.skills.take(3).map((skill) => Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primaryBlue.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    skill,
-                    style: AppTheme.caption.copyWith(
-                      color: AppTheme.primaryBlue,
-                    ),
-                  ),
-                )).toList(),
+                children: request.skills
+                    .take(3)
+                    .map(
+                      (skill) => Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryBlue.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          skill,
+                          style: AppTheme.caption.copyWith(
+                            color: AppTheme.primaryBlue,
+                          ),
+                        ),
+                      ),
+                    )
+                    .toList(),
               ),
               const SizedBox(height: 12),
             ],
@@ -296,6 +302,29 @@ class _MentorshipRequestsViewState extends State<MentorshipRequestsView> {
                   ],
                 ),
               ),
+
+            // v7.3: Open Chat button for accepted requests
+            if (request.isAccepted && request.chatId != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 16),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () => Navigator.pushNamed(
+                      context,
+                      chatRoute,
+                      arguments: request.chatId,
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primaryBlue,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    icon: const Icon(Icons.chat_bubble, size: 18),
+                    label: const Text('Open Chat'),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -305,23 +334,27 @@ class _MentorshipRequestsViewState extends State<MentorshipRequestsView> {
   bool _shouldShowActionButtons(MentorshipRequest request) {
     final roleProvider = context.read<RoleProvider>();
     return roleProvider.userRole == UserRole.alumni &&
-           request.status == MentorshipRequestStatus.pending;
+        request.status == MentorshipRequestStatus.pending;
   }
 
   Future<void> _respondToRequest(String requestId, bool accepted) async {
     final mentorshipProvider = context.read<MentorshipProvider>();
 
     try {
-      final success = await mentorshipProvider.respondToRequest(
+      final chatId = await mentorshipProvider.respondToRequest(
         requestId: requestId,
         accepted: accepted,
-        responseMessage: accepted ? 'Request accepted!' : 'Thank you for your interest.',
+        responseMessage: accepted
+            ? 'Request accepted!'
+            : 'Thank you for your interest.',
       );
 
-      if (success && mounted) {
+      if (chatId != null && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(accepted ? 'Mentorship request accepted!' : 'Request declined'),
+            content: Text(
+              accepted ? 'Mentorship request accepted!' : 'Request declined',
+            ),
             backgroundColor: accepted ? AppTheme.success : AppTheme.error,
           ),
         );

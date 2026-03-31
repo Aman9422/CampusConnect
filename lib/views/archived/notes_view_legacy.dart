@@ -1,5 +1,6 @@
 import 'package:campusconnect/constants/routes.dart';
 import 'package:campusconnect/enums/menu_action.dart';
+import 'package:campusconnect/enums/user_role.dart'; // v7.1 for role checking
 import 'package:campusconnect/models/chat_message.dart';
 import 'package:campusconnect/models/note.dart';
 import 'package:campusconnect/models/placement.dart';
@@ -11,6 +12,8 @@ import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
 import 'package:campusconnect/providers/resume_review_provider.dart'; // v6.7
 import 'package:campusconnect/providers/role_provider.dart'; // v7.1
+// import 'package:campusconnect/providers/chat_provider.dart'; // v7.3 - TODO: Enable when implemented
+// import 'package:campusconnect/providers/teacher_analytics_provider.dart'; // v7.3 - TODO: Enable when implemented
 import 'package:campusconnect/services/ai/ai_service.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/services/firestore/notes_service.dart';
@@ -19,6 +22,7 @@ import 'package:campusconnect/utilities/error_messages.dart';
 import 'package:campusconnect/views/widgets/eligibility_badge.dart';
 import 'package:campusconnect/views/widgets/initials_avatar.dart';
 import 'package:campusconnect/views/widgets/notification_badge.dart';
+import 'package:campusconnect/views/widgets/chat_badge.dart'; // v7.3
 import 'package:campusconnect/widgets/empty_state.dart';
 import 'package:campusconnect/widgets/home_widgets.dart';
 import 'package:campusconnect/widgets/offline_banner.dart';
@@ -137,6 +141,8 @@ class _NotesViewState extends State<NotesView> {
   Widget _buildHomeScreen() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final layout = context.watch<LayoutProvider>();
+    final roleProvider = context.watch<RoleProvider>();
+    final isTeacher = roleProvider.role == UserRole.teacher;
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -147,13 +153,13 @@ class _NotesViewState extends State<NotesView> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              Icons.school,
+              isTeacher ? Icons.school : Icons.school,
               color: isDark ? Colors.white : AppTheme.gray900,
               size: 24,
             ),
             const SizedBox(width: 8),
             Text(
-              'Student Dashboard',
+              isTeacher ? 'Teacher Dashboard' : 'Student Dashboard',
               style: AppTheme.titleMedium.copyWith(
                 fontWeight: FontWeight.w600,
                 color: isDark ? Colors.white : AppTheme.gray900,
@@ -166,6 +172,8 @@ class _NotesViewState extends State<NotesView> {
           NotificationBadge(
             onTap: () => Navigator.pushNamed(context, notificationsRoute),
           ),
+          // v7.3: Chat badge
+          ChatBadge(),
           PopupMenuButton<MenuAction>(
             icon: Icon(
               Icons.more_vert,
@@ -183,6 +191,18 @@ class _NotesViewState extends State<NotesView> {
                     context.read<NotificationsProvider>().reset();
                     context.read<ResumeReviewProvider>().reset(); // v6.7
                     context.read<RoleProvider>().reset(); // v7.1
+                    // v7.3: Reset new providers (when implemented)
+                    // Enable when providers are implemented
+                    // try {
+                    //   context.read<ChatProvider>().reset();
+                    // } catch (e) {
+                    //   debugPrint('ChatProvider reset failed: $e');
+                    // }
+                    // try {
+                    //   context.read<TeacherAnalyticsProvider>().reset();
+                    // } catch (e) {
+                    //   debugPrint('TeacherAnalyticsProvider reset failed: $e');
+                    // }
                     try {
                       await AuthService.firebase().logOut();
                     } catch (_) {
@@ -442,19 +462,40 @@ class _NotesViewState extends State<NotesView> {
 
   Widget _buildNotesScreen() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final roleProvider = context.watch<RoleProvider>();
+    final isTeacher = roleProvider.role == UserRole.teacher;
+
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
         elevation: 0,
         title: Text(
-          'Lecture Notes',
+          isTeacher ? 'Manage Notes' : 'Lecture Notes',
           style: AppTheme.titleMedium.copyWith(
             fontWeight: FontWeight.w600,
             color: isDark ? Colors.white : AppTheme.gray900,
           ),
         ),
       ),
+      floatingActionButton: isTeacher ? FloatingActionButton.extended(
+        onPressed: () {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Upload Notes functionality - Coming Soon!'),
+              backgroundColor: AppTheme.primaryBlue,
+              action: SnackBarAction(
+                label: 'OK',
+                textColor: Colors.white,
+                onPressed: () {},
+              ),
+            ),
+          );
+        },
+        icon: Icon(Icons.upload_file),
+        label: Text('Upload Notes'),
+        backgroundColor: AppTheme.primaryBlue,
+      ) : null,
       body: StreamBuilder<List<Note>>(
         stream: _notesService.getAllNotes(),
         builder: (context, snapshot) {
@@ -1689,7 +1730,7 @@ class _NotesViewState extends State<NotesView> {
       buffer.writeln("   💰 ${placement.salary}");
       if (daysUntilDeadline <= 7) {
         buffer.writeln(
-          "   ⚠️ Deadline: ${daysUntilDeadline} day${daysUntilDeadline != 1 ? 's' : ''} left!",
+          "   ⚠️ Deadline: $daysUntilDeadline day${daysUntilDeadline != 1 ? 's' : ''} left!",
         );
       } else {
         buffer.writeln(
@@ -2167,6 +2208,18 @@ class _NotesViewState extends State<NotesView> {
       context.read<NotificationsProvider>().reset();
       context.read<ResumeReviewProvider>().reset(); // v6.7
       context.read<RoleProvider>().reset(); // v7.1
+      // v7.3: Reset new providers (when implemented)
+      // TODO: Enable when providers are implemented
+      // try {
+      //   context.read<ChatProvider>().reset();
+      // } catch (e) {
+      //   debugPrint('ChatProvider reset failed: $e');
+      // }
+      // try {
+      //   context.read<TeacherAnalyticsProvider>().reset();
+      // } catch (e) {
+      //   debugPrint('TeacherAnalyticsProvider reset failed: $e');
+      // }
       try {
         await AuthService.firebase().logOut();
       } catch (_) {
@@ -2205,11 +2258,14 @@ class _NotesViewState extends State<NotesView> {
   // v7.2: Connect & Grow Section - Full feature set
   Widget _buildQuickAccessSection() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final roleProvider = context.watch<RoleProvider>();
+    final isTeacher = roleProvider.role == UserRole.teacher;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Connect & Grow',
+          isTeacher ? 'Teacher Tools' : 'Connect & Grow',
           style: AppTheme.titleMedium.copyWith(
             fontWeight: FontWeight.w600,
             color: isDark ? Colors.white : AppTheme.gray900,
@@ -2221,19 +2277,23 @@ class _NotesViewState extends State<NotesView> {
           children: [
             Expanded(
               child: _buildQuickAccessCard(
-                title: 'Alumni Directory',
-                subtitle: 'Connect with alumni',
-                icon: Icons.people,
+                title: isTeacher ? 'Student Analytics' : 'Alumni Directory',
+                subtitle: isTeacher ? 'View student progress' : 'Connect with alumni',
+                icon: isTeacher ? Icons.analytics : Icons.people,
                 onTap: () {
-                  Navigator.pushNamed(context, alumniDirectoryRoute);
+                  if (isTeacher) {
+                    Navigator.pushNamed(context, studentAnalyticsRoute);
+                  } else {
+                    Navigator.pushNamed(context, alumniDirectoryRoute);
+                  }
                 },
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 8),
             Expanded(
               child: _buildQuickAccessCard(
-                title: 'Mentorships',
-                subtitle: 'Request mentorship',
+                title: isTeacher ? 'Mentorship Requests' : 'Mentorships',
+                subtitle: isTeacher ? 'Manage requests' : 'Request mentorship',
                 icon: Icons.school,
                 onTap: () {
                   Navigator.pushNamed(context, mentorshipRequestsRoute);
@@ -2248,15 +2308,22 @@ class _NotesViewState extends State<NotesView> {
           children: [
             Expanded(
               child: _buildQuickAccessCard(
-                title: 'Job Opportunities',
-                subtitle: 'Explore career paths',
-                icon: Icons.work,
+                title: isTeacher ? 'Upload Notes' : 'Job Opportunities',
+                subtitle: isTeacher ? 'Share resources' : 'Explore career paths',
+                icon: isTeacher ? Icons.upload : Icons.work,
                 onTap: () {
-                  Navigator.pushNamed(context, opportunitiesRoute);
+                  if (isTeacher) {
+                    // Navigate to Upload Notes functionality (Notes tab)
+                    setState(() {
+                      _selectedIndex = 1; // Switch to Notes tab
+                    });
+                  } else {
+                    Navigator.pushNamed(context, opportunitiesRoute);
+                  }
                 },
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 8),
             Expanded(
               child: _buildQuickAccessCard(
                 title: 'AI Career Chat',

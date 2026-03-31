@@ -51,16 +51,20 @@ class _AlumniProfileViewState extends State<AlumniProfileView> {
       final profile = await context
           .read<AlumniDirectoryProvider>()
           .getAlumniById(alumniId);
-      setState(() {
-        _alumniProfile = profile;
-        _isLoading = false;
-        _error = profile == null ? 'Alumni profile not found' : null;
-      });
+      if (mounted) {
+        setState(() {
+          _alumniProfile = profile;
+          _isLoading = false;
+          _error = profile == null ? 'Alumni profile not found' : null;
+        });
+      }
     } catch (e) {
-      setState(() {
-        _error = 'Failed to load alumni profile';
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _error = 'Failed to load alumni profile';
+          _isLoading = false;
+        });
+      }
     }
   }
 

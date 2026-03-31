@@ -12,6 +12,8 @@ import 'package:campusconnect/providers/role_provider.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/views/widgets/initials_avatar.dart';
+import 'package:campusconnect/views/widgets/notification_badge.dart'; // v7.3
+import 'package:campusconnect/views/widgets/chat_badge.dart'; // v7.3
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -40,6 +42,12 @@ class AlumniDashboardView extends StatelessWidget {
         backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
         elevation: 0,
         actions: [
+          // v7.3: Notification badge
+          NotificationBadge(
+            onTap: () => Navigator.pushNamed(context, notificationsRoute),
+          ),
+          // v7.3: Chat badge
+          ChatBadge(),
           IconButton(
             icon: const Icon(Icons.logout_rounded),
             onPressed: () => _logout(context),
