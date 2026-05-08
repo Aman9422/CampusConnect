@@ -67,7 +67,8 @@ import 'package:campusconnect/views/notes/notes_list_view.dart';
 import 'package:campusconnect/views/notes/upload_notes_view.dart';
 import 'package:campusconnect/views/placements/placements_list_view.dart';
 import 'package:campusconnect/views/chat/ai_chat_view.dart';
-import 'package:campusconnect/views/profile/profile_view.dart' as extracted_profile;
+import 'package:campusconnect/views/profile/profile_view.dart'
+    as extracted_profile;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -123,8 +124,9 @@ class MyApp extends StatelessWidget {
               OpportunityProvider(service: OpportunityService.instance()),
         ),
         ChangeNotifierProvider(
-          create: (_) =>
-              AlumniDirectoryProvider(service: AlumniDirectoryService.instance()),
+          create: (_) => AlumniDirectoryProvider(
+            service: AlumniDirectoryService.instance(),
+          ),
         ),
         // v7.3: Chat provider
         ChangeNotifierProvider(
@@ -133,12 +135,18 @@ class MyApp extends StatelessWidget {
         // v7.3: Teacher analytics provider
         ChangeNotifierProvider(
           create: (_) => TeacherAnalyticsProvider(
-              service: TeacherAnalyticsService.instance()),
+            service: TeacherAnalyticsService.instance(),
+          ),
         ),
         // v7.3: Activity feed provider (depends on other providers)
-        ChangeNotifierProxyProvider5<NotificationsProvider, ChatProvider,
-            MentorshipProvider, PlacementsProvider, OpportunityProvider,
-            ActivityFeedProvider>(
+        ChangeNotifierProxyProvider5<
+          NotificationsProvider,
+          ChatProvider,
+          MentorshipProvider,
+          PlacementsProvider,
+          OpportunityProvider,
+          ActivityFeedProvider
+        >(
           create: (context) => ActivityFeedProvider(
             notificationsProvider: context.read<NotificationsProvider>(),
             chatProvider: context.read<ChatProvider>(),
@@ -146,16 +154,24 @@ class MyApp extends StatelessWidget {
             placementsProvider: context.read<PlacementsProvider>(),
             opportunityProvider: context.read<OpportunityProvider>(),
           ),
-          update: (context, notifications, chat, mentorship, placements,
-                  opportunities, previous) =>
-              previous ??
-              ActivityFeedProvider(
-                notificationsProvider: notifications,
-                chatProvider: chat,
-                mentorshipProvider: mentorship,
-                placementsProvider: placements,
-                opportunityProvider: opportunities,
-              ),
+          update:
+              (
+                context,
+                notifications,
+                chat,
+                mentorship,
+                placements,
+                opportunities,
+                previous,
+              ) =>
+                  previous ??
+                  ActivityFeedProvider(
+                    notificationsProvider: notifications,
+                    chatProvider: chat,
+                    mentorshipProvider: mentorship,
+                    placementsProvider: placements,
+                    opportunityProvider: opportunities,
+                  ),
         ),
       ],
       child: Consumer<ThemeProvider>(
@@ -186,7 +202,8 @@ class MyApp extends StatelessWidget {
               if (settings.name == completeMentorshipRoute) {
                 final request = settings.arguments as MentorshipRequest;
                 return MaterialPageRoute(
-                  builder: (context) => CompleteMentorshipView(request: request),
+                  builder: (context) =>
+                      CompleteMentorshipView(request: request),
                 );
               }
               return null; // Let routes handle it
@@ -214,12 +231,17 @@ class MyApp extends StatelessWidget {
               // v7.2: Multi-role ecosystem routes
               alumniDirectoryRoute: (context) => const AlumniDirectoryView(),
               alumniProfileRoute: (context) => const AlumniProfileView(),
-              mentorshipRequestsRoute: (context) => const MentorshipRequestsView(),
-              createMentorshipRequestRoute: (context) => const CreateMentorshipRequestView(),
-              mentorshipRequestDetailRoute: (context) => const MentorshipRequestDetailView(),
+              mentorshipRequestsRoute: (context) =>
+                  const MentorshipRequestsView(),
+              createMentorshipRequestRoute: (context) =>
+                  const CreateMentorshipRequestView(),
+              mentorshipRequestDetailRoute: (context) =>
+                  const MentorshipRequestDetailView(),
               opportunitiesRoute: (context) => const OpportunitiesView(),
-              createOpportunityRoute: (context) => const CreateOpportunityView(),
-              opportunityDetailRoute: (context) => const OpportunityDetailView(),
+              createOpportunityRoute: (context) =>
+                  const CreateOpportunityView(),
+              opportunityDetailRoute: (context) =>
+                  const OpportunityDetailView(),
               studentAnalyticsRoute: (context) => const StudentAnalyticsView(),
               // v7.3: Chat routes
               chatsListRoute: (context) => const ChatsListView(),
@@ -228,7 +250,8 @@ class MyApp extends StatelessWidget {
               uploadNotesRoute: (context) => const UploadNotesView(),
               placementsListRoute: (context) => const PlacementsListView(),
               aiChatRoute: (context) => const AIChatView(),
-              profileViewRoute: (context) => const extracted_profile.ProfileView(),
+              profileViewRoute: (context) =>
+                  const extracted_profile.ProfileView(),
             },
           );
         },
@@ -361,8 +384,10 @@ class _AuthGuardState extends State<AuthGuard> {
                 if (profileProvider.hasProfile && roleProvider.hasRole) {
                   WidgetsBinding.instance.addPostFrameCallback((_) {
                     if (!mounted || _isLoggedOut) return;
-                    final mentorshipProvider = context.read<MentorshipProvider>();
-                    final opportunityProvider = context.read<OpportunityProvider>();
+                    final mentorshipProvider = context
+                        .read<MentorshipProvider>();
+                    final opportunityProvider = context
+                        .read<OpportunityProvider>();
 
                     final roleString = roleProvider.role?.name ?? 'student';
 

@@ -145,7 +145,7 @@ class TeacherDashboardView extends StatelessWidget {
               subtitle: 'Access placement analytics dashboard',
               color: AppTheme.secondaryIndigo,
               isDark: isDark,
-              onTap: () => Navigator.pushNamed(context, studentAnalyticsRoute),
+              onTap: () => Navigator.pushNamed(context, placementsListRoute),
             ),
           ],
         ),

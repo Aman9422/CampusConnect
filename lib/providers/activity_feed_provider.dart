@@ -165,7 +165,8 @@ class ActivityFeedProvider extends ChangeNotifier {
       activities.addAll(recentApplications);
 
       // Convert recent opportunities to activities
-      final recentOpportunities = _opportunityProvider.opportunities?.take(10) ?? [];
+      final recentOpportunities =
+          _opportunityProvider.opportunities?.take(10) ?? [];
       for (final opportunity in recentOpportunities) {
         activities.add(_createActivityFromOpportunity(opportunity));
       }
@@ -210,7 +211,8 @@ class ActivityFeedProvider extends ChangeNotifier {
 
   /// Convert Chat to ActivityItem
   ActivityItem _createActivityFromChat(Chat chat) {
-    final senderName = chat.participantNames[chat.lastMessageSenderId] ?? 'Unknown';
+    final senderName =
+        chat.participantNames[chat.lastMessageSenderId] ?? 'Unknown';
     return ActivityItem.fromChatMessage(
       id: 'chat_${chat.id}',
       senderName: senderName,

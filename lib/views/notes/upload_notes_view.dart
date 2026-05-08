@@ -25,7 +25,8 @@ class _UploadNotesViewState extends State<UploadNotesView> {
   final _titleController = TextEditingController();
   final _subjectController = TextEditingController();
   final _departmentController = TextEditingController();
-  final _descriptionController = TextEditingController(); // Optional - for future use
+  final _descriptionController =
+      TextEditingController(); // Optional - for future use
 
   bool _isUploading = false;
   String _selectedYear = '1';
@@ -50,12 +51,17 @@ class _UploadNotesViewState extends State<UploadNotesView> {
     try {
       // For now, use existing getAllNotes and filter client-side
       // In Phase 2, we'll add proper teacher-specific methods
-      final allNotesSnapshot = await NotesService.instance().getAllNotes().first;
+      final allNotesSnapshot = await NotesService.instance()
+          .getAllNotes()
+          .first;
       final profile = context.read<ProfileProvider>().profile;
 
       if (profile != null) {
         final teacherNotes = allNotesSnapshot
-            .where((note) => note.uploadedBy == profile.personal.effectiveDisplayName)
+            .where(
+              (note) =>
+                  note.uploadedBy == profile.personal.effectiveDisplayName,
+            )
             .take(5)
             .toList();
 
@@ -173,36 +179,6 @@ class _UploadNotesViewState extends State<UploadNotesView> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Info card explaining Phase 1 limitation
-                  Container(
-                    padding: EdgeInsets.all(layout.cardPadding),
-                    decoration: BoxDecoration(
-                      color: AppTheme.warningBg,
-                      borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
-                      border: Border.all(
-                        color: AppTheme.warning.withOpacity(0.3),
-                        width: 1,
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.info_outline, color: AppTheme.warning, size: 20),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            'Phase 1: Note metadata creation. File upload functionality coming in Phase 2.',
-                            style: AppTheme.bodySmall.copyWith(
-                              color: AppTheme.gray800,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 20),
-
                   // Metadata form
                   _buildMetadataForm(isDark, layout),
 
@@ -360,13 +336,15 @@ class _UploadNotesViewState extends State<UploadNotesView> {
                       DropdownMenuItem(value: year, child: Text('Year $year')),
                 )
                 .toList(),
-            onChanged: _isUploading ? null : (value) {
-              if (value != null) {
-                setState(() {
-                  _selectedYear = value;
-                });
-              }
-            },
+            onChanged: _isUploading
+                ? null
+                : (value) {
+                    if (value != null) {
+                      setState(() {
+                        _selectedYear = value;
+                      });
+                    }
+                  },
           ),
 
           const SizedBox(height: 16),
@@ -378,7 +356,7 @@ class _UploadNotesViewState extends State<UploadNotesView> {
             maxLines: 3,
             decoration: InputDecoration(
               labelText: 'Notes (optional)',
-              hintText: '(File upload coming in Phase 2)',
+              hintText: 'Add any guidance for students',
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
               ),

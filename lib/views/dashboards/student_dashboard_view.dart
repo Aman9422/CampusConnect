@@ -89,8 +89,9 @@ class _StudentDashboardTab extends StatelessWidget {
     final activityFeed = context.watch<ActivityFeedProvider>();
 
     return Scaffold(
-      backgroundColor:
-          isDark ? AppTheme.darkBackground : const Color(0xFFF8FAFC),
+      backgroundColor: isDark
+          ? AppTheme.darkBackground
+          : const Color(0xFFF8FAFC),
       appBar: AppBar(
         backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
         elevation: 0,
@@ -320,11 +321,7 @@ class _StudentDashboardTab extends StatelessWidget {
                 color: iconColor.withAlpha(isDark ? 51 : 26),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Icon(
-                icon,
-                color: iconColor,
-                size: 20,
-              ),
+              child: Icon(icon, color: iconColor, size: 20),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -350,11 +347,7 @@ class _StudentDashboardTab extends StatelessWidget {
                 ],
               ),
             ),
-            Icon(
-              Icons.chevron_right,
-              color: AppTheme.gray400,
-              size: 20,
-            ),
+            Icon(Icons.chevron_right, color: AppTheme.gray400, size: 20),
           ],
         ),
       ),
@@ -378,11 +371,7 @@ class _StudentDashboardTab extends StatelessWidget {
                 color: activity.iconColor.withAlpha(isDark ? 51 : 26),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Icon(
-                activity.icon,
-                color: activity.iconColor,
-                size: 20,
-              ),
+              child: Icon(activity.icon, color: activity.iconColor, size: 20),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -408,11 +397,7 @@ class _StudentDashboardTab extends StatelessWidget {
                 ],
               ),
             ),
-            Icon(
-              Icons.chevron_right,
-              color: AppTheme.gray400,
-              size: 20,
-            ),
+            Icon(Icons.chevron_right, color: AppTheme.gray400, size: 20),
           ],
         ),
       ),
@@ -530,11 +515,7 @@ class _StudentDashboardTab extends StatelessWidget {
                 color: AppTheme.primaryBlue.withAlpha(26),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Icon(
-                icon,
-                color: AppTheme.primaryBlue,
-                size: 20,
-              ),
+              child: Icon(icon, color: AppTheme.primaryBlue, size: 20),
             ),
             const SizedBox(height: 12),
             Text(
@@ -607,9 +588,7 @@ class _StudentDashboardTab extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
         color: isDark ? AppTheme.darkSurface : Colors.white,
-        border: Border.all(
-          color: isDark ? AppTheme.gray700 : AppTheme.gray200,
-        ),
+        border: Border.all(color: isDark ? AppTheme.gray700 : AppTheme.gray200),
         gradient: LinearGradient(
           colors: isDark
               ? [AppTheme.darkSurface, AppTheme.primaryBlue.withAlpha(13)]
@@ -679,8 +658,7 @@ class _StudentDashboardTab extends StatelessWidget {
                       ),
                     ),
                     // Eligibility badge
-                    if (eligibility != null &&
-                        !placement.isDeadlinePassed) ...[
+                    if (eligibility != null && !placement.isDeadlinePassed) ...[
                       const SizedBox(height: 8),
                       EligibilityBadge(eligibility: eligibility, compact: true),
                     ],
@@ -747,8 +725,9 @@ class _StudentDashboardTab extends StatelessWidget {
                         ? null
                         : () => _showApplyDialog(context, placement),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor:
-                          hasApplied ? AppTheme.gray400 : AppTheme.primaryBlue,
+                      backgroundColor: hasApplied
+                          ? AppTheme.gray400
+                          : AppTheme.primaryBlue,
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
@@ -805,8 +784,11 @@ class _StudentDashboardTab extends StatelessWidget {
         break;
       case ActivityType.chatMessage:
         if (actionData['chatId'] != null) {
-          Navigator.pushNamed(context, chatDetailRoute,
-              arguments: actionData['chatId']);
+          Navigator.pushNamed(
+            context,
+            chatDetailRoute,
+            arguments: actionData['chatId'],
+          );
         }
         break;
       case ActivityType.mentorshipUpdate:
