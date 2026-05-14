@@ -2,8 +2,11 @@ import 'package:campusconnect/providers/ai_usage_provider.dart';
 import 'package:campusconnect/providers/notifications_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
+import 'package:campusconnect/providers/recommendation_provider.dart';
 import 'package:campusconnect/providers/resume_review_provider.dart';
 import 'package:campusconnect/providers/role_provider.dart';
+import 'package:campusconnect/providers/engagement_provider.dart';
+import 'package:campusconnect/providers/ai_chat_provider.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:flutter/material.dart';
@@ -62,6 +65,9 @@ class _VerifyEmailViewState extends State<VerifyEmailView>
     context.read<NotificationsProvider>().reset();
     context.read<ResumeReviewProvider>().reset();
     context.read<RoleProvider>().reset();
+    context.read<RecommendationProvider>().reset();
+    context.read<EngagementProvider>().reset();
+    context.read<AIChatProvider>().reset();
     try {
       await AuthService.firebase().logOut();
     } catch (_) {
@@ -230,8 +236,8 @@ class _VerifyEmailViewState extends State<VerifyEmailView>
                                         strokeWidth: 2,
                                         valueColor:
                                             AlwaysStoppedAnimation<Color>(
-                                          Colors.white,
-                                        ),
+                                              Colors.white,
+                                            ),
                                       ),
                                     )
                                   : Text(

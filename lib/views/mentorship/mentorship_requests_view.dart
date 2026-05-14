@@ -390,6 +390,6 @@ class _MentorshipRequestsViewState extends State<MentorshipRequestsView> {
 
   void _createNewRequest() {
     // Navigate to alumni directory to select an alumni for mentorship
-    Navigator.pushNamed(context, '/alumni-directory');
+    Navigator.pushNamed(context, alumniDirectoryRoute);
   }
 }

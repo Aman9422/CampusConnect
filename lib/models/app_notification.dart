@@ -13,6 +13,12 @@ enum NotificationType {
   mentorshipRejected, // Alumni rejects request
   newMessage, // Chat message received
   newJobPost, // New opportunity posted
+  // v7.4: Intelligent notifications
+  mentorMatch, // AI mentor recommendation
+  jobMatch, // AI job recommendation
+  inactiveChatReminder, // Inactive chat reminder
+  engagementMilestone, // Streak / engagement milestone
+  recommendationDigest, // Consolidated recommendations
 }
 
 /// AppNotification model for in-app notifications
@@ -91,6 +97,17 @@ class AppNotification {
         return NotificationType.newMessage;
       case 'newJobPost':
         return NotificationType.newJobPost;
+      // v7.4
+      case 'mentorMatch':
+        return NotificationType.mentorMatch;
+      case 'jobMatch':
+        return NotificationType.jobMatch;
+      case 'inactiveChatReminder':
+        return NotificationType.inactiveChatReminder;
+      case 'engagementMilestone':
+        return NotificationType.engagementMilestone;
+      case 'recommendationDigest':
+        return NotificationType.recommendationDigest;
       default:
         return NotificationType.system;
     }
@@ -281,6 +298,57 @@ class AppNotification {
     );
   }
 
+  /// v7.4: Factory for mentor match recommendation
+  factory AppNotification.mentorMatch({
+    required String alumniId,
+    required String alumniName,
+    required int matchScore,
+  }) {
+    return AppNotification(
+      id: '',
+      type: NotificationType.mentorMatch,
+      title: 'New Mentor Match',
+      body: '$alumniName looks like a strong match ($matchScore%)',
+      data: {'alumniId': alumniId, 'matchScore': matchScore},
+      isRead: false,
+      createdAt: DateTime.now(),
+    );
+  }
+
+  /// v7.4: Factory for job match recommendation
+  factory AppNotification.jobMatch({
+    required String opportunityId,
+    required String title,
+    required String company,
+    required int matchScore,
+  }) {
+    return AppNotification(
+      id: '',
+      type: NotificationType.jobMatch,
+      title: 'New Job Match',
+      body: '$title at $company ($matchScore% match)',
+      data: {'opportunityId': opportunityId, 'matchScore': matchScore},
+      isRead: false,
+      createdAt: DateTime.now(),
+    );
+  }
+
+  /// v7.4: Factory for engagement milestone
+  factory AppNotification.engagementMilestone({
+    required int streakDays,
+    required String milestoneText,
+  }) {
+    return AppNotification(
+      id: '',
+      type: NotificationType.engagementMilestone,
+      title: 'Engagement Milestone',
+      body: '$milestoneText • $streakDays day streak',
+      data: {'streakDays': streakDays},
+      isRead: false,
+      createdAt: DateTime.now(),
+    );
+  }
+
   /// Get icon for notification type
   String get iconName {
     switch (type) {
@@ -305,6 +373,16 @@ class AppNotification {
         return 'message';
       case NotificationType.newJobPost:
         return 'work';
+      case NotificationType.mentorMatch:
+        return 'groups';
+      case NotificationType.jobMatch:
+        return 'recommend';
+      case NotificationType.inactiveChatReminder:
+        return 'chat';
+      case NotificationType.engagementMilestone:
+        return 'emoji_events';
+      case NotificationType.recommendationDigest:
+        return 'tips_and_updates';
     }
   }
 

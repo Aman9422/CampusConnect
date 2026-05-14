@@ -9,11 +9,14 @@ class TeacherAnalyticsProvider extends ChangeNotifier {
   final TeacherAnalyticsService _analyticsService;
 
   TeacherAnalyticsProvider({TeacherAnalyticsService? service})
-      : _analyticsService = service ?? TeacherAnalyticsService.instance();
+    : _analyticsService = service ?? TeacherAnalyticsService.instance();
 
   // State
   Map<String, dynamic>? _stats;
   List<Map<String, dynamic>>? _studentData;
+  Map<String, dynamic>? _predictionIndicators;
+  List<Map<String, dynamic>>? _skillGapAnalysis;
+  List<Map<String, dynamic>>? _performanceTrends;
   bool _isLoading = false;
   String? _error;
   bool _isDisposed = false;
@@ -21,6 +24,9 @@ class TeacherAnalyticsProvider extends ChangeNotifier {
   // Getters
   Map<String, dynamic>? get stats => _stats;
   List<Map<String, dynamic>>? get studentData => _studentData;
+  Map<String, dynamic>? get predictionIndicators => _predictionIndicators;
+  List<Map<String, dynamic>>? get skillGapAnalysis => _skillGapAnalysis;
+  List<Map<String, dynamic>>? get performanceTrends => _performanceTrends;
   bool get isLoading => _isLoading;
   String? get error => _error;
 
@@ -37,12 +43,18 @@ class TeacherAnalyticsProvider extends ChangeNotifier {
       final results = await Future.wait([
         _analyticsService.getResumeReviewStats(),
         _analyticsService.getStudentResumeData(),
+        _analyticsService.getPlacementPredictionIndicators(),
+        _analyticsService.getSkillGapAnalysis(),
+        _analyticsService.getPerformanceTrendInsights(),
       ]);
 
       if (_isDisposed) return; // Safety check
 
       _stats = results[0] as Map<String, dynamic>;
       _studentData = results[1] as List<Map<String, dynamic>>;
+      _predictionIndicators = results[2] as Map<String, dynamic>;
+      _skillGapAnalysis = results[3] as List<Map<String, dynamic>>;
+      _performanceTrends = results[4] as List<Map<String, dynamic>>;
       _error = null;
     } catch (e) {
       if (_isDisposed) return; // Safety check
@@ -74,7 +86,8 @@ class TeacherAnalyticsProvider extends ChangeNotifier {
   double get averageScore => getStat('avgScore', 0.0);
 
   /// Get score distribution map
-  Map<String, int> get scoreDistribution => getStat('scoreDistribution', <String, int>{});
+  Map<String, int> get scoreDistribution =>
+      getStat('scoreDistribution', <String, int>{});
 
   /// Get excellent scores count (80+)
   int get excellentCount => scoreDistribution['excellent'] ?? 0;
@@ -91,6 +104,15 @@ class TeacherAnalyticsProvider extends ChangeNotifier {
   /// Check if analytics have been loaded
   bool get hasData => _stats != null && _studentData != null;
 
+  int get highPotentialCount =>
+      (_predictionIndicators?['highPotential'] as int?) ?? 0;
+  int get mediumPotentialCount =>
+      (_predictionIndicators?['mediumPotential'] as int?) ?? 0;
+  int get atRiskCount => (_predictionIndicators?['atRisk'] as int?) ?? 0;
+  double get predictedPlacementRate =>
+      (_predictionIndicators?['predictedPlacementRate'] as num? ?? 0.0)
+          .toDouble();
+
   /// Get top N students by score
   List<Map<String, dynamic>> getTopStudents(int count) {
     if (_studentData == null) return [];
@@ -103,12 +125,10 @@ class TeacherAnalyticsProvider extends ChangeNotifier {
     required int maxScore,
   }) {
     if (_studentData == null) return [];
-    return _studentData!
-        .where((student) {
-          final score = student['latestScore'] as int? ?? 0;
-          return score >= minScore && score <= maxScore;
-        })
-        .toList();
+    return _studentData!.where((student) {
+      final score = student['latestScore'] as int? ?? 0;
+      return score >= minScore && score <= maxScore;
+    }).toList();
   }
 
   /// Get students with excellent scores (80+)
@@ -165,6 +185,9 @@ class TeacherAnalyticsProvider extends ChangeNotifier {
     // Clear all state
     _stats = null;
     _studentData = null;
+    _predictionIndicators = null;
+    _skillGapAnalysis = null;
+    _performanceTrends = null;
     _isLoading = false;
     _error = null;
 

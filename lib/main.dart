@@ -18,6 +18,9 @@ import 'package:campusconnect/providers/opportunity_provider.dart';
 import 'package:campusconnect/providers/chat_provider.dart';
 import 'package:campusconnect/providers/teacher_analytics_provider.dart'; // v7.3
 import 'package:campusconnect/providers/activity_feed_provider.dart'; // v7.3: Activity feed
+import 'package:campusconnect/providers/ai_chat_provider.dart'; // v7.4
+import 'package:campusconnect/providers/recommendation_provider.dart'; // v7.4
+import 'package:campusconnect/providers/engagement_provider.dart'; // v7.4
 import 'package:campusconnect/services/ai/ai_service.dart';
 import 'package:campusconnect/services/ai/resume_review_service.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
@@ -26,6 +29,8 @@ import 'package:campusconnect/services/firestore/placements_service.dart';
 import 'package:campusconnect/services/firestore/alumni_directory_service.dart';
 import 'package:campusconnect/services/firestore/mentorship_service.dart';
 import 'package:campusconnect/services/firestore/opportunity_service.dart';
+import 'package:campusconnect/services/firestore/recommendation_service.dart'; // v7.4
+import 'package:campusconnect/services/firestore/engagement_service.dart'; // v7.4
 // v7.3: Chat service
 import 'package:campusconnect/services/firestore/chat_service.dart';
 import 'package:campusconnect/services/firestore/teacher_analytics_service.dart'; // v7.3
@@ -138,6 +143,18 @@ class MyApp extends StatelessWidget {
             service: TeacherAnalyticsService.instance(),
           ),
         ),
+        // v7.4: AI recommendation and engagement providers
+        ChangeNotifierProvider(
+          create: (_) =>
+              RecommendationProvider(service: RecommendationService.instance()),
+        ),
+        ChangeNotifierProvider(
+          create: (_) =>
+              EngagementProvider(service: EngagementService.instance()),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => AIChatProvider(aiService: AIService.instance()),
+        ),
         // v7.3: Activity feed provider (depends on other providers)
         ChangeNotifierProxyProvider5<
           NotificationsProvider,
@@ -185,7 +202,13 @@ class MyApp extends StatelessWidget {
             onGenerateRoute: (settings) {
               // v6.8: Handle dynamic routes with arguments
               if (settings.name == resumeReviewDetailRoute) {
-                final reviewId = settings.arguments as String;
+                final args = settings.arguments;
+                final reviewId = args is String ? args : null;
+                if (reviewId == null || reviewId.isEmpty) {
+                  return MaterialPageRoute(
+                    builder: (context) => const ResumeReviewHistoryView(),
+                  );
+                }
                 return MaterialPageRoute(
                   builder: (context) =>
                       ResumeReviewDetailView(reviewId: reviewId),
@@ -193,14 +216,26 @@ class MyApp extends StatelessWidget {
               }
               // v7.3: Handle chat route with chatId argument
               if (settings.name == chatRoute) {
-                final chatId = settings.arguments as String;
+                final args = settings.arguments;
+                final chatId = args is String ? args : null;
+                if (chatId == null || chatId.isEmpty) {
+                  return MaterialPageRoute(
+                    builder: (context) => const ChatsListView(),
+                  );
+                }
                 return MaterialPageRoute(
                   builder: (context) => ChatView(chatId: chatId),
                 );
               }
               // v7.3: Handle complete mentorship route with request argument
               if (settings.name == completeMentorshipRoute) {
-                final request = settings.arguments as MentorshipRequest;
+                final args = settings.arguments;
+                if (args is! MentorshipRequest) {
+                  return MaterialPageRoute(
+                    builder: (context) => const MentorshipRequestsView(),
+                  );
+                }
+                final request = args;
                 return MaterialPageRoute(
                   builder: (context) =>
                       CompleteMentorshipView(request: request),
@@ -347,6 +382,8 @@ class _AuthGuardState extends State<AuthGuard> {
                         .read<ResumeReviewProvider>(); // v6.7
                     final rp = context.read<RoleProvider>(); // v7.1
                     final chatProvider = context.read<ChatProvider>(); // v7.3
+                    final aiChatProvider = context
+                        .read<AIChatProvider>(); // v7.4
 
                     placementsProvider.initWithUser(user.id);
                     aiProvider.initWithUser(user.id);
@@ -354,6 +391,7 @@ class _AuthGuardState extends State<AuthGuard> {
                     resumeReviewProvider.initWithUser(user.id); // v6.7
                     rp.initWithUser(user.id); // v7.1
                     chatProvider.initWithUser(user.id); // v7.3
+                    aiChatProvider.initWithUser(user.id); // v7.4
                     // v7.2: Initialize ecosystem providers after role is loaded
                     // This will be done in a separate callback below
                     profileProvider.initWithUser(
@@ -388,6 +426,10 @@ class _AuthGuardState extends State<AuthGuard> {
                         .read<MentorshipProvider>();
                     final opportunityProvider = context
                         .read<OpportunityProvider>();
+                    final recommendationProvider = context
+                        .read<RecommendationProvider>();
+                    final engagementProvider = context
+                        .read<EngagementProvider>();
 
                     final roleString = roleProvider.role?.name ?? 'student';
 
@@ -396,6 +438,19 @@ class _AuthGuardState extends State<AuthGuard> {
                     }
                     if (!opportunityProvider.isInitialized) {
                       opportunityProvider.initWithUser(user.id, roleString);
+                    }
+
+                    if (!recommendationProvider.isInitialized) {
+                      recommendationProvider.initWithUser(
+                        user.id,
+                        profileProvider.profile!,
+                      );
+                    }
+                    if (!engagementProvider.isInitialized) {
+                      engagementProvider.initWithUser(
+                        user.id,
+                        profileProvider.profile!,
+                      );
                     }
                   });
                 }
@@ -441,6 +496,10 @@ class _AuthGuardState extends State<AuthGuard> {
               context.read<TeacherAnalyticsProvider>().reset();
               // v7.3: Reset activity feed provider
               context.read<ActivityFeedProvider>().reset();
+              // v7.4: Reset recommendation/engagement/AI chat providers
+              context.read<RecommendationProvider>().reset();
+              context.read<EngagementProvider>().reset();
+              context.read<AIChatProvider>().reset();
             });
           }
 

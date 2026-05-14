@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:campusconnect/models/resume_review.dart';
+import 'package:campusconnect/models/user_activity.dart';
 import 'package:campusconnect/services/ai/resume_review_service.dart';
+import 'package:campusconnect/services/firestore/engagement_service.dart';
 import 'package:campusconnect/services/firestore/resume_history_service.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -18,6 +20,7 @@ import 'package:flutter/foundation.dart';
 class ResumeReviewProvider with ChangeNotifier {
   final ResumeReviewService _service;
   final ResumeHistoryService _historyService; // v6.8
+  final EngagementService _engagementService;
   final Connectivity _connectivity = Connectivity();
 
   String? userId;
@@ -25,9 +28,11 @@ class ResumeReviewProvider with ChangeNotifier {
   ResumeReviewProvider({
     required ResumeReviewService service,
     ResumeHistoryService? historyService, // v6.8
+    EngagementService? engagementService,
     this.userId,
   }) : _service = service,
-       _historyService = historyService ?? ResumeHistoryService.instance();
+       _historyService = historyService ?? ResumeHistoryService.instance(),
+       _engagementService = engagementService ?? EngagementService.instance();
 
   // === State ===
 
@@ -284,6 +289,17 @@ class ResumeReviewProvider with ChangeNotifier {
           debugPrint('Failed to save review to history: $e');
           // Don't fail the operation if history save fails
         });
+
+        _engagementService
+            .logActivity(
+              userId: userId!,
+              eventType: ActivityEventType.resumeReviewed,
+              points: 5,
+              metadata: {'targetRole': targetRole},
+            )
+            .catchError((e) {
+              debugPrint('Failed to log resume review activity: $e');
+            });
       }
 
       notifyListeners();

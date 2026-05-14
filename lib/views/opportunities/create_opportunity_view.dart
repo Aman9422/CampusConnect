@@ -80,8 +80,8 @@ class _CreateOpportunityViewState extends State<CreateOpportunityView> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final args =
-        ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>?;
+    final routeArgs = ModalRoute.of(context)?.settings.arguments;
+    final args = routeArgs is Map<String, dynamic> ? routeArgs : null;
     _existingOpportunity = args?['opportunity'] as Opportunity?;
 
     if (_existingOpportunity != null) {

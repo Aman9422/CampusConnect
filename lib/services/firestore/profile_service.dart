@@ -64,6 +64,11 @@ class ProfileService {
       await _usersCollection
           .doc(profile.uid)
           .set(updatedProfile.toFirestore(), SetOptions(merge: true));
+
+      // v7.4: Keep optional public profile projection in sync for alumni
+      if (updatedProfile.role == UserRole.alumni) {
+        await syncPublicProfile(updatedProfile);
+      }
     } catch (e) {
       debugPrint('Error updating profile: $e');
       rethrow;
@@ -141,6 +146,111 @@ class ProfileService {
       debugPrint('Error initializing profile: $e');
       // Fallback: return empty profile
       return StudentProfile.empty(uid, email);
+    }
+  }
+
+  /// v7.4: Ensure alumni has a stable public profile key.
+  Future<String> ensurePublicProfileKey(StudentProfile profile) async {
+    if (profile.publicProfileKey != null &&
+        profile.publicProfileKey!.isNotEmpty) {
+      return profile.publicProfileKey!;
+    }
+
+    final baseName = profile.personal.effectiveDisplayName.isNotEmpty
+        ? profile.personal.effectiveDisplayName
+        : 'alumni';
+    final slug = baseName
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+        .replaceAll(RegExp(r'^-+|-+$'), '');
+    final uidSuffix = profile.uid.length >= 6
+        ? profile.uid.substring(profile.uid.length - 6)
+        : profile.uid;
+    final key = '${slug.isEmpty ? 'alumni' : slug}-$uidSuffix';
+
+    await _usersCollection.doc(profile.uid).set({
+      'publicProfileKey': key,
+      'metadata.updatedAt': Timestamp.fromDate(DateTime.now()),
+    }, SetOptions(merge: true));
+
+    return key;
+  }
+
+  /// v7.4: Sync public profile projection for shareable alumni links.
+  Future<void> syncPublicProfile(StudentProfile profile) async {
+    final key = profile.publicProfileKey;
+    if (key == null || key.isEmpty || !profile.isPublicProfile) {
+      if (key != null && key.isNotEmpty) {
+        await _firestore
+            .collection('public_profiles')
+            .doc(key)
+            .delete()
+            .catchError((_) {
+              // Ignore when projection does not exist yet
+            });
+      }
+      return;
+    }
+
+    final opportunitiesCount = await _firestore
+        .collection('opportunities')
+        .where('alumniId', isEqualTo: profile.uid)
+        .count()
+        .get();
+
+    await _firestore.collection('public_profiles').doc(key).set({
+      'uid': profile.uid,
+      'profileKey': key,
+      'isPublic': true,
+      'name': profile.personal.effectiveDisplayName,
+      'jobRole': profile.jobRole,
+      'company': profile.company,
+      'designation': profile.designation,
+      'careerInterest': profile.careerInterest,
+      'skills': profile.skills ?? <String>[],
+      'linkedinProfile': profile.linkedinProfile,
+      'experience':
+          '${profile.jobRole ?? "Alumni"} at ${profile.company ?? "CampusConnect Network"}',
+      'opportunitiesPosted': opportunitiesCount.count ?? 0,
+      'updatedAt': Timestamp.fromDate(DateTime.now()),
+    }, SetOptions(merge: true));
+  }
+
+  /// v7.4: Resolve a public profile key to full alumni profile.
+  Future<StudentProfile?> getPublicAlumniProfile(String profileKey) async {
+    try {
+      final publicDoc = await _firestore
+          .collection('public_profiles')
+          .doc(profileKey)
+          .get();
+      if (!publicDoc.exists) return null;
+      final data = publicDoc.data();
+      if (data == null || data['isPublic'] != true) return null;
+      final uid = data['uid'] as String?;
+      if (uid == null || uid.isEmpty) return null;
+      return getProfile(uid);
+    } catch (e) {
+      debugPrint('Error getting public alumni profile: $e');
+      return null;
+    }
+  }
+
+  /// v7.4: Get public profile projection data by key.
+  Future<Map<String, dynamic>?> getPublicProfileProjection(
+    String profileKey,
+  ) async {
+    try {
+      final publicDoc = await _firestore
+          .collection('public_profiles')
+          .doc(profileKey)
+          .get();
+      if (!publicDoc.exists) return null;
+      final data = publicDoc.data();
+      if (data == null || data['isPublic'] != true) return null;
+      return data;
+    } catch (e) {
+      debugPrint('Error getting public profile projection: $e');
+      return null;
     }
   }
 }

@@ -1,9 +1,10 @@
 import 'package:campusconnect/constants/routes.dart';
+import 'package:campusconnect/models/ai_interaction.dart';
 import 'package:campusconnect/models/chat_message.dart';
+import 'package:campusconnect/providers/ai_chat_provider.dart';
 import 'package:campusconnect/providers/ai_usage_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
-import 'package:campusconnect/services/ai/ai_service.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/utilities/error_messages.dart';
@@ -24,13 +25,8 @@ class AIChatView extends StatefulWidget {
 }
 
 class _AIChatViewState extends State<AIChatView> {
-  final AIService _aiService = AIService.instance();
-
-  // Chat state
-  final List<ChatMessage> _chatMessages = [];
   final TextEditingController _chatController = TextEditingController();
   final ScrollController _chatScrollController = ScrollController();
-  bool _isLoadingAIResponse = false;
 
   @override
   void dispose() {
@@ -42,6 +38,7 @@ class _AIChatViewState extends State<AIChatView> {
   @override
   Widget build(BuildContext context) {
     final aiProvider = context.watch<AIUsageProvider>();
+    final aiChatProvider = context.watch<AIChatProvider>();
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
@@ -93,18 +90,18 @@ class _AIChatViewState extends State<AIChatView> {
               ),
             ),
           Expanded(
-            child: _chatMessages.isEmpty
+            child: aiChatProvider.messages.isEmpty
                 ? _buildEmptyChatState()
                 : ListView.builder(
                     controller: _chatScrollController,
                     padding: const EdgeInsets.all(16),
-                    itemCount: _chatMessages.length,
+                    itemCount: aiChatProvider.messages.length,
                     itemBuilder: (context, index) {
-                      return _buildChatBubble(_chatMessages[index]);
+                      return _buildChatBubble(aiChatProvider.messages[index]);
                     },
                   ),
           ),
-          if (_isLoadingAIResponse) _buildLoadingIndicator(),
+          if (aiChatProvider.isSending) _buildLoadingIndicator(),
           _buildChatInput(),
         ],
       ),
@@ -156,9 +153,10 @@ class _AIChatViewState extends State<AIChatView> {
               children: [
                 // v6.5: Smart suggestion that uses eligibility engine
                 _buildSuggestionChip('Which placements am I eligible for?'),
-                _buildSuggestionChip('How to prepare for placements?'),
-                _buildSuggestionChip('Study tips for exams'),
-                _buildSuggestionChip('Resume help'),
+                _buildSuggestionChip('Improve my resume for ATS'),
+                _buildSuggestionChip('Suggest my career path'),
+                _buildSuggestionChip('Run a mock interview'),
+                _buildSuggestionChip('Find my skill gaps'),
               ],
             ),
           ],
@@ -282,8 +280,9 @@ class _AIChatViewState extends State<AIChatView> {
   Widget _buildChatInput() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final aiProvider = context.watch<AIUsageProvider>();
+    final aiChatProvider = context.watch<AIChatProvider>();
     final isDisabled =
-        _isLoadingAIResponse ||
+        aiChatProvider.isSending ||
         !aiProvider.isOnline ||
         aiProvider.hasReachedLimit;
 
@@ -396,7 +395,8 @@ class _AIChatViewState extends State<AIChatView> {
 
   Future<void> _handleSendMessage(String text) async {
     final message = text.trim();
-    if (message.isEmpty || _isLoadingAIResponse) return;
+    final aiChatProvider = context.read<AIChatProvider>();
+    if (message.isEmpty || aiChatProvider.isSending) return;
 
     final userId = AuthService.firebase().currentUser?.id;
     if (userId == null) {
@@ -421,39 +421,33 @@ class _AIChatViewState extends State<AIChatView> {
     // Clear input
     _chatController.clear();
 
-    // Add user message
-    setState(() {
-      _chatMessages.add(ChatMessage.user(message));
-      _isLoadingAIResponse = true;
-    });
-
     // Scroll to bottom
     _scrollToBottom();
 
     // v6.5: Check if this is an eligibility-related question
     final eligibilityResponse = _handleEligibilityQuestion(message);
     if (eligibilityResponse != null) {
-      // Answer from v6.5 intelligence - no AI call needed!
-      setState(() {
-        _chatMessages.add(ChatMessage.ai(eligibilityResponse));
-        _isLoadingAIResponse = false;
-      });
+      await aiChatProvider.addLocalExchange(
+        userMessage: message,
+        aiMessage: eligibilityResponse,
+        intent: AIInteractionIntent.skillGap,
+      );
       _scrollToBottom();
       return;
     }
 
     try {
-      // Call AI service (VERSION 4: Returns AIResponse with metadata)
-      final aiResponse = await _aiService.sendMessage(
-        userId: userId,
-        message: message,
-      );
+      // Ensure provider is initialized for current user
+      if (!aiChatProvider.isInitialized) {
+        await aiChatProvider.initWithUser(userId);
+      }
 
-      // Add AI response
-      setState(() {
-        _chatMessages.add(ChatMessage.ai(aiResponse.message));
-        _isLoadingAIResponse = false;
-      });
+      // Call AI career assistant
+      final aiResponse = await aiChatProvider.sendMessage(message);
+      if (aiResponse == null) {
+        _scrollToBottom();
+        return;
+      }
 
       // VERSION 4: Update provider with latest usage info
       if (aiResponse.trial != null) {
@@ -473,17 +467,11 @@ class _AIChatViewState extends State<AIChatView> {
       // Scroll to bottom
       _scrollToBottom();
     } catch (e) {
-      // V5.1.x: User-friendly error translation
       final friendlyError = ErrorMessages.getUserFriendlyMessage(e);
-
-      setState(() {
-        _chatMessages.add(
-          ChatMessage.ai(
-            'Sorry, I couldn\'t process your message.\n\n$friendlyError',
-          ),
-        );
-        _isLoadingAIResponse = false;
-      });
+      await aiChatProvider.addLocalExchange(
+        userMessage: message,
+        aiMessage: 'Sorry, I couldn\'t process your message.\n\n$friendlyError',
+      );
       _scrollToBottom();
 
       debugPrint('AI Chat error: $e');

@@ -1,4 +1,6 @@
 const {onRequest, onCall} = require("firebase-functions/v2/https");
+const {onDocumentWritten, onDocumentCreated} = require("firebase-functions/v2/firestore");
+const {onSchedule} = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
 const { generateAIResponse, generateChatResponse, generateResumeReviewAI } = require("./ai/aiProvider");
 
@@ -1164,3 +1166,586 @@ exports.generateResumeAnalysis = onCall(
       }
     }
 );
+
+// ===============================================
+// VERSION 7.4: AI ECOSYSTEM AUTOMATION LAYER
+// ===============================================
+
+const INACTIVITY_REMINDER_HOURS = 48;
+
+exports.onProfileUpdatedRefreshAI = onDocumentWritten(
+    {
+      document: "users/{userId}",
+      region: "us-central1",
+      maxInstances: 10,
+    },
+    async (event) => {
+      const userId = event.params.userId;
+      const before = event.data.before.exists ? event.data.before.data() : null;
+      const after = event.data.after.exists ? event.data.after.data() : null;
+
+      if (!after) return;
+      if (after.role !== "student" || after.profileCompleted !== true) return;
+
+      const changed =
+        !before ||
+        JSON.stringify(before.skills || []) !== JSON.stringify(after.skills || []) ||
+        before.careerInterest !== after.careerInterest ||
+        before.department !== after.department ||
+        before.graduationYear !== after.graduationYear ||
+        before.updatedAt !== after.updatedAt;
+
+      if (!changed) return;
+
+      try {
+        await refreshRecommendationsForStudent(userId, after);
+        await logUserActivity(userId, "profileUpdated", 3, {source: "profile_trigger"});
+        await recomputeEngagementSummary(userId, after);
+      } catch (error) {
+        console.error("onProfileUpdatedRefreshAI error:", error);
+      }
+    }
+);
+
+exports.onResumeReviewCreatedRefreshMatches = onDocumentCreated(
+    {
+      document: "users/{userId}/resumeReviews/{reviewId}",
+      region: "us-central1",
+      maxInstances: 10,
+    },
+    async (event) => {
+      const userId = event.params.userId;
+      const resumeData = event.data.data();
+
+      try {
+        const userDoc = await admin.firestore().collection("users").doc(userId).get();
+        if (!userDoc.exists) return;
+        const userData = userDoc.data();
+        if (userData.role !== "student") return;
+
+        await refreshRecommendationsForStudent(userId, userData, {resumeData});
+        await logUserActivity(userId, "resumeReviewed", 5, {
+          reviewId: event.params.reviewId,
+          atsScore: resumeData.atsScore || 0,
+        });
+        await recomputeEngagementSummary(userId, userData);
+      } catch (error) {
+        console.error("onResumeReviewCreatedRefreshMatches error:", error);
+      }
+    }
+);
+
+exports.onOpportunityPostedNotifyStudents = onDocumentCreated(
+    {
+      document: "opportunities/{opportunityId}",
+      region: "us-central1",
+      maxInstances: 10,
+    },
+    async (event) => {
+      const opportunityId = event.params.opportunityId;
+      const opportunity = event.data.data();
+
+      try {
+        const studentsSnapshot = await admin.firestore()
+            .collection("users")
+            .where("role", "==", "student")
+            .where("profileCompleted", "==", true)
+            .get();
+
+        if (studentsSnapshot.empty) return;
+
+        const now = admin.firestore.Timestamp.now();
+        let batch = admin.firestore().batch();
+        let writes = 0;
+
+        for (const student of studentsSnapshot.docs) {
+          const notificationRef = admin.firestore()
+              .collection("users")
+              .doc(student.id)
+              .collection("notifications")
+              .doc();
+
+          batch.set(notificationRef, {
+            type: "newJobPost",
+            title: "New Job Opportunity",
+            body: `${opportunity.title || "Role"} at ${opportunity.company || "Company"}`,
+            data: {opportunityId},
+            isRead: false,
+            priority: "medium",
+            createdAt: now,
+          });
+
+          writes++;
+          if (writes >= 400) {
+            await batch.commit();
+            batch = admin.firestore().batch();
+            writes = 0;
+          }
+        }
+
+        if (writes > 0) {
+          await batch.commit();
+        }
+      } catch (error) {
+        console.error("onOpportunityPostedNotifyStudents error:", error);
+      }
+    }
+);
+
+exports.autoExpireOpportunities = onSchedule(
+    {
+      schedule: "every 60 minutes",
+      region: "us-central1",
+      timeZone: "UTC",
+    },
+    async () => {
+      try {
+        const now = admin.firestore.Timestamp.now();
+        const snapshot = await admin.firestore()
+            .collection("opportunities")
+            .where("isActive", "==", true)
+            .where("applicationDeadline", "<=", now)
+            .get();
+
+        if (snapshot.empty) return;
+
+        const batch = admin.firestore().batch();
+        for (const doc of snapshot.docs) {
+          batch.update(doc.ref, {
+            isActive: false,
+            expiredAt: now,
+            updatedAt: now,
+          });
+        }
+        await batch.commit();
+      } catch (error) {
+        console.error("autoExpireOpportunities error:", error);
+      }
+    }
+);
+
+exports.sendInactivityReminders = onSchedule(
+    {
+      schedule: "every day 09:00",
+      region: "us-central1",
+      timeZone: "UTC",
+    },
+    async () => {
+      try {
+        const now = Date.now();
+        const inactivityCutoff = admin.firestore.Timestamp.fromMillis(
+            now - INACTIVITY_REMINDER_HOURS * 60 * 60 * 1000
+        );
+
+        // 1) Inactive chats with unread messages
+        const chatsSnapshot = await admin.firestore()
+            .collection("chats")
+            .where("lastMessageAt", "<", inactivityCutoff)
+            .get();
+
+        for (const chatDoc of chatsSnapshot.docs) {
+          const chat = chatDoc.data();
+          const unreadCount = chat.unreadCount || {};
+          const participantIds = chat.participantIds || [];
+
+          for (const participantId of participantIds) {
+            if ((unreadCount[participantId] || 0) <= 0) continue;
+
+            await maybeCreateNotification(participantId, "inactiveChatReminder", {
+              title: "Chat Reminder",
+              body: "You have unread chat messages waiting for your reply.",
+              data: {chatId: chatDoc.id},
+              priority: "low",
+            });
+          }
+        }
+
+        // 2) Pending mentorship requests older than 3 days
+        const mentorshipCutoff = admin.firestore.Timestamp.fromMillis(
+            now - 3 * 24 * 60 * 60 * 1000
+        );
+        const pendingMentorships = await admin.firestore()
+            .collection("mentorship_requests")
+            .where("status", "==", "pending")
+            .where("createdAt", "<=", mentorshipCutoff)
+            .get();
+
+        for (const requestDoc of pendingMentorships.docs) {
+          const request = requestDoc.data();
+          if (request.alumniId) {
+            await maybeCreateNotification(request.alumniId, "reminder", {
+              title: "Mentorship Request Pending",
+              body: `You have a pending request from ${request.studentName || "a student"}.`,
+              data: {requestId: requestDoc.id},
+              priority: "medium",
+            });
+          }
+          if (request.studentId) {
+            await maybeCreateNotification(request.studentId, "reminder", {
+              title: "Mentorship Follow-up",
+              body: "Your mentorship request is still pending. Try sending a concise follow-up.",
+              data: {requestId: requestDoc.id},
+              priority: "low",
+            });
+          }
+        }
+      } catch (error) {
+        console.error("sendInactivityReminders error:", error);
+      }
+    }
+);
+
+exports.recomputeEngagementScores = onSchedule(
+    {
+      schedule: "every day 01:00",
+      region: "us-central1",
+      timeZone: "UTC",
+    },
+    async () => {
+      try {
+        const usersSnapshot = await admin.firestore()
+            .collection("users")
+            .where("profileCompleted", "==", true)
+            .get();
+
+        for (const userDoc of usersSnapshot.docs) {
+          await recomputeEngagementSummary(userDoc.id, userDoc.data());
+        }
+      } catch (error) {
+        console.error("recomputeEngagementScores error:", error);
+      }
+    }
+);
+
+async function refreshRecommendationsForStudent(userId, userData, options = {}) {
+  const studentSkills = normalizeTokens(userData.skills || []);
+  const careerSignals = normalizeTokens([
+    ...(userData.career?.interests || []),
+    ...(userData.career?.preferredRoles || []),
+    userData.careerInterest || "",
+  ]);
+  const resumeMissing = normalizeTokens(options.resumeData?.missingKeywords || []);
+
+  const [alumniSnapshot, opportunitiesSnapshot] = await Promise.all([
+    admin.firestore()
+        .collection("users")
+        .where("role", "==", "alumni")
+        .where("profileCompleted", "==", true)
+        .limit(120)
+        .get(),
+    admin.firestore()
+        .collection("opportunities")
+        .where("isActive", "==", true)
+        .limit(120)
+        .get(),
+  ]);
+
+  const mentorRecommendations = [];
+  for (const alumniDoc of alumniSnapshot.docs) {
+    if (alumniDoc.id === userId) continue;
+    const alumni = alumniDoc.data();
+    const mentorSkills = normalizeTokens(alumni.skills || []);
+    const overlapSkills = intersectionCount(studentSkills, mentorSkills);
+
+    let score = overlapSkills * 18;
+    if (careerSignals.has((alumni.jobRole || "").toLowerCase())) score += 15;
+    if (careerSignals.has((alumni.company || "").toLowerCase())) score += 10;
+    if (userData.department && alumni.department && userData.department === alumni.department) {
+      score += 10;
+    }
+    if (resumeMissing.size > 0) {
+      const bridging = intersectionCount(resumeMissing, mentorSkills);
+      score += Math.min(12, bridging * 4);
+    }
+    score = Math.min(100, score);
+    if (score < 45) continue;
+
+    mentorRecommendations.push({
+      id: `mentor_${alumniDoc.id}`,
+      userId,
+      type: "mentor",
+      priority: score >= 75 ? "high" : "medium",
+      title: `Connect with ${alumni.personal?.displayName || alumni.personal?.fullName || "Mentor"}`,
+      description: `${alumni.jobRole || "Alumni mentor"} at ${alumni.company || "CampusConnect Network"}`,
+      score,
+      isActive: true,
+      createdAt: admin.firestore.Timestamp.now(),
+      expiresAt: admin.firestore.Timestamp.fromMillis(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      metadata: {
+        alumniId: alumniDoc.id,
+        company: alumni.company || null,
+        jobRole: alumni.jobRole || null,
+      },
+    });
+  }
+  mentorRecommendations.sort((a, b) => b.score - a.score);
+
+  const jobRecommendations = [];
+  for (const opportunityDoc of opportunitiesSnapshot.docs) {
+    const opportunity = opportunityDoc.data();
+    const opportunitySkills = normalizeTokens(opportunity.skills || []);
+    let score = intersectionCount(studentSkills, opportunitySkills) * 20;
+
+    const titleTokens = normalizeTokens([opportunity.title || "", opportunity.company || ""]);
+    score += intersectionCount(careerSignals, titleTokens) * 12;
+
+    const missingForRole = intersectionCount(resumeMissing, opportunitySkills);
+    score += Math.max(0, 10 - missingForRole * 2);
+    score = Math.min(100, score);
+
+    if (score < 40) continue;
+
+    jobRecommendations.push({
+      id: `job_${opportunityDoc.id}`,
+      userId,
+      type: "job",
+      priority: score >= 70 ? "high" : "medium",
+      title: `${opportunity.title || "Opportunity"} at ${opportunity.company || "Company"}`,
+      description: `AI match score: ${score}%`,
+      score,
+      isActive: true,
+      createdAt: admin.firestore.Timestamp.now(),
+      expiresAt: admin.firestore.Timestamp.fromMillis(Date.now() + 3 * 24 * 60 * 60 * 1000),
+      metadata: {
+        opportunityId: opportunityDoc.id,
+      },
+    });
+  }
+  jobRecommendations.sort((a, b) => b.score - a.score);
+
+  const recommendations = [
+    ...mentorRecommendations.slice(0, 4),
+    ...jobRecommendations.slice(0, 4),
+    {
+      id: "nudge_ai_chat",
+      userId,
+      type: "chat",
+      priority: "medium",
+      title: "Use AI Career Assistant",
+      description: "Get interview Q&A simulation, skill-gap analysis, and resume guidance.",
+      score: 65,
+      isActive: true,
+      createdAt: admin.firestore.Timestamp.now(),
+      expiresAt: admin.firestore.Timestamp.fromMillis(Date.now() + 2 * 24 * 60 * 60 * 1000),
+      metadata: {action: "open_ai_chat"},
+    },
+  ];
+
+  const existingSnapshot = await admin.firestore()
+      .collection("users")
+      .doc(userId)
+      .collection("recommendations")
+      .where("isActive", "==", true)
+      .get();
+
+  const batch = admin.firestore().batch();
+  for (const oldDoc of existingSnapshot.docs) {
+    batch.update(oldDoc.ref, {isActive: false});
+  }
+  for (const recommendation of recommendations) {
+    const docRef = admin.firestore()
+        .collection("users")
+        .doc(userId)
+        .collection("recommendations")
+        .doc(recommendation.id);
+    batch.set(docRef, recommendation, {merge: true});
+  }
+
+  const metaRef = admin.firestore()
+      .collection("users")
+      .doc(userId)
+      .collection("recommendations_meta")
+      .doc("summary");
+  batch.set(metaRef, {
+    updatedAt: admin.firestore.Timestamp.now(),
+    total: recommendations.length,
+  }, {merge: true});
+
+  await batch.commit();
+
+  if (mentorRecommendations.length > 0) {
+    await maybeCreateNotification(userId, "mentorMatch", {
+      title: "New Mentor Match",
+      body: `${mentorRecommendations[0].title} (${mentorRecommendations[0].score}% match)`,
+      data: {
+        alumniId: mentorRecommendations[0].metadata.alumniId,
+        matchScore: mentorRecommendations[0].score,
+      },
+      priority: "high",
+    });
+  }
+  if (jobRecommendations.length > 0) {
+    await maybeCreateNotification(userId, "jobMatch", {
+      title: "New Job Match",
+      body: `${jobRecommendations[0].title} (${jobRecommendations[0].score}% match)`,
+      data: {
+        opportunityId: jobRecommendations[0].metadata.opportunityId,
+        matchScore: jobRecommendations[0].score,
+      },
+      priority: "high",
+    });
+  }
+}
+
+async function maybeCreateNotification(userId, type, payload) {
+  const recentCutoff = admin.firestore.Timestamp.fromMillis(
+      Date.now() - 20 * 60 * 60 * 1000
+  );
+
+  const recent = await admin.firestore()
+      .collection("users")
+      .doc(userId)
+      .collection("notifications")
+      .where("type", "==", type)
+      .where("createdAt", ">=", recentCutoff)
+      .limit(1)
+      .get();
+
+  if (!recent.empty) return;
+
+  await admin.firestore()
+      .collection("users")
+      .doc(userId)
+      .collection("notifications")
+      .add({
+        type,
+        title: payload.title || "Notification",
+        body: payload.body || "",
+        data: payload.data || {},
+        isRead: false,
+        priority: payload.priority || "low",
+        createdAt: admin.firestore.Timestamp.now(),
+      });
+}
+
+async function logUserActivity(userId, eventType, points, metadata = {}) {
+  await admin.firestore()
+      .collection("users")
+      .doc(userId)
+      .collection("activities")
+      .add({
+        userId,
+        eventType,
+        points,
+        metadata,
+        occurredAt: admin.firestore.Timestamp.now(),
+      });
+}
+
+async function recomputeEngagementSummary(userId, userData) {
+  const activitySnapshot = await admin.firestore()
+      .collection("users")
+      .doc(userId)
+      .collection("activities")
+      .orderBy("occurredAt", "desc")
+      .limit(250)
+      .get();
+
+  const activities = activitySnapshot.docs.map((doc) => doc.data());
+  const activityPoints = activities.reduce((sum, item) => sum + (item.points || 0), 0);
+  const dailyStreak = computeStreakFromActivities(activities);
+  const profileStrength = computeProfileStrength(userData);
+  const engagementScore = Math.min(
+      100,
+      Math.round(profileStrength * 0.6 + Math.min(40, activityPoints * 0.4) + Math.min(20, dailyStreak * 2.5))
+  );
+
+  const badges = [
+    buildBadge("profile_pro", "profilePro", "Profile Pro", "Complete profile for stronger matches", profileStrength, 100),
+    buildBadge("consistency_champion", "consistencyChampion", "Consistency Champion", "Stay active 7 days in a row", dailyStreak, 7),
+    buildBadge("active_student", "activeStudent", "Active Student", "Earn 50 engagement points", activityPoints, 50),
+    buildBadge("networking_pro", "networkingPro", "Networking Pro", "Build strong networking activity", activityPoints, 100),
+  ];
+
+  await admin.firestore()
+      .collection("users")
+      .doc(userId)
+      .collection("engagement_summary")
+      .doc("summary")
+      .set({
+        engagementScore,
+        profileStrength,
+        dailyStreak,
+        activityPoints,
+        badges,
+        updatedAt: admin.firestore.Timestamp.now(),
+        lastActiveAt: activities.length > 0 ? activities[0].occurredAt : null,
+      }, {merge: true});
+
+  if (dailyStreak > 0 && dailyStreak % 7 === 0) {
+    await maybeCreateNotification(userId, "engagementMilestone", {
+      title: "Engagement Milestone",
+      body: `Great momentum! You are on a ${dailyStreak}-day streak.`,
+      data: {streakDays: dailyStreak},
+      priority: "medium",
+    });
+  }
+}
+
+function buildBadge(id, type, title, description, progress, target) {
+  const earned = progress >= target;
+  return {
+    id,
+    type,
+    title,
+    description,
+    icon: "emoji_events",
+    progress,
+    target,
+    isFeatured: id === "profile_pro" || id === "consistency_champion",
+    earnedAt: earned ? admin.firestore.Timestamp.now() : null,
+  };
+}
+
+function computeStreakFromActivities(activities) {
+  if (!activities || activities.length === 0) return 0;
+  const days = new Set(
+      activities
+          .map((a) => a.occurredAt && a.occurredAt.toDate ? a.occurredAt.toDate() : null)
+          .filter(Boolean)
+          .map((d) => `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}-${d.getUTCDate()}`)
+  );
+  const now = new Date();
+  let streak = 0;
+  let cursor = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  while (days.has(`${cursor.getUTCFullYear()}-${cursor.getUTCMonth() + 1}-${cursor.getUTCDate()}`)) {
+    streak++;
+    cursor = new Date(cursor.getTime() - 24 * 60 * 60 * 1000);
+  }
+  return streak;
+}
+
+function computeProfileStrength(userData) {
+  let completed = 0;
+  const total = 12;
+  if ((userData.personal?.fullName || "").trim()) completed++;
+  if ((userData.personal?.phone || "").trim()) completed++;
+  if ((userData.personal?.bio || "").trim()) completed++;
+  if ((userData.academic?.college || "").trim()) completed++;
+  if ((userData.academic?.program || "").trim()) completed++;
+  if ((userData.academic?.year || 0) > 0) completed++;
+  if ((userData.academic?.cgpa || 0) > 0) completed++;
+  if ((userData.skills || []).length > 0) completed++;
+  if ((userData.careerInterest || "").trim()) completed++;
+  if ((userData.company || "").trim()) completed++;
+  if ((userData.jobRole || "").trim()) completed++;
+  if ((userData.linkedinProfile || "").trim()) completed++;
+  return Math.round((completed / total) * 100);
+}
+
+function normalizeTokens(values) {
+  return new Set(
+      (values || [])
+          .flatMap((value) => String(value || "").split(/[,\s/]+/g))
+          .map((token) => token.trim().toLowerCase())
+          .filter((token) => token.length > 1)
+  );
+}
+
+function intersectionCount(setA, setB) {
+  let count = 0;
+  for (const value of setA) {
+    if (setB.has(value)) count++;
+  }
+  return count;
+}

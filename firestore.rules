@@ -13,6 +13,17 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function userRole() {
+      return isAuthenticated()
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+        : null;
+    }
+
+    function canManagePlacements() {
+      return isAuthenticated() &&
+        (userRole() == 'teacher' || userRole() == 'alumni');
+    }
+
     // ===============================================
     // USERS COLLECTION (with subcollections)
     // ===============================================
@@ -36,6 +47,36 @@ service cloud.firestore {
         allow read: if isOwner(userId);
         allow write: if false; // Only Cloud Functions can write
       }
+
+      // v7.4: AI interaction history (career assistant)
+      match /ai_interactions/{interactionId} {
+        allow read, create: if isOwner(userId);
+        allow update, delete: if false;
+      }
+
+      // v7.4: Recommendation feed (Cloud Functions managed)
+      match /recommendations/{recommendationId} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+
+      // v7.4: Recommendation metadata (Cloud Functions managed)
+      match /recommendations_meta/{metaId} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+
+      // v7.4: Engagement score summary (Cloud Functions / service managed)
+      match /engagement_summary/{summaryId} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+
+      // v7.4: User activity log
+      match /activities/{activityId} {
+        allow read, create: if isOwner(userId);
+        allow update, delete: if false;
+      }
       
       // v6.8: Resume Review History
       // v6.95: Added aiAnalysis, aiGeneratedAt, aiProviderUsed fields
@@ -57,7 +98,7 @@ service cloud.firestore {
     // ===============================================
     match /placements/{placementId} {
       allow read: if isAuthenticated();
-      allow write: if false;
+      allow create, update, delete: if canManagePlacements();
 
       // Applications under placements
       match /applications/{appUserId} {
@@ -172,6 +213,26 @@ service cloud.firestore {
     }
 
     // Alumni directory - handled in users collection above ✓
+
+    // ===============================================
+    // PUBLIC ALUMNI PROFILES (v7.4 optional)
+    // ===============================================
+    match /public_profiles/{profileKey} {
+      // Public docs are readable by anyone; owners can always read their own doc.
+      allow read: if resource.data.isPublic == true ||
+        (isAuthenticated() && resource.data.uid == request.auth.uid);
+
+      // Alumni can create/update/delete only their own public profile projection.
+      allow create: if isAuthenticated() &&
+        request.resource.data.uid == request.auth.uid &&
+        request.resource.data.profileKey == profileKey;
+      allow update: if isAuthenticated() &&
+        resource.data.uid == request.auth.uid &&
+        request.resource.data.uid == request.auth.uid &&
+        request.resource.data.profileKey == profileKey;
+      allow delete: if isAuthenticated() &&
+        resource.data.uid == request.auth.uid;
+    }
 
     // ===============================================
     // REAL-TIME CHAT SYSTEM (v7.3)

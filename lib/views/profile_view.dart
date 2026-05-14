@@ -3,7 +3,10 @@ import 'package:campusconnect/providers/ai_usage_provider.dart';
 import 'package:campusconnect/providers/notifications_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
+import 'package:campusconnect/providers/recommendation_provider.dart';
 import 'package:campusconnect/providers/resume_review_provider.dart';
+import 'package:campusconnect/providers/engagement_provider.dart';
+import 'package:campusconnect/providers/ai_chat_provider.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -151,6 +154,9 @@ class _ProfileViewState extends State<ProfileView> {
       context.read<AIUsageProvider>().reset();
       context.read<NotificationsProvider>().reset();
       context.read<ResumeReviewProvider>().reset(); // v6.7
+      context.read<RecommendationProvider>().reset();
+      context.read<EngagementProvider>().reset();
+      context.read<AIChatProvider>().reset();
       await AuthService.firebase().logOut();
       // AuthGuard handles navigation via StreamBuilder
     }

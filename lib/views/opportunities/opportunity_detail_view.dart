@@ -1,5 +1,6 @@
 import 'package:campusconnect/enums/user_role.dart';
 import 'package:campusconnect/models/opportunity.dart';
+import 'package:campusconnect/providers/opportunity_provider.dart';
 import 'package:campusconnect/providers/role_provider.dart';
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:flutter/material.dart';
@@ -18,12 +19,92 @@ class OpportunityDetailView extends StatefulWidget {
 }
 
 class _OpportunityDetailViewState extends State<OpportunityDetailView> {
+  Opportunity? _opportunity;
+  bool _isLoading = true;
+  bool _isResolved = false;
+  String? _error;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_isResolved) return;
+    _isResolved = true;
+    _resolveOpportunity();
+  }
+
+  Future<void> _resolveOpportunity() async {
+    final routeArgs = ModalRoute.of(context)?.settings.arguments;
+    Opportunity? resolvedOpportunity;
+    String? opportunityId;
+
+    if (routeArgs is Opportunity) {
+      resolvedOpportunity = routeArgs;
+    } else if (routeArgs is String) {
+      if (routeArgs.trim().isNotEmpty) {
+        opportunityId = routeArgs.trim();
+      }
+    } else if (routeArgs is Map<String, dynamic>) {
+      final rawOpportunity = routeArgs['opportunity'];
+      if (rawOpportunity is Opportunity) {
+        resolvedOpportunity = rawOpportunity;
+      }
+
+      if (resolvedOpportunity == null) {
+        final rawOpportunityId = routeArgs['opportunityId'] ?? routeArgs['id'];
+        if (rawOpportunityId is String && rawOpportunityId.trim().isNotEmpty) {
+          opportunityId = rawOpportunityId.trim();
+        } else if (rawOpportunity is String &&
+            rawOpportunity.trim().isNotEmpty) {
+          opportunityId = rawOpportunity.trim();
+        }
+      }
+    }
+
+    if (resolvedOpportunity == null && opportunityId != null) {
+      resolvedOpportunity = await context
+          .read<OpportunityProvider>()
+          .getOpportunityById(opportunityId);
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _opportunity = resolvedOpportunity;
+      _isLoading = false;
+      _error = resolvedOpportunity == null
+          ? 'Opportunity not found or no longer available'
+          : null;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final arguments = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
-    final opportunity = arguments?['opportunity'] as Opportunity?;
+    final opportunity = _opportunity;
+
+    if (_isLoading) {
+      return Scaffold(
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        appBar: AppBar(
+          backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+          elevation: 0,
+          title: Text(
+            'Opportunity Details',
+            style: AppTheme.titleMedium.copyWith(
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white : AppTheme.gray900,
+            ),
+          ),
+          leading: IconButton(
+            icon: Icon(
+              Icons.arrow_back,
+              color: isDark ? Colors.white : AppTheme.gray900,
+            ),
+            onPressed: () => Navigator.pop(context),
+          ),
+        ),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
 
     if (opportunity == null) {
       return Scaffold(
@@ -46,7 +127,12 @@ class _OpportunityDetailViewState extends State<OpportunityDetailView> {
             onPressed: () => Navigator.pop(context),
           ),
         ),
-        body: const Center(child: Text('Error: No opportunity data found')),
+        body: Center(
+          child: Text(
+            _error ?? 'Error: No opportunity data found',
+            textAlign: TextAlign.center,
+          ),
+        ),
       );
     }
 
@@ -228,7 +314,7 @@ class _OpportunityDetailViewState extends State<OpportunityDetailView> {
                           ],
                         ),
                       );
-                    }).toList(),
+                    }),
                   ],
                 ),
               ),
@@ -281,17 +367,22 @@ class _OpportunityDetailViewState extends State<OpportunityDetailView> {
             // Apply Button (for students only)
             Consumer<RoleProvider>(
               builder: (context, roleProvider, child) {
-                if (roleProvider.userRole == UserRole.student && !opportunity.isExpired) {
+                if (roleProvider.userRole == UserRole.student &&
+                    !opportunity.isExpired) {
                   return SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
                       onPressed: () => _applyForJob(opportunity),
-                      icon: Icon(opportunity.applicationUrl != null
-                          ? Icons.work_outline
-                          : Icons.contact_mail),
-                      label: Text(opportunity.applicationUrl != null
-                          ? 'Apply Now'
-                          : 'Contact to Apply'),
+                      icon: Icon(
+                        opportunity.applicationUrl != null
+                            ? Icons.work_outline
+                            : Icons.contact_mail,
+                      ),
+                      label: Text(
+                        opportunity.applicationUrl != null
+                            ? 'Apply Now'
+                            : 'Contact to Apply',
+                      ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.primaryBlue,
                         foregroundColor: Colors.white,
@@ -365,19 +456,14 @@ class _OpportunityDetailViewState extends State<OpportunityDetailView> {
                 children: [
                   const Icon(Icons.email),
                   const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(opportunity.contactEmail!),
-                  ),
+                  Expanded(child: Text(opportunity.contactEmail!)),
                 ],
               ),
             ],
             const SizedBox(height: 16),
             Text(
               'You can reach out directly to learn more about the position and application process.',
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey[600],
-              ),
+              style: TextStyle(fontSize: 14, color: Colors.grey[600]),
             ),
           ],
         ),
@@ -390,11 +476,15 @@ class _OpportunityDetailViewState extends State<OpportunityDetailView> {
             ElevatedButton(
               onPressed: () {
                 Navigator.pop(context);
-                final subject = Uri.encodeComponent('Application for ${opportunity.title}');
-                final body = Uri.encodeComponent(
-                  'Hi ${opportunity.alumniName},\n\nI am interested in applying for the ${opportunity.title} position at ${opportunity.company}. Could you please provide more information about the application process?\n\nThank you,\n[Your Name]'
+                final subject = Uri.encodeComponent(
+                  'Application for ${opportunity.title}',
                 );
-                final uri = Uri.parse('mailto:${opportunity.contactEmail}?subject=$subject&body=$body');
+                final body = Uri.encodeComponent(
+                  'Hi ${opportunity.alumniName},\n\nI am interested in applying for the ${opportunity.title} position at ${opportunity.company}. Could you please provide more information about the application process?\n\nThank you,\n[Your Name]',
+                );
+                final uri = Uri.parse(
+                  'mailto:${opportunity.contactEmail}?subject=$subject&body=$body',
+                );
                 launchUrl(uri);
               },
               child: const Text('Send Email'),

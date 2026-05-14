@@ -2,10 +2,14 @@ import 'package:campusconnect/constants/routes.dart';
 import 'package:campusconnect/models/activity_item.dart';
 import 'package:campusconnect/models/placement.dart';
 import 'package:campusconnect/models/placement_eligibility.dart';
+import 'package:campusconnect/models/recommendation.dart';
 import 'package:campusconnect/providers/activity_feed_provider.dart';
+import 'package:campusconnect/providers/ai_chat_provider.dart';
 import 'package:campusconnect/providers/ai_usage_provider.dart';
+import 'package:campusconnect/providers/engagement_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
+import 'package:campusconnect/providers/recommendation_provider.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/views/widgets/chat_badge.dart';
@@ -136,6 +140,9 @@ class _StudentDashboardTab extends StatelessWidget {
                     context.read<PlacementsProvider>().reset();
                     context.read<AIUsageProvider>().reset();
                     context.read<ActivityFeedProvider>().reset();
+                    context.read<RecommendationProvider>().reset();
+                    context.read<EngagementProvider>().reset();
+                    context.read<AIChatProvider>().reset();
                     try {
                       await AuthService.firebase().logOut();
                     } catch (_) {
@@ -194,6 +201,14 @@ class _StudentDashboardTab extends StatelessWidget {
 
               // Connect & Grow Section
               _buildConnectAndGrowSection(context, isDark),
+              const SizedBox(height: 24),
+
+              // v7.4: AI recommendations
+              _buildAIPicksSection(context, isDark),
+              const SizedBox(height: 24),
+
+              // v7.4: Engagement and profile strength
+              _buildEngagementSection(context, isDark),
               const SizedBox(height: 24),
 
               // Latest Placements Section
@@ -535,6 +550,329 @@ class _StudentDashboardTab extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildAIPicksSection(BuildContext context, bool isDark) {
+    return Consumer<RecommendationProvider>(
+      builder: (context, recommendationProvider, child) {
+        final picks = recommendationProvider.recommendations.take(3).toList();
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  'AI Smart Picks',
+                  style: AppTheme.titleMedium.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white : AppTheme.gray900,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(
+                  Icons.auto_awesome,
+                  size: 18,
+                  color: AppTheme.secondaryIndigo,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (recommendationProvider.isLoading &&
+                recommendationProvider.recommendations.isEmpty)
+              const Center(child: CircularProgressIndicator())
+            else if (picks.isEmpty)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: isDark ? AppTheme.darkSurface : Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: isDark ? AppTheme.gray700 : AppTheme.gray200,
+                  ),
+                ),
+                child: Text(
+                  'Complete your profile and stay active to unlock personalized mentor and job recommendations.',
+                  style: AppTheme.bodySmall.copyWith(
+                    color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+                  ),
+                ),
+              )
+            else
+              Column(
+                children: picks
+                    .map(
+                      (recommendation) => _buildRecommendationCard(
+                        context,
+                        recommendation,
+                        isDark,
+                      ),
+                    )
+                    .toList(),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildRecommendationCard(
+    BuildContext context,
+    Recommendation recommendation,
+    bool isDark,
+  ) {
+    final scoreColor = recommendation.score >= 75
+        ? AppTheme.success
+        : AppTheme.primaryBlue;
+
+    return InkWell(
+      onTap: () async {
+        await context.read<RecommendationProvider>().markInteracted(
+          recommendation.id,
+        );
+        if (!context.mounted) return;
+        switch (recommendation.type) {
+          case RecommendationType.mentor:
+          case RecommendationType.mentorship:
+            Navigator.pushNamed(context, mentorshipRequestsRoute);
+            break;
+          case RecommendationType.job:
+            Navigator.pushNamed(context, opportunitiesRoute);
+            break;
+          case RecommendationType.chat:
+            Navigator.pushNamed(context, aiChatRoute);
+            break;
+          case RecommendationType.skill:
+            Navigator.pushNamed(context, profileSetupRoute);
+            break;
+        }
+      },
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: isDark ? AppTheme.darkSurface : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: isDark ? AppTheme.gray700 : AppTheme.gray200),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: scoreColor.withAlpha(isDark ? 46 : 24),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                _recommendationIcon(recommendation.type),
+                color: scoreColor,
+                size: 18,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    recommendation.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTheme.bodyMedium.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.white : AppTheme.gray900,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    recommendation.description,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTheme.bodySmall.copyWith(
+                      color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: scoreColor.withAlpha(25),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                '${recommendation.score.round()}%',
+                style: AppTheme.caption.copyWith(
+                  color: scoreColor,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  IconData _recommendationIcon(RecommendationType type) {
+    switch (type) {
+      case RecommendationType.mentor:
+      case RecommendationType.mentorship:
+        return Icons.groups_rounded;
+      case RecommendationType.job:
+        return Icons.work_outline_rounded;
+      case RecommendationType.chat:
+        return Icons.chat_bubble_outline_rounded;
+      case RecommendationType.skill:
+        return Icons.lightbulb_outline_rounded;
+    }
+  }
+
+  Widget _buildEngagementSection(BuildContext context, bool isDark) {
+    return Consumer<EngagementProvider>(
+      builder: (context, engagementProvider, child) {
+        final profileStrength = engagementProvider.profileStrength;
+        final score = engagementProvider.engagementScore;
+        final streak = engagementProvider.dailyStreak;
+        final badges = engagementProvider.badges.take(2).toList();
+
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: isDark ? AppTheme.darkSurface : Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: isDark ? AppTheme.gray700 : AppTheme.gray200),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Text(
+                    'Engagement',
+                    style: AppTheme.titleMedium.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.white : AppTheme.gray900,
+                    ),
+                  ),
+                  const Spacer(),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.local_fire_department,
+                        size: 18,
+                        color: AppTheme.warning,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        '$streak day streak',
+                        style: AppTheme.bodySmall.copyWith(
+                          color: isDark ? AppTheme.gray300 : AppTheme.gray700,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              _buildMetricProgress(
+                label: 'Profile Strength',
+                value: profileStrength,
+                color: AppTheme.primaryBlue,
+                isDark: isDark,
+              ),
+              const SizedBox(height: 10),
+              _buildMetricProgress(
+                label: 'Engagement Score',
+                value: score,
+                color: AppTheme.success,
+                isDark: isDark,
+              ),
+              if (badges.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: badges
+                      .map(
+                        (badge) => Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppTheme.secondaryIndigo.withAlpha(20),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: AppTheme.secondaryIndigo.withAlpha(35),
+                            ),
+                          ),
+                          child: Text(
+                            badge.title,
+                            style: AppTheme.caption.copyWith(
+                              color: AppTheme.secondaryIndigo,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildMetricProgress({
+    required String label,
+    required int value,
+    required Color color,
+    required bool isDark,
+  }) {
+    final clamped = value.clamp(0, 100);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              label,
+              style: AppTheme.bodySmall.copyWith(
+                color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+              ),
+            ),
+            const Spacer(),
+            Text(
+              '$clamped%',
+              style: AppTheme.bodySmall.copyWith(
+                color: color,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(99),
+          child: LinearProgressIndicator(
+            minHeight: 8,
+            value: clamped / 100,
+            color: color,
+            backgroundColor: isDark ? AppTheme.gray700 : AppTheme.gray200,
+          ),
+        ),
+      ],
     );
   }
 

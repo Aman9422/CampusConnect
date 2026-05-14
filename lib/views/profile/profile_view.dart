@@ -3,8 +3,11 @@ import 'package:campusconnect/providers/ai_usage_provider.dart';
 import 'package:campusconnect/providers/notifications_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
+import 'package:campusconnect/providers/recommendation_provider.dart';
 import 'package:campusconnect/providers/resume_review_provider.dart';
 import 'package:campusconnect/providers/role_provider.dart';
+import 'package:campusconnect/providers/engagement_provider.dart';
+import 'package:campusconnect/providers/ai_chat_provider.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/views/widgets/initials_avatar.dart';
@@ -341,18 +344,9 @@ class ProfileView extends StatelessWidget {
       context.read<NotificationsProvider>().reset();
       context.read<ResumeReviewProvider>().reset(); // v6.7
       context.read<RoleProvider>().reset(); // v7.1
-      // v7.3: Reset new providers (when implemented)
-      // TODO: Enable when providers are implemented
-      // try {
-      //   context.read<ChatProvider>().reset();
-      // } catch (e) {
-      //   debugPrint('ChatProvider reset failed: $e');
-      // }
-      // try {
-      //   context.read<TeacherAnalyticsProvider>().reset();
-      // } catch (e) {
-      //   debugPrint('TeacherAnalyticsProvider reset failed: $e');
-      // }
+      context.read<RecommendationProvider>().reset(); // v7.4
+      context.read<EngagementProvider>().reset(); // v7.4
+      context.read<AIChatProvider>().reset(); // v7.4
       try {
         await AuthService.firebase().logOut();
       } catch (_) {

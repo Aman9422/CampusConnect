@@ -1,5 +1,6 @@
 import 'package:campusconnect/models/application.dart';
 import 'package:campusconnect/models/placement.dart';
+import 'package:campusconnect/models/placement_eligibility.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart';
@@ -62,6 +63,55 @@ class PlacementsService {
     } catch (e) {
       rethrow;
     }
+  }
+
+  /// Create a new placement posting (teacher/alumni management flow)
+  Future<String> createPlacement({
+    required String createdBy,
+    required String company,
+    required String role,
+    required String description,
+    required String eligibility,
+    required String salary,
+    required DateTime deadline,
+    PlacementRequirements requirements = const PlacementRequirements(),
+  }) async {
+    final docRef = _firestore.collection('placements').doc();
+    final now = DateTime.now();
+
+    final placement = Placement(
+      id: docRef.id,
+      company: company,
+      role: role,
+      description: description,
+      eligibility: eligibility,
+      salary: salary,
+      deadline: deadline,
+      postedAt: now,
+      isActive: true,
+      requirements: requirements,
+    );
+
+    await docRef.set({
+      ...placement.toFirestore(),
+      'createdBy': createdBy,
+      'updatedBy': createdBy,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    return docRef.id;
+  }
+
+  /// Update an existing placement posting
+  Future<void> updatePlacement({
+    required String updatedBy,
+    required Placement placement,
+  }) async {
+    await _firestore.collection('placements').doc(placement.id).set({
+      ...placement.toFirestore(),
+      'updatedBy': updatedBy,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
   }
 
   // Apply for a placement (VERSION 4: Uses Cloud Function for security)

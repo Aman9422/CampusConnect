@@ -261,6 +261,87 @@ class PlacementsProvider with ChangeNotifier {
     }
   }
 
+  /// Create a placement posting (teacher/alumni management)
+  Future<bool> createPlacement({
+    required String company,
+    required String role,
+    required String description,
+    required String eligibility,
+    required String salary,
+    required DateTime deadline,
+    PlacementRequirements requirements = const PlacementRequirements(),
+  }) async {
+    if (userId == null || _isDisposed) {
+      _error = 'You must be logged in to post a placement';
+      notifyListeners();
+      return false;
+    }
+
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      await _service.createPlacement(
+        createdBy: userId!,
+        company: company,
+        role: role,
+        description: description,
+        eligibility: eligibility,
+        salary: salary,
+        deadline: deadline,
+        requirements: requirements,
+      );
+
+      await _loadPlacements();
+      _recalculateEligibility();
+      _error = null;
+      return true;
+    } catch (e) {
+      _error = ErrorMessages.getUserFriendlyMessage(e);
+      debugPrint('PlacementsProvider createPlacement error: $e');
+      return false;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Update an existing placement posting (teacher/alumni management)
+  Future<bool> updatePlacement(Placement placement) async {
+    if (userId == null || _isDisposed) {
+      _error = 'You must be logged in to update a placement';
+      notifyListeners();
+      return false;
+    }
+
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      await _service.updatePlacement(updatedBy: userId!, placement: placement);
+
+      final index = _placements.indexWhere((p) => p.id == placement.id);
+      if (index != -1) {
+        _placements[index] = placement;
+      } else {
+        await _loadPlacements();
+      }
+
+      _recalculateEligibility();
+      _error = null;
+      return true;
+    } catch (e) {
+      _error = ErrorMessages.getUserFriendlyMessage(e);
+      debugPrint('PlacementsProvider updatePlacement error: $e');
+      return false;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
   /// Apply for a placement with optimistic update
   /// V5: Instant UI feedback, backend validation
   /// V5.1: Enhanced guardrails and error handling

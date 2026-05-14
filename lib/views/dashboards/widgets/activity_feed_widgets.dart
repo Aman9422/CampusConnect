@@ -281,18 +281,39 @@ class ActivityListItem extends StatelessWidget {
             break;
           case '/chat':
             final chatId = activity.actionData!['chatId'] as String?;
-            if (chatId != null) {
+            if (chatId != null && chatId.isNotEmpty) {
               Navigator.pushNamed(context, chatRoute, arguments: chatId);
+            } else {
+              Navigator.pushNamed(context, chatsListRoute);
             }
             break;
           case '/mentorship-request-detail':
-            Navigator.pushNamed(context, mentorshipRequestDetailRoute);
+            final requestId = activity.actionData!['requestId'] as String?;
+            if (requestId != null && requestId.isNotEmpty) {
+              Navigator.pushNamed(
+                context,
+                mentorshipRequestDetailRoute,
+                arguments: requestId,
+              );
+            } else {
+              Navigator.pushNamed(context, mentorshipRequestsRoute);
+            }
             break;
           case '/placements-list':
             Navigator.pushNamed(context, placementsListRoute);
             break;
           case '/opportunity-detail':
-            Navigator.pushNamed(context, opportunityDetailRoute);
+            final opportunityId =
+                activity.actionData!['opportunityId'] as String?;
+            if (opportunityId != null && opportunityId.isNotEmpty) {
+              Navigator.pushNamed(
+                context,
+                opportunityDetailRoute,
+                arguments: opportunityId,
+              );
+            } else {
+              Navigator.pushNamed(context, opportunitiesRoute);
+            }
             break;
           default:
             // Fallback navigation based on activity type

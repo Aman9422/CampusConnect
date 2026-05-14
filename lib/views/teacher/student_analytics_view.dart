@@ -112,6 +112,24 @@ class _StudentAnalyticsViewState extends State<StudentAnalyticsView> {
                           _buildStudentLeaderboard(analyticsProvider, isDark),
                           const SizedBox(height: 20),
 
+                          // v7.4: Placement prediction indicators
+                          _buildPlacementPredictionSection(
+                            analyticsProvider,
+                            isDark,
+                          ),
+                          const SizedBox(height: 20),
+
+                          // v7.4: Skill gap analysis
+                          _buildSkillGapSection(analyticsProvider, isDark),
+                          const SizedBox(height: 20),
+
+                          // v7.4: Performance trends
+                          _buildPerformanceTrendSection(
+                            analyticsProvider,
+                            isDark,
+                          ),
+                          const SizedBox(height: 20),
+
                           // Department-wise breakdown
                           _buildDepartmentBreakdown(placementsProvider, isDark),
                         ],
@@ -204,7 +222,7 @@ class _StudentAnalyticsViewState extends State<StudentAnalyticsView> {
                 child: _buildMetricCard(
                   'Avg Review Score',
                   totalReviews > 0
-                      ? '${avgReviewScore.toStringAsFixed(1)}/10'
+                      ? '${avgReviewScore.toStringAsFixed(1)}/100'
                       : 'N/A',
                   Icons.star_outline,
                   AppTheme.secondaryIndigo,
@@ -426,7 +444,7 @@ class _StudentAnalyticsViewState extends State<StudentAnalyticsView> {
                 child: _buildMetricCard(
                   'Avg Score',
                   totalReviews > 0
-                      ? '${avgRating.toStringAsFixed(1)}/10'
+                      ? '${avgRating.toStringAsFixed(1)}/100'
                       : 'N/A',
                   Icons.star_outline,
                   AppTheme.warning,
@@ -838,6 +856,185 @@ class _StudentAnalyticsViewState extends State<StudentAnalyticsView> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildPlacementPredictionSection(
+    TeacherAnalyticsProvider provider,
+    bool isDark,
+  ) {
+    return _buildSection(
+      'Placement Prediction Indicators',
+      isDark,
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: _buildMetricCard(
+                  'High Potential',
+                  provider.highPotentialCount.toString(),
+                  Icons.trending_up_rounded,
+                  AppTheme.success,
+                  isDark,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildMetricCard(
+                  'Medium Potential',
+                  provider.mediumPotentialCount.toString(),
+                  Icons.trending_flat_rounded,
+                  AppTheme.warning,
+                  isDark,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _buildMetricCard(
+                  'At Risk',
+                  provider.atRiskCount.toString(),
+                  Icons.trending_down_rounded,
+                  AppTheme.error,
+                  isDark,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildMetricCard(
+                  'Predicted Placement',
+                  '${provider.predictedPlacementRate.toStringAsFixed(1)}%',
+                  Icons.insights_rounded,
+                  AppTheme.primaryBlue,
+                  isDark,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSkillGapSection(TeacherAnalyticsProvider provider, bool isDark) {
+    final skillGaps = provider.skillGapAnalysis ?? [];
+
+    return _buildSection(
+      'Institution Skill Gap Analysis',
+      isDark,
+      child: skillGaps.isEmpty
+          ? EmptyStateWidget(
+              icon: Icons.psychology_outlined,
+              title: 'No skill gap data',
+              subtitle:
+                  'Skill gap trends will appear after more resume reviews',
+            )
+          : Column(
+              children: skillGaps.map((gap) {
+                final skill = gap['skill'] as String? ?? 'unknown';
+                final count = gap['count'] as int? ?? 0;
+                final severity = gap['severity'] as String? ?? 'low';
+                final color = severity == 'high'
+                    ? AppTheme.error
+                    : severity == 'medium'
+                    ? AppTheme.warning
+                    : AppTheme.success;
+
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: color.withValues(alpha: 0.25)),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          skill,
+                          style: AppTheme.bodyMedium.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: isDark ? Colors.white : AppTheme.gray900,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '$count students',
+                        style: AppTheme.caption.copyWith(
+                          color: color,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+    );
+  }
+
+  Widget _buildPerformanceTrendSection(
+    TeacherAnalyticsProvider provider,
+    bool isDark,
+  ) {
+    final trends = provider.performanceTrends ?? [];
+
+    return _buildSection(
+      'Performance Trend Insights',
+      isDark,
+      child: trends.isEmpty
+          ? EmptyStateWidget(
+              icon: Icons.show_chart_rounded,
+              title: 'No trend data',
+              subtitle: 'Monthly trend analysis will appear with more reviews',
+            )
+          : Column(
+              children: trends.map((item) {
+                final month = item['month'] as String? ?? '';
+                final avgScore = item['avgScore'] as int? ?? 0;
+                final reviewCount = item['reviewCount'] as int? ?? 0;
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: isDark ? AppTheme.gray800 : AppTheme.gray50,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          month,
+                          style: AppTheme.bodyMedium.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: isDark ? Colors.white : AppTheme.gray900,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '$avgScore/100',
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.primaryBlue,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        '$reviewCount reviews',
+                        style: AppTheme.caption.copyWith(
+                          color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
     );
   }
 

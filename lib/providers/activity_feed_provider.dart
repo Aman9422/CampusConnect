@@ -339,6 +339,16 @@ class ActivityFeedProvider extends ChangeNotifier {
         return Icons.message_rounded;
       case NotificationType.newJobPost:
         return Icons.work_outline_rounded;
+      case NotificationType.mentorMatch:
+        return Icons.groups_rounded;
+      case NotificationType.jobMatch:
+        return Icons.recommend_rounded;
+      case NotificationType.inactiveChatReminder:
+        return Icons.chat_outlined;
+      case NotificationType.engagementMilestone:
+        return Icons.emoji_events_outlined;
+      case NotificationType.recommendationDigest:
+        return Icons.tips_and_updates_outlined;
       case NotificationType.system:
       case NotificationType.mentorshipRejected:
         return Icons.notifications_outlined;
@@ -362,6 +372,16 @@ class ActivityFeedProvider extends ChangeNotifier {
         return Colors.blue;
       case NotificationType.newJobPost:
         return Colors.orange;
+      case NotificationType.mentorMatch:
+        return AppTheme.secondaryIndigo;
+      case NotificationType.jobMatch:
+        return AppTheme.primaryBlue;
+      case NotificationType.inactiveChatReminder:
+        return Colors.teal;
+      case NotificationType.engagementMilestone:
+        return AppTheme.success;
+      case NotificationType.recommendationDigest:
+        return AppTheme.warning;
       case NotificationType.system:
       case NotificationType.mentorshipRejected:
         return AppTheme.gray500;

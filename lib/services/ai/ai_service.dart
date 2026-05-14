@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:campusconnect/models/ai_interaction.dart';
 import 'package:http/http.dart' as http;
 
 /// VERSION 4: AI Response Model
@@ -156,6 +157,79 @@ class AIService {
       }
       throw Exception('Failed to connect to AI service: $e');
     }
+  }
+
+  /// v7.4: Career assistant wrapper with local intent framing.
+  ///
+  /// Keeps backend contract unchanged while steering the model response style.
+  Future<AIResponse> sendCareerAssistantMessage({
+    required String userId,
+    required String message,
+  }) async {
+    final intent = detectIntent(message);
+    final framedMessage = _withCareerIntentPrefix(intent, message);
+    return sendMessage(userId: userId, message: framedMessage);
+  }
+
+  /// v7.4: Lightweight intent detection used by AI chat/provider layers.
+  AIInteractionIntent detectIntent(String message) {
+    final normalized = message.toLowerCase();
+    if (_containsAny(normalized, [
+      'resume',
+      'ats',
+      'cv',
+      'bullet',
+      'rewrite',
+    ])) {
+      return AIInteractionIntent.resumeImprovement;
+    }
+    if (_containsAny(normalized, [
+      'career path',
+      'career',
+      'roadmap',
+      'next role',
+      'future',
+    ])) {
+      return AIInteractionIntent.careerPath;
+    }
+    if (_containsAny(normalized, [
+      'interview',
+      'mock',
+      'question',
+      'hr round',
+      'technical round',
+    ])) {
+      return AIInteractionIntent.interviewPrep;
+    }
+    if (_containsAny(normalized, [
+      'skill gap',
+      'missing skill',
+      'what should i learn',
+      'upskill',
+      'learn next',
+    ])) {
+      return AIInteractionIntent.skillGap;
+    }
+    return AIInteractionIntent.general;
+  }
+
+  String _withCareerIntentPrefix(AIInteractionIntent intent, String message) {
+    switch (intent) {
+      case AIInteractionIntent.resumeImprovement:
+        return '[Career Assistant: Resume Improvement]\n$message';
+      case AIInteractionIntent.careerPath:
+        return '[Career Assistant: Career Path Guidance]\n$message';
+      case AIInteractionIntent.interviewPrep:
+        return '[Career Assistant: Interview Preparation]\n$message';
+      case AIInteractionIntent.skillGap:
+        return '[Career Assistant: Skill Gap Analysis]\n$message';
+      case AIInteractionIntent.general:
+        return '[Career Assistant: General Guidance]\n$message';
+    }
+  }
+
+  bool _containsAny(String source, List<String> needles) {
+    return needles.any(source.contains);
   }
 
   /// Dispose of resources

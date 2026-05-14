@@ -3,6 +3,7 @@ import 'package:campusconnect/models/student_profile.dart';
 import 'package:campusconnect/providers/alumni_directory_provider.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
 import 'package:campusconnect/providers/role_provider.dart';
+import 'package:campusconnect/services/firestore/profile_service.dart';
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/views/widgets/empty_state_widget.dart';
 import 'package:campusconnect/views/widgets/initials_avatar.dart';
@@ -25,6 +26,8 @@ class AlumniProfileView extends StatefulWidget {
 
 class _AlumniProfileViewState extends State<AlumniProfileView> {
   StudentProfile? _alumniProfile;
+  Map<String, dynamic>? _publicProjection;
+  bool _isPublicView = false;
   bool _isLoading = true;
   String? _error;
 
@@ -35,9 +38,37 @@ class _AlumniProfileViewState extends State<AlumniProfileView> {
   }
 
   void _loadAlumniProfile() async {
-    final args =
-        ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>?;
+    final routeArgs = ModalRoute.of(context)?.settings.arguments;
+    final args = routeArgs is Map<String, dynamic> ? routeArgs : null;
     final alumniId = args?['alumniId'] as String?;
+    final profileKey = args?['profileKey'] as String?;
+
+    if (profileKey != null && profileKey.isNotEmpty) {
+      try {
+        final profileService = ProfileService.instance();
+        final projection = await profileService.getPublicProfileProjection(
+          profileKey,
+        );
+        final profile = await profileService.getPublicAlumniProfile(profileKey);
+        if (mounted) {
+          setState(() {
+            _publicProjection = projection;
+            _isPublicView = true;
+            _alumniProfile = profile;
+            _isLoading = false;
+            _error = profile == null ? 'Public alumni profile not found' : null;
+          });
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _error = 'Failed to load public alumni profile';
+            _isLoading = false;
+          });
+        }
+      }
+      return;
+    }
 
     if (alumniId == null) {
       setState(() {
@@ -78,7 +109,7 @@ class _AlumniProfileViewState extends State<AlumniProfileView> {
           : const Color(0xFFF8FAFC),
       appBar: AppBar(
         title: Text(
-          'Alumni Profile',
+          _isPublicView ? 'Public Alumni Profile' : 'Alumni Profile',
           style: AppTheme.titleLarge.copyWith(
             fontSize: 18,
             color: isDark ? Colors.white : AppTheme.gray900,
@@ -146,6 +177,11 @@ class _AlumniProfileViewState extends State<AlumniProfileView> {
           // Contact information
           _buildContactInfo(_alumniProfile!, isDark),
           const SizedBox(height: 24),
+
+          if (_publicProjection != null) ...[
+            _buildPublicSnapshot(_publicProjection!, isDark),
+            const SizedBox(height: 24),
+          ],
 
           // Action buttons
           _buildActionButtons(_alumniProfile!, isDark),
@@ -550,6 +586,49 @@ class _AlumniProfileViewState extends State<AlumniProfileView> {
                 ],
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPublicSnapshot(Map<String, dynamic> projection, bool isDark) {
+    final experience = projection['experience'] as String?;
+    final opportunitiesPosted =
+        (projection['opportunitiesPosted'] as num?)?.toInt() ?? 0;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? AppTheme.darkSurface : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? AppTheme.gray700.withOpacity(0.3) : AppTheme.gray200,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Public Career Snapshot',
+            style: AppTheme.titleMedium.copyWith(
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white : AppTheme.gray900,
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (experience != null && experience.isNotEmpty)
+            _buildInfoRow(
+              Icons.timeline_rounded,
+              'Experience',
+              experience,
+              isDark,
+            ),
+          _buildInfoRow(
+            Icons.work_history_outlined,
+            'Opportunities Posted',
+            '$opportunitiesPosted',
+            isDark,
           ),
         ],
       ),

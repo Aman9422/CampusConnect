@@ -201,6 +201,19 @@ class NotificationsView extends StatelessWidget {
           );
         }
         break;
+      case NotificationType.mentorMatch:
+        Navigator.pushNamed(context, alumniDirectoryRoute);
+        break;
+      case NotificationType.jobMatch:
+        Navigator.pushNamed(context, opportunitiesRoute);
+        break;
+      case NotificationType.inactiveChatReminder:
+        Navigator.pushNamed(context, chatsListRoute);
+        break;
+      case NotificationType.engagementMilestone:
+      case NotificationType.recommendationDigest:
+        // Informational notifications: no deep-link required.
+        break;
       default:
         break;
     }
@@ -339,6 +352,16 @@ class _NotificationTile extends StatelessWidget {
         return Icons.message;
       case NotificationType.newJobPost:
         return Icons.work;
+      case NotificationType.mentorMatch:
+        return Icons.groups;
+      case NotificationType.jobMatch:
+        return Icons.recommend;
+      case NotificationType.inactiveChatReminder:
+        return Icons.chat_bubble_outline;
+      case NotificationType.engagementMilestone:
+        return Icons.emoji_events;
+      case NotificationType.recommendationDigest:
+        return Icons.tips_and_updates;
     }
   }
 }

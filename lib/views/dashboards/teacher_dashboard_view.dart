@@ -9,6 +9,9 @@ import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
 import 'package:campusconnect/providers/resume_review_provider.dart';
 import 'package:campusconnect/providers/role_provider.dart';
+import 'package:campusconnect/providers/recommendation_provider.dart';
+import 'package:campusconnect/providers/engagement_provider.dart';
+import 'package:campusconnect/providers/ai_chat_provider.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/views/widgets/initials_avatar.dart';
@@ -141,8 +144,8 @@ class TeacherDashboardView extends StatelessWidget {
             const SizedBox(height: 12),
             _featureTile(
               icon: Icons.assessment_outlined,
-              title: 'Placement Reports',
-              subtitle: 'Access placement analytics dashboard',
+              title: 'Placement Management',
+              subtitle: 'Post and update placement drives',
               color: AppTheme.secondaryIndigo,
               isDark: isDark,
               onTap: () => Navigator.pushNamed(context, placementsListRoute),
@@ -230,6 +233,9 @@ class TeacherDashboardView extends StatelessWidget {
     context.read<MentorshipProvider>().reset();
     context.read<OpportunityProvider>().reset();
     context.read<AlumniDirectoryProvider>().reset();
+    context.read<RecommendationProvider>().reset();
+    context.read<EngagementProvider>().reset();
+    context.read<AIChatProvider>().reset();
     try {
       await AuthService.firebase().logOut();
     } catch (_) {

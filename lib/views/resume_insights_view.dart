@@ -342,7 +342,14 @@ class _AIAnalysisSection extends StatelessWidget {
     // Find the selected review to get resume text context
     // Since we don't store raw resume text in history, we pass the
     // concatenated review data as context for AI analysis
-    final review = provider.history.firstWhere((r) => r.id == selectedReviewId);
+    final matching = provider.history.where((r) => r.id == selectedReviewId);
+    if (matching.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Selected review is no longer available')),
+      );
+      return;
+    }
+    final review = matching.first;
 
     final resumeContext = _buildResumeContext(review);
 
@@ -820,8 +827,9 @@ class _TrendChartCard extends StatelessWidget {
               interval: 1,
               getTitlesWidget: (value, meta) {
                 final index = value.toInt();
-                if (index < 0 || index >= sorted.length)
+                if (index < 0 || index >= sorted.length) {
                   return const SizedBox();
+                }
 
                 final date = sorted[index].createdAt;
                 final label = DateFormat('M/d').format(date);

@@ -1,6 +1,7 @@
 import 'package:campusconnect/models/opportunity.dart';
 import 'package:campusconnect/models/student_profile.dart';
 import 'package:campusconnect/models/app_notification.dart'; // v7.3
+import 'package:campusconnect/services/firestore/profile_service.dart'; // v7.4
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
@@ -100,6 +101,19 @@ class OpportunityService {
       } catch (e) {
         debugPrint('Error creating job post notifications: $e');
         // Don't fail job posting if notifications fail
+      }
+
+      // v7.4: Keep optional public alumni profile projection in sync
+      if (alumniProfile.isPublicProfile &&
+          alumniProfile.publicProfileKey != null &&
+          alumniProfile.publicProfileKey!.isNotEmpty) {
+        try {
+          await ProfileService.instance().syncPublicProfile(alumniProfile);
+        } catch (e) {
+          debugPrint(
+            'Error syncing public profile after opportunity create: $e',
+          );
+        }
       }
 
       return docRef.id;

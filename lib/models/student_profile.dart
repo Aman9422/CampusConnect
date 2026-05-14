@@ -1,7 +1,6 @@
 import 'package:campusconnect/enums/user_role.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-
 class StudentProfile {
   final String uid;
   final PersonalInfo personal;
@@ -20,6 +19,8 @@ class StudentProfile {
   final String? jobRole;
   final String? linkedinProfile;
   final String? designation;
+  final bool isPublicProfile; // v7.4 optional public alumni profile
+  final String? publicProfileKey; // v7.4 shareable profile key
 
   StudentProfile({
     required this.uid,
@@ -37,6 +38,8 @@ class StudentProfile {
     this.jobRole,
     this.linkedinProfile,
     this.designation,
+    this.isPublicProfile = false,
+    this.publicProfileKey,
   });
 
   // Create a default/empty profile
@@ -96,15 +99,20 @@ class StudentProfile {
       career: careerData != null
           ? CareerInfo.fromMap(careerData)
           : CareerInfo(
-              interests: (data['interests'] as List<dynamic>?)?.cast<String>() ?? [],
-              preferredRoles: (data['preferredRoles'] as List<dynamic>?)?.cast<String>() ?? [],
+              interests:
+                  (data['interests'] as List<dynamic>?)?.cast<String>() ?? [],
+              preferredRoles:
+                  (data['preferredRoles'] as List<dynamic>?)?.cast<String>() ??
+                  [],
             ),
       // Metadata - fallback to current timestamp if not available
       metadata: metadataData != null
           ? ProfileMetadata.fromMap(metadataData)
           : ProfileMetadata(
-              createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-              updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+              createdAt:
+                  (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+              updatedAt:
+                  (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
             ),
       // Read from root level (fallback to metadata for backward compatibility)
       profileCompleted:
@@ -122,6 +130,8 @@ class StudentProfile {
       jobRole: data['jobRole'] as String?,
       linkedinProfile: data['linkedinProfile'] as String?,
       designation: data['designation'] as String?,
+      isPublicProfile: data['isPublicProfile'] as bool? ?? false,
+      publicProfileKey: data['publicProfileKey'] as String?,
     );
   }
 
@@ -145,6 +155,8 @@ class StudentProfile {
     if (jobRole != null) map['jobRole'] = jobRole;
     if (linkedinProfile != null) map['linkedinProfile'] = linkedinProfile;
     if (designation != null) map['designation'] = designation;
+    map['isPublicProfile'] = isPublicProfile;
+    if (publicProfileKey != null) map['publicProfileKey'] = publicProfileKey;
 
     return map;
   }
@@ -173,6 +185,8 @@ class StudentProfile {
     String? jobRole,
     String? linkedinProfile,
     String? designation,
+    bool? isPublicProfile,
+    String? publicProfileKey,
   }) {
     return StudentProfile(
       uid: uid,
@@ -190,6 +204,8 @@ class StudentProfile {
       jobRole: jobRole ?? this.jobRole,
       linkedinProfile: linkedinProfile ?? this.linkedinProfile,
       designation: designation ?? this.designation,
+      isPublicProfile: isPublicProfile ?? this.isPublicProfile,
+      publicProfileKey: publicProfileKey ?? this.publicProfileKey,
     );
   }
 }

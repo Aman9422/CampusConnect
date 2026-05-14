@@ -1,7 +1,9 @@
+import 'package:campusconnect/enums/user_role.dart';
 import 'package:campusconnect/models/placement.dart';
 import 'package:campusconnect/models/placement_eligibility.dart';
 import 'package:campusconnect/providers/layout_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
+import 'package:campusconnect/providers/role_provider.dart';
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/utilities/error_messages.dart';
 import 'package:campusconnect/views/widgets/eligibility_badge.dart';
@@ -22,6 +24,10 @@ class PlacementsListView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final role = context.watch<RoleProvider>().userRole;
+    final canManagePlacements =
+        role == UserRole.teacher || role == UserRole.alumni;
+    final canApplyPlacements = role == UserRole.student;
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -36,6 +42,12 @@ class PlacementsListView extends StatelessWidget {
           ),
         ),
         actions: [
+          if (canManagePlacements)
+            IconButton(
+              icon: const Icon(Icons.add_rounded),
+              tooltip: 'Add placement',
+              onPressed: () => _showPlacementEditorDialog(context),
+            ),
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             onPressed: () {
@@ -52,10 +64,30 @@ class PlacementsListView extends StatelessWidget {
               OfflineBanner(isOffline: !provider.isOnline),
 
               // Content
-              Expanded(child: _PlacementsContent(provider: provider)),
+              Expanded(
+                child: _PlacementsContent(
+                  provider: provider,
+                  canManagePlacements: canManagePlacements,
+                  canApplyPlacements: canApplyPlacements,
+                ),
+              ),
             ],
           );
         },
+      ),
+    );
+  }
+
+  void _showPlacementEditorDialog(
+    BuildContext context, {
+    Placement? placement,
+  }) {
+    final provider = context.read<PlacementsProvider>();
+    showDialog(
+      context: context,
+      builder: (dialogContext) => ChangeNotifierProvider.value(
+        value: provider,
+        child: _PlacementEditorDialog(existingPlacement: placement),
       ),
     );
   }
@@ -64,8 +96,14 @@ class PlacementsListView extends StatelessWidget {
 /// Internal placements content widget - extracted from _buildPlacementsContent
 class _PlacementsContent extends StatelessWidget {
   final PlacementsProvider provider;
+  final bool canManagePlacements;
+  final bool canApplyPlacements;
 
-  const _PlacementsContent({required this.provider});
+  const _PlacementsContent({
+    required this.provider,
+    required this.canManagePlacements,
+    required this.canApplyPlacements,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -128,7 +166,12 @@ class _PlacementsContent extends StatelessWidget {
               : index;
           final placement = placements[placementIndex];
           final eligibility = provider.getEligibility(placement.id);
-          return _PlacementCard(placement: placement, eligibility: eligibility);
+          return _PlacementCard(
+            placement: placement,
+            eligibility: eligibility,
+            canManagePlacements: canManagePlacements,
+            canApplyPlacements: canApplyPlacements,
+          );
         },
       ),
     );
@@ -199,13 +242,21 @@ class _RecommendedHeader extends StatelessWidget {
 class _PlacementCard extends StatelessWidget {
   final Placement placement;
   final PlacementEligibility? eligibility;
+  final bool canManagePlacements;
+  final bool canApplyPlacements;
 
-  const _PlacementCard({required this.placement, this.eligibility});
+  const _PlacementCard({
+    required this.placement,
+    this.eligibility,
+    required this.canManagePlacements,
+    required this.canApplyPlacements,
+  });
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final layout = context.watch<LayoutProvider>();
+    final isClosed = placement.isDeadlinePassed || !placement.isActive;
 
     return Card(
       margin: EdgeInsets.only(bottom: layout.itemSpacing),
@@ -267,7 +318,7 @@ class _PlacementCard extends StatelessWidget {
                           vertical: AppTheme.space4,
                         ),
                         decoration: BoxDecoration(
-                          gradient: placement.isDeadlinePassed
+                          gradient: isClosed
                               ? LinearGradient(
                                   colors: [
                                     AppTheme.errorBg,
@@ -288,14 +339,14 @@ class _PlacementCard extends StatelessWidget {
                             AppTheme.radiusFull,
                           ),
                           border: Border.all(
-                            color: placement.isDeadlinePassed
+                            color: isClosed
                                 ? AppTheme.error.withOpacity(0.3)
                                 : AppTheme.success.withOpacity(0.3),
                             width: 0.5,
                           ),
                           boxShadow: [
                             BoxShadow(
-                              color: placement.isDeadlinePassed
+                              color: isClosed
                                   ? AppTheme.error.withOpacity(0.15)
                                   : AppTheme.success.withOpacity(0.15),
                               blurRadius: 8,
@@ -304,11 +355,9 @@ class _PlacementCard extends StatelessWidget {
                           ],
                         ),
                         child: Text(
-                          placement.isDeadlinePassed ? 'Closed' : 'Open',
+                          isClosed ? 'Closed' : 'Open',
                           style: AppTheme.label.copyWith(
-                            color: placement.isDeadlinePassed
-                                ? AppTheme.error
-                                : AppTheme.success,
+                            color: isClosed ? AppTheme.error : AppTheme.success,
                             fontWeight: FontWeight.w700,
                             fontSize: 10,
                             letterSpacing: 0.3,
@@ -316,12 +365,22 @@ class _PlacementCard extends StatelessWidget {
                         ),
                       ),
                       // v6.5: Eligibility badge
-                      if (eligibility != null &&
-                          !placement.isDeadlinePassed) ...[
+                      if (eligibility != null && !isClosed) ...[
                         const SizedBox(height: AppTheme.space8),
                         EligibilityBadge(
                           eligibility: eligibility!,
                           compact: true,
+                        ),
+                      ],
+                      if (canManagePlacements) ...[
+                        const SizedBox(height: AppTheme.space8),
+                        IconButton(
+                          icon: const Icon(Icons.edit_outlined, size: 18),
+                          tooltip: 'Edit placement',
+                          constraints: const BoxConstraints(),
+                          padding: EdgeInsets.zero,
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () => _showPlacementEditorDialog(context),
                         ),
                       ],
                     ],
@@ -382,7 +441,7 @@ class _PlacementCard extends StatelessWidget {
                       ),
                     ],
                   ),
-                  if (!placement.isDeadlinePassed)
+                  if (canApplyPlacements && !isClosed)
                     _ApplyButton(
                       placementId: placement.id,
                       company: placement.company,
@@ -393,6 +452,17 @@ class _PlacementCard extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  void _showPlacementEditorDialog(BuildContext context) {
+    final provider = context.read<PlacementsProvider>();
+    showDialog(
+      context: context,
+      builder: (dialogContext) => ChangeNotifierProvider.value(
+        value: provider,
+        child: _PlacementEditorDialog(existingPlacement: placement),
       ),
     );
   }
@@ -702,5 +772,255 @@ class _ApplyDialogWidgetState extends State<_ApplyDialogWidget> {
         });
       }
     }
+  }
+}
+
+/// Create/Edit placement dialog for teacher/alumni management
+class _PlacementEditorDialog extends StatefulWidget {
+  final Placement? existingPlacement;
+
+  const _PlacementEditorDialog({this.existingPlacement});
+
+  @override
+  State<_PlacementEditorDialog> createState() => _PlacementEditorDialogState();
+}
+
+class _PlacementEditorDialogState extends State<_PlacementEditorDialog> {
+  late final TextEditingController _companyController;
+  late final TextEditingController _roleController;
+  late final TextEditingController _descriptionController;
+  late final TextEditingController _salaryController;
+  late final TextEditingController _eligibilityController;
+
+  bool _isSaving = false;
+  String? _errorMessage;
+  late DateTime _deadline;
+
+  bool get _isEdit => widget.existingPlacement != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final placement = widget.existingPlacement;
+    _companyController = TextEditingController(text: placement?.company ?? '');
+    _roleController = TextEditingController(text: placement?.role ?? '');
+    _descriptionController = TextEditingController(
+      text: placement?.description ?? '',
+    );
+    _salaryController = TextEditingController(text: placement?.salary ?? '');
+    _eligibilityController = TextEditingController(
+      text: placement?.eligibility ?? '',
+    );
+    _deadline =
+        placement?.deadline ?? DateTime.now().add(const Duration(days: 30));
+  }
+
+  @override
+  void dispose() {
+    _companyController.dispose();
+    _roleController.dispose();
+    _descriptionController.dispose();
+    _salaryController.dispose();
+    _eligibilityController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(_isEdit ? 'Edit Placement' : 'Add Placement'),
+      content: SingleChildScrollView(
+        child: SizedBox(
+          width: 420,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildTextField(
+                controller: _companyController,
+                label: 'Company',
+                hint: 'e.g., Google',
+              ),
+              const SizedBox(height: 12),
+              _buildTextField(
+                controller: _roleController,
+                label: 'Role',
+                hint: 'e.g., Software Engineer Intern',
+              ),
+              const SizedBox(height: 12),
+              _buildTextField(
+                controller: _descriptionController,
+                label: 'Description',
+                hint: 'Brief role summary',
+                maxLines: 3,
+              ),
+              const SizedBox(height: 12),
+              _buildTextField(
+                controller: _salaryController,
+                label: 'Salary',
+                hint: 'e.g., ₹50,000/month',
+              ),
+              const SizedBox(height: 12),
+              _buildTextField(
+                controller: _eligibilityController,
+                label: 'Eligibility',
+                hint: 'e.g., CGPA 7.0+, CSE/IT',
+                maxLines: 2,
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  const Icon(Icons.calendar_today_outlined, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Deadline: ${DateFormat('MMM dd, yyyy').format(_deadline)}',
+                      style: AppTheme.bodyMedium,
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _isSaving ? null : _pickDeadline,
+                    child: const Text('Change'),
+                  ),
+                ],
+              ),
+              if (_errorMessage != null) ...[
+                const SizedBox(height: 10),
+                Text(
+                  _errorMessage!,
+                  style: TextStyle(color: Colors.red.shade600),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isSaving ? null : () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: _isSaving ? null : _savePlacement,
+          child: _isSaving
+              ? const SizedBox(
+                  height: 18,
+                  width: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Text(_isEdit ? 'Update' : 'Post'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+    int maxLines = 1,
+  }) {
+    return TextField(
+      controller: controller,
+      maxLines: maxLines,
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hint,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+    );
+  }
+
+  Future<void> _pickDeadline() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _deadline,
+      firstDate: DateTime.now().subtract(const Duration(days: 1)),
+      lastDate: DateTime.now().add(const Duration(days: 3650)),
+    );
+
+    if (picked == null || !mounted) return;
+    setState(() {
+      _deadline = DateTime(
+        picked.year,
+        picked.month,
+        picked.day,
+        _deadline.hour,
+        _deadline.minute,
+      );
+    });
+  }
+
+  Future<void> _savePlacement() async {
+    final company = _companyController.text.trim();
+    final role = _roleController.text.trim();
+    final description = _descriptionController.text.trim();
+    final salary = _salaryController.text.trim();
+    final eligibility = _eligibilityController.text.trim();
+
+    if (company.isEmpty ||
+        role.isEmpty ||
+        description.isEmpty ||
+        salary.isEmpty ||
+        eligibility.isEmpty) {
+      setState(() {
+        _errorMessage = 'Please fill all fields before saving.';
+      });
+      return;
+    }
+
+    setState(() {
+      _isSaving = true;
+      _errorMessage = null;
+    });
+
+    final provider = context.read<PlacementsProvider>();
+    bool success;
+
+    if (_isEdit) {
+      final existing = widget.existingPlacement!;
+      final updatedPlacement = Placement(
+        id: existing.id,
+        company: company,
+        role: role,
+        description: description,
+        eligibility: eligibility,
+        salary: salary,
+        deadline: _deadline,
+        postedAt: existing.postedAt,
+        isActive: existing.isActive,
+        requirements: existing.requirements,
+      );
+      success = await provider.updatePlacement(updatedPlacement);
+    } else {
+      success = await provider.createPlacement(
+        company: company,
+        role: role,
+        description: description,
+        eligibility: eligibility,
+        salary: salary,
+        deadline: _deadline,
+      );
+    }
+
+    if (!mounted) return;
+    if (success) {
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _isEdit
+                ? 'Placement updated successfully'
+                : 'Placement posted successfully',
+          ),
+          backgroundColor: Colors.green,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isSaving = false;
+      _errorMessage = provider.error ?? 'Failed to save placement';
+    });
   }
 }

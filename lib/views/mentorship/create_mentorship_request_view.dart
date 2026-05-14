@@ -52,8 +52,8 @@ class _CreateMentorshipRequestViewState
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final args =
-        ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>?;
+    final routeArgs = ModalRoute.of(context)?.settings.arguments;
+    final args = routeArgs is Map<String, dynamic> ? routeArgs : null;
     _alumniProfile = args?['alumniProfile'] as StudentProfile?;
   }
 
