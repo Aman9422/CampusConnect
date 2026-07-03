@@ -54,10 +54,10 @@ class ActivitySectionHeader extends StatelessWidget {
                     vertical: 2,
                   ),
                   decoration: BoxDecoration(
-                    color: AppTheme.primaryBlue.withOpacity(0.1),
+                    color: AppTheme.primaryBlue.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: AppTheme.primaryBlue.withOpacity(0.2),
+                      color: AppTheme.primaryBlue.withValues(alpha: 0.2),
                     ),
                   ),
                   child: Text(
@@ -120,7 +120,7 @@ class ActivityListItem extends StatelessWidget {
       background: Container(
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 24),
-        color: AppTheme.success.withOpacity(0.1),
+        color: AppTheme.success.withValues(alpha: 0.1),
         child: Icon(Icons.check_rounded, color: AppTheme.success),
       ),
       child: Container(
@@ -134,7 +134,7 @@ class ActivityListItem extends StatelessWidget {
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.03),
+              color: Colors.black.withValues(alpha: 0.03),
               blurRadius: 8,
               offset: const Offset(0, 2),
             ),
@@ -219,7 +219,7 @@ class ActivityListItem extends StatelessWidget {
                                 vertical: 2,
                               ),
                               decoration: BoxDecoration(
-                                color: activity.iconColor.withOpacity(0.1),
+                                color: activity.iconColor.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text(
@@ -259,7 +259,7 @@ class ActivityListItem extends StatelessWidget {
           color: activity.iconColor.withOpacity(isDark ? 0.15 : 0.1),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: activity.iconColor.withOpacity(0.2),
+            color: activity.iconColor.withValues(alpha: 0.2),
             width: 0.5,
           ),
         ),
@@ -366,7 +366,7 @@ class FeaturedCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: gradientColors.first.withOpacity(0.3),
+            color: gradientColors.first.withValues(alpha: 0.3),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -385,7 +385,7 @@ class FeaturedCard extends StatelessWidget {
                   width: 48,
                   height: 48,
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
+                    color: Colors.white.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(icon, color: Colors.white, size: 24),
@@ -414,7 +414,7 @@ class FeaturedCard extends StatelessWidget {
                                 vertical: 4,
                               ),
                               decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.2),
+                                color: Colors.white.withValues(alpha: 0.2),
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               child: Text(
@@ -433,7 +433,7 @@ class FeaturedCard extends StatelessWidget {
                       Text(
                         description,
                         style: AppTheme.bodySmall.copyWith(
-                          color: Colors.white.withOpacity(0.9),
+                          color: Colors.white.withValues(alpha: 0.9),
                         ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
@@ -445,7 +445,7 @@ class FeaturedCard extends StatelessWidget {
                 if (onTap != null) ...[
                   Icon(
                     Icons.arrow_forward_ios_rounded,
-                    color: Colors.white.withOpacity(0.8),
+                    color: Colors.white.withValues(alpha: 0.8),
                     size: 16,
                   ),
                 ],
@@ -487,7 +487,7 @@ class TodayHighlight extends StatelessWidget {
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.03),
+            color: Colors.black.withValues(alpha: 0.03),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),

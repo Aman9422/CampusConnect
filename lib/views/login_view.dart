@@ -124,7 +124,7 @@ class _LoginViewState extends State<LoginView>
                           borderRadius: BorderRadius.circular(20),
                           boxShadow: [
                             BoxShadow(
-                              color: AppTheme.primaryBlue.withOpacity(0.3),
+                              color: AppTheme.primaryBlue.withValues(alpha: 0.3),
                               blurRadius: 20,
                               offset: const Offset(0, 8),
                             ),
@@ -168,14 +168,14 @@ class _LoginViewState extends State<LoginView>
                           ),
                           border: Border.all(
                             color: isDark
-                                ? AppTheme.gray700.withOpacity(0.5)
+                                ? AppTheme.gray700.withValues(alpha: 0.5)
                                 : AppTheme.gray200,
                           ),
                           boxShadow: isDark
                               ? []
                               : [
                                   BoxShadow(
-                                    color: Colors.black.withOpacity(0.04),
+                                    color: Colors.black.withValues(alpha: 0.04),
                                     blurRadius: 24,
                                     offset: const Offset(0, 8),
                                   ),

@@ -281,8 +281,8 @@ class _NotificationTile extends StatelessWidget {
         onTap: onTap,
         leading: CircleAvatar(
           backgroundColor: isUnread
-              ? theme.colorScheme.primary.withOpacity(0.1)
-              : Colors.grey.withOpacity(0.1),
+              ? theme.colorScheme.primary.withValues(alpha: 0.1)
+              : Colors.grey.withValues(alpha: 0.1),
           child: Icon(
             _getIcon(),
             color: isUnread ? theme.colorScheme.primary : Colors.grey,

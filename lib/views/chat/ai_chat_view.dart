@@ -241,7 +241,7 @@ class _AIChatViewState extends State<AIChatView> {
               DateFormat('HH:mm').format(message.timestamp),
               style: AppTheme.caption.copyWith(
                 color: message.isUserMessage
-                    ? Colors.white.withOpacity(0.7)
+                    ? Colors.white.withValues(alpha: 0.7)
                     : AppTheme.gray600,
               ),
             ),

@@ -188,7 +188,7 @@ class _OpportunitiesViewState extends State<OpportunitiesView> {
         color: isDark ? AppTheme.darkSurface : Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isDark ? AppTheme.gray700.withOpacity(0.3) : AppTheme.gray200,
+          color: isDark ? AppTheme.gray700.withValues(alpha: 0.3) : AppTheme.gray200,
         ),
       ),
       child: Padding(
@@ -203,7 +203,7 @@ class _OpportunitiesViewState extends State<OpportunitiesView> {
                   width: 48,
                   height: 48,
                   decoration: BoxDecoration(
-                    color: AppTheme.primaryBlue.withOpacity(0.1),
+                    color: AppTheme.primaryBlue.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Icon(
@@ -237,7 +237,7 @@ class _OpportunitiesViewState extends State<OpportunitiesView> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: AppTheme.success.withOpacity(0.1),
+                    color: AppTheme.success.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
@@ -304,7 +304,7 @@ class _OpportunitiesViewState extends State<OpportunitiesView> {
                 children: opportunity.skills.take(4).map((skill) => Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: AppTheme.primaryBlue.withOpacity(0.1),
+                    color: AppTheme.primaryBlue.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
@@ -346,8 +346,8 @@ class _OpportunitiesViewState extends State<OpportunitiesView> {
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: opportunity.isExpired
-                      ? AppTheme.error.withOpacity(0.1)
-                      : Colors.orange.withOpacity(0.1),
+                      ? AppTheme.error.withValues(alpha: 0.1)
+                      : Colors.orange.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Row(

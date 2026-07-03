@@ -420,10 +420,10 @@ class _MentorshipRequestDetailViewState
                   width: double.infinity,
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color: AppTheme.success.withOpacity(0.1),
+                    color: AppTheme.success.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: AppTheme.success.withOpacity(0.3),
+                      color: AppTheme.success.withValues(alpha: 0.3),
                     ),
                   ),
                   child: Column(

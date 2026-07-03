@@ -1,445 +1,971 @@
-// v7.2: Import new providers
-import 'package:campusconnect/providers/alumni_directory_provider.dart';
-import 'package:campusconnect/enums/user_role.dart';
-import 'package:campusconnect/providers/mentorship_provider.dart';
-import 'package:campusconnect/providers/opportunity_provider.dart';
 import 'package:campusconnect/constants/routes.dart';
-import 'package:campusconnect/models/student_profile.dart';
+import 'package:campusconnect/providers/activity_feed_provider.dart';
+import 'package:campusconnect/providers/ai_chat_provider.dart';
 import 'package:campusconnect/providers/ai_usage_provider.dart';
+import 'package:campusconnect/providers/alumni_directory_provider.dart';
+import 'package:campusconnect/providers/engagement_provider.dart';
+import 'package:campusconnect/providers/mentorship_provider.dart';
 import 'package:campusconnect/providers/notifications_provider.dart';
+import 'package:campusconnect/providers/opportunity_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
+import 'package:campusconnect/providers/recommendation_provider.dart';
 import 'package:campusconnect/providers/resume_review_provider.dart';
 import 'package:campusconnect/providers/role_provider.dart';
-import 'package:campusconnect/providers/recommendation_provider.dart';
-import 'package:campusconnect/providers/engagement_provider.dart';
-import 'package:campusconnect/providers/ai_chat_provider.dart';
+import 'package:campusconnect/models/student_profile.dart';
+import 'package:campusconnect/providers/chat_provider.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
-import 'package:campusconnect/services/firestore/profile_service.dart';
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/views/widgets/initials_avatar.dart';
-import 'package:campusconnect/views/widgets/notification_badge.dart'; // v7.3
-import 'package:campusconnect/views/widgets/chat_badge.dart'; // v7.3
+import 'package:campusconnect/views/widgets/notification_badge.dart';
+import 'package:campusconnect/views/widgets/chat_badge.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
-/// v7.1: Alumni dashboard - tailored for graduates
+/// v7.5: Modernized Alumni Dashboard matching Student Dashboard quality.
+///
+/// Hero section with welcome + avatar + stats.
+/// Quick Stats row, Activity Feed, Professional Tools grid,
+/// My Impact section, and Quick Actions.
 class AlumniDashboardView extends StatelessWidget {
   const AlumniDashboardView({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final profile = context.watch<ProfileProvider>().profile;
-    final name = profile?.personal.effectiveDisplayName ?? 'Alumni';
-    final isPublicProfile = profile?.isPublicProfile == true;
-
     return Scaffold(
-      backgroundColor: isDark
-          ? AppTheme.darkBackground
-          : const Color(0xFFF8FAFC),
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: Text(
-          'Alumni Dashboard',
-          style: AppTheme.titleLarge.copyWith(
-            fontSize: 20,
-            color: isDark ? Colors.white : AppTheme.gray900,
-          ),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.workspace_premium, color: AppTheme.gray900, size: 24),
+            const SizedBox(width: 8),
+            Text(
+              'Alumni Dashboard',
+              style: AppTheme.titleMedium.copyWith(
+                fontWeight: FontWeight.w600,
+                color: AppTheme.gray900,
+              ),
+            ),
+          ],
         ),
-        backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
+        backgroundColor: AppTheme.surface,
         elevation: 0,
         actions: [
-          // v7.3: Notification badge
           NotificationBadge(
             onTap: () => Navigator.pushNamed(context, notificationsRoute),
           ),
-          // v7.3: Chat badge
           ChatBadge(),
-          IconButton(
-            icon: const Icon(Icons.logout_rounded),
-            onPressed: () => _logout(context),
+          PopupMenuButton<MenuAction>(
+            icon: Icon(Icons.more_vert, color: AppTheme.gray700),
+            onSelected: (value) async {
+              switch (value) {
+                case MenuAction.logout:
+                  final shouldLogout = await _showLogOutDialog(context);
+                  if (shouldLogout && context.mounted) {
+                    _resetProviders(context);
+                    try {
+                      await AuthService.firebase().logOut();
+                    } catch (_) {}
+                  }
+                  break;
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem<MenuAction>(
+                value: MenuAction.logout,
+                child: Text('Log out'),
+              ),
+            ],
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Welcome card
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
-                ),
-                borderRadius: BorderRadius.circular(AppTheme.radiusXLarge),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFF6366F1).withOpacity(0.3),
-                    blurRadius: 20,
-                    offset: const Offset(0, 8),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      InitialsAvatar(name: name, size: 48),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Welcome, $name',
-                              style: AppTheme.titleMedium.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            if (profile?.company != null)
-                              Text(
-                                '${profile!.jobRole ?? "Professional"} at ${profile.company}',
-                                style: AppTheme.bodySmall.copyWith(
-                                  color: Colors.white.withOpacity(0.8),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 24),
-
-            // Feature cards
-            _featureTile(
-              icon: Icons.people_outline_rounded,
-              title: 'Mentorship',
-              subtitle: 'Connect with students seeking guidance',
-              color: AppTheme.primaryBlue,
-              isDark: isDark,
-              onTap: () =>
-                  Navigator.pushNamed(context, mentorshipRequestsRoute),
-            ),
-            const SizedBox(height: 12),
-            _featureTile(
-              icon: Icons.description_outlined,
-              title: 'Resume Reviews',
-              subtitle: 'Help students improve their resumes',
-              color: AppTheme.success,
-              isDark: isDark,
-              onTap: () => Navigator.pushNamed(context, resumeReviewRoute),
-            ),
-            const SizedBox(height: 12),
-            _featureTile(
-              icon: Icons.work_outline_rounded,
-              title: 'Job Referrals',
-              subtitle: 'Share opportunities from your network',
-              color: AppTheme.warning,
-              isDark: isDark,
-              onTap: () => Navigator.pushNamed(context, opportunitiesRoute),
-            ),
-            const SizedBox(height: 12),
-            _featureTile(
-              icon: Icons.business_center_outlined,
-              title: 'Placements',
-              subtitle: 'Post and update campus placement drives',
-              color: AppTheme.primaryBlue,
-              isDark: isDark,
-              onTap: () => Navigator.pushNamed(context, placementsListRoute),
-            ),
-            const SizedBox(height: 12),
-            _featureTile(
-              icon: Icons.public_rounded,
-              title: 'Public Profile',
-              subtitle: isPublicProfile
-                  ? 'Visible to everyone with your link'
-                  : 'Enable a shareable alumni profile link',
-              color: AppTheme.secondaryIndigo,
-              isDark: isDark,
-              onTap: () => _managePublicProfile(context, profile),
-            ),
-            const SizedBox(height: 12),
-            _featureTile(
-              icon: Icons.event_outlined,
-              title: 'Campus Events',
-              subtitle: 'Connect with fellow alumni',
-              color: AppTheme.secondaryIndigo,
-              isDark: isDark,
-              onTap: () => Navigator.pushNamed(context, alumniDirectoryRoute),
-            ),
-          ],
-        ),
-      ),
+      body: _AlumniDashboardBody(),
     );
   }
 
-  Future<void> _managePublicProfile(
-    BuildContext context,
-    StudentProfile? profile,
-  ) async {
-    if (profile == null || profile.role != UserRole.alumni) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Complete your alumni profile first')),
-      );
-      return;
-    }
-
-    final profileProvider = context.read<ProfileProvider>();
-    final profileService = ProfileService.instance();
-    final key = await profileService.ensurePublicProfileKey(profile);
-    if (!context.mounted) return;
-
-    StudentProfile latestProfile = profileProvider.profile ?? profile;
-    if ((latestProfile.publicProfileKey == null ||
-            latestProfile.publicProfileKey!.isEmpty) &&
-        context.mounted) {
-      final keySynced = await profileProvider.updateProfile(
-        latestProfile.copyWith(publicProfileKey: key),
-      );
-      if (!keySynced || !context.mounted) return;
-      latestProfile = profileProvider.profile ?? latestProfile;
-    }
-
-    final profileLink = 'https://campusconnect.app/alumni/$key';
-    final isPublic = latestProfile.isPublicProfile;
-    final actionLabel = isPublic
-        ? 'Disable Public Profile'
-        : 'Enable Public Profile';
-    final actionIcon = isPublic ? Icons.visibility_off : Icons.public;
-
-    final selectedAction = await showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      builder: (sheetContext) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Public Alumni Profile',
-                  style: AppTheme.titleMedium.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: Theme.of(sheetContext).brightness == Brightness.dark
-                        ? Colors.white
-                        : AppTheme.gray900,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  isPublic
-                      ? 'Your profile is public. Anyone with the link can view it.'
-                      : 'Your profile is private. Enable it to share with recruiters and peers.',
-                  style: AppTheme.bodySmall.copyWith(
-                    color: Theme.of(sheetContext).brightness == Brightness.dark
-                        ? AppTheme.gray400
-                        : AppTheme.gray600,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                if (isPublic) ...[
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color:
-                          Theme.of(sheetContext).brightness == Brightness.dark
-                          ? AppTheme.darkSurface
-                          : AppTheme.gray100,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text(profileLink, style: AppTheme.bodySmall),
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: () => Navigator.pop(sheetContext, 'toggle'),
-                    icon: Icon(actionIcon),
-                    label: Text(actionLabel),
-                  ),
-                ),
-                if (isPublic) ...[
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: () => Navigator.pop(sheetContext, 'copy'),
-                      icon: const Icon(Icons.copy_rounded),
-                      label: const Text('Copy Public Link'),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: () => Navigator.pop(sheetContext, 'preview'),
-                      icon: const Icon(Icons.open_in_new_rounded),
-                      label: const Text('Preview Public Profile'),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        );
-      },
-    );
-
-    if (!context.mounted || selectedAction == null) return;
-
-    if (selectedAction == 'copy') {
-      await Clipboard.setData(ClipboardData(text: profileLink));
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Public profile link copied')),
-      );
-      return;
-    }
-
-    if (selectedAction == 'preview') {
-      Navigator.pushNamed(
-        context,
-        alumniProfileRoute,
-        arguments: {'profileKey': key},
-      );
-      return;
-    }
-
-    if (selectedAction == 'toggle') {
-      await _setPublicProfileVisibility(
-        context,
-        latestProfile: latestProfile,
-        key: key,
-        shouldEnable: !isPublic,
-      );
-    }
-  }
-
-  Future<void> _setPublicProfileVisibility(
-    BuildContext context, {
-    required StudentProfile latestProfile,
-    required String key,
-    required bool shouldEnable,
-  }) async {
-    final updatedProfile = latestProfile.copyWith(
-      publicProfileKey: key,
-      isPublicProfile: shouldEnable,
-    );
-    final success = await context.read<ProfileProvider>().updateProfile(
-      updatedProfile,
-    );
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          success
-              ? (shouldEnable
-                    ? 'Public profile enabled'
-                    : 'Public profile disabled')
-              : 'Failed to update public profile visibility',
-        ),
-      ),
-    );
-  }
-
-  Widget _featureTile({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required Color color,
-    required bool isDark,
-    VoidCallback? onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: isDark ? AppTheme.darkSurface : Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: isDark
-                ? AppTheme.gray700.withOpacity(0.5)
-                : AppTheme.gray200,
-          ),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: color.withOpacity(isDark ? 0.15 : 0.08),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(icon, color: color, size: 22),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: AppTheme.titleSmall.copyWith(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: isDark ? Colors.white : AppTheme.gray900,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: AppTheme.caption.copyWith(
-                      color: isDark ? AppTheme.gray400 : AppTheme.gray500,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Icon(
-              Icons.chevron_right_rounded,
-              color: isDark ? AppTheme.gray500 : AppTheme.gray400,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _logout(BuildContext context) async {
+  void _resetProviders(BuildContext context) {
     context.read<ProfileProvider>().reset();
     context.read<PlacementsProvider>().reset();
     context.read<AIUsageProvider>().reset();
     context.read<NotificationsProvider>().reset();
     context.read<ResumeReviewProvider>().reset();
     context.read<RoleProvider>().reset();
-    // v7.2: Reset ecosystem providers
     context.read<MentorshipProvider>().reset();
     context.read<OpportunityProvider>().reset();
     context.read<AlumniDirectoryProvider>().reset();
     context.read<RecommendationProvider>().reset();
     context.read<EngagementProvider>().reset();
     context.read<AIChatProvider>().reset();
-    try {
-      await AuthService.firebase().logOut();
-    } catch (_) {
-      // AuthGuard will handle the state
-    }
-    // AuthGuard StreamBuilder detects sign-out and shows LoginView
+    context.read<ActivityFeedProvider>().reset();
   }
+
+  Future<bool> _showLogOutDialog(BuildContext context) async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Sign Out'),
+            content: const Text('Are you sure you want to sign out?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.error,
+                ),
+                child: const Text('Sign Out',
+                    style: TextStyle(color: Colors.white)),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+}
+
+enum MenuAction { logout }
+
+class _AlumniDashboardBody extends StatefulWidget {
+  @override
+  State<_AlumniDashboardBody> createState() => _AlumniDashboardBodyState();
+}
+
+class _AlumniDashboardBodyState extends State<_AlumniDashboardBody> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<MentorshipProvider>().refresh();
+      context.read<OpportunityProvider>().refresh();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final profile = context.watch<ProfileProvider>().profile;
+    final mentorship = context.watch<MentorshipProvider>();
+    final opportunities = context.watch<OpportunityProvider>();
+    final chatProvider = context.watch<ChatProvider>();
+    final activityFeed = context.watch<ActivityFeedProvider>();
+
+    return RefreshIndicator(
+      onRefresh: () async {
+        await context.read<MentorshipProvider>().refresh();
+        await context.read<OpportunityProvider>().refresh();
+        await context.read<ActivityFeedProvider>().refresh();
+      },
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(AppTheme.space16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Hero Section
+            _buildHeroSection(context, profile, isDark),
+            const SizedBox(height: AppTheme.space24),
+
+            // Quick Stats
+            _buildQuickStats(
+              context,
+              profile,
+              mentorship,
+              opportunities,
+              chatProvider,
+              isDark,
+            ),
+            const SizedBox(height: AppTheme.space24),
+
+            // Activity Feed
+            _buildActivityFeed(context, activityFeed, mentorship, isDark),
+            const SizedBox(height: AppTheme.space24),
+
+            // Professional Tools
+            _buildProfessionalTools(context, isDark),
+            const SizedBox(height: AppTheme.space24),
+
+            // My Impact
+            _buildMyImpact(context, mentorship, opportunities, profile, isDark),
+            const SizedBox(height: AppTheme.space24),
+
+            // Quick Actions
+            _buildQuickActions(context, isDark),
+            const SizedBox(height: AppTheme.space24),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─── HERO SECTION ───────────────────────────────────────────────
+  Widget _buildHeroSection(
+      BuildContext context, StudentProfile? profile, bool isDark) {
+    final name = profile?.personal.effectiveDisplayName ?? 'Alumni';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppTheme.space24),
+      decoration: BoxDecoration(
+        gradient: AppTheme.accentGradient,
+        borderRadius: BorderRadius.circular(AppTheme.radiusXLarge),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.secondaryIndigo.withValues(alpha: 0.3),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              InitialsAvatar(name: name, size: 52),
+              const SizedBox(width: AppTheme.space16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Welcome, $name',
+                      style: AppTheme.titleMedium.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: AppTheme.space4),
+                    Text(
+                      profile?.jobRole ?? 'Professional',
+                      style: AppTheme.bodySmall.copyWith(
+                        color: Colors.white.withValues(alpha: 0.85),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppTheme.space20),
+          Row(
+            children: [
+              _heroStat(
+                profile?.company ?? 'Your Network',
+                'Company',
+                Icons.business_outlined,
+              ),
+              const SizedBox(width: AppTheme.space12),
+              _heroStat(
+                '${profile?.skills?.length ?? 0} Skills',
+                'Expertise',
+                Icons.lightbulb_outline,
+              ),
+              const SizedBox(width: AppTheme.space12),
+              _heroStat(
+                profile?.designation ?? 'Alumni',
+                'Designation',
+                Icons.badge_outlined,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _heroStat(String value, String label, IconData icon) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(AppTheme.space12),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: Colors.white, size: 20),
+            const SizedBox(height: AppTheme.space4),
+            Text(
+              value,
+              style: AppTheme.titleSmall.copyWith(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+            ),
+            Text(
+              label,
+              style: AppTheme.caption.copyWith(
+                color: Colors.white.withValues(alpha: 0.8),
+                fontSize: 10,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─── QUICK STATS ────────────────────────────────────────────────
+  Widget _buildQuickStats(
+    BuildContext context,
+    StudentProfile? profile,
+    MentorshipProvider mentorship,
+    OpportunityProvider opportunities,
+    ChatProvider chatProvider,
+    bool isDark,
+  ) {
+    final studentsMentored = mentorship.completedMentorshipsCount +
+        mentorship.acceptedMentorshipsCount;
+    final activeChats = chatProvider.chats?.length ?? 0;
+    final opportunitiesPosted = opportunities.myOpportunities?.length ?? 0;
+    final profileViews = 0; // Placeholder - would require analytics
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Quick Stats',
+          style: AppTheme.titleMedium.copyWith(
+            fontWeight: FontWeight.w600,
+            color: isDark ? Colors.white : AppTheme.gray900,
+          ),
+        ),
+        const SizedBox(height: AppTheme.space16),
+        Row(
+          children: [
+            Expanded(
+              child: _buildStatCard(
+                '$studentsMentored',
+                'Students Mentored',
+                Icons.people_outline,
+                AppTheme.primaryBlue,
+                isDark,
+              ),
+            ),
+            const SizedBox(width: AppTheme.space12),
+            Expanded(
+              child: _buildStatCard(
+                '$activeChats',
+                'Active Chats',
+                Icons.chat_outlined,
+                AppTheme.success,
+                isDark,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppTheme.space12),
+        Row(
+          children: [
+            Expanded(
+              child: _buildStatCard(
+                '$opportunitiesPosted',
+                'Opps. Posted',
+                Icons.work_outline,
+                AppTheme.warning,
+                isDark,
+              ),
+            ),
+            const SizedBox(width: AppTheme.space12),
+            Expanded(
+              child: _buildStatCard(
+                '$profileViews',
+                'Profile Views',
+                Icons.visibility_outlined,
+                AppTheme.secondaryIndigo,
+                isDark,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatCard(
+    String value,
+    String label,
+    IconData icon,
+    Color color,
+    bool isDark,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(AppTheme.space16),
+      decoration: BoxDecoration(
+        color: isDark ? AppTheme.darkSurface : AppTheme.surface,
+        borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+        border: Border.all(
+          color: isDark ? AppTheme.gray700 : AppTheme.gray200,
+        ),
+        boxShadow: AppTheme.shadowSmall,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(AppTheme.space8),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: isDark ? 0.2 : 0.1),
+                  borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+                ),
+                child: Icon(icon, color: color, size: 18),
+              ),
+              const Spacer(),
+              Text(
+                value,
+                style: AppTheme.titleMedium.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? Colors.white : AppTheme.gray900,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppTheme.space8),
+          Text(
+            label,
+            style: AppTheme.caption.copyWith(
+              color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── ACTIVITY FEED ──────────────────────────────────────────────
+  Widget _buildActivityFeed(
+    BuildContext context,
+    ActivityFeedProvider activityFeed,
+    MentorshipProvider mentorship,
+    bool isDark,
+  ) {
+    final activities = <_ActivityItem>[];
+
+    // Mentorship requests
+    final pendingCount = mentorship.pendingRequestsCount;
+    if (pendingCount > 0) {
+      activities.add(_ActivityItem(
+        '$pendingCount pending mentorship request(s)',
+        'Review mentorship requests from students',
+        Icons.school_outlined,
+        AppTheme.warning,
+      ));
+    }
+
+    final acceptedCount = mentorship.acceptedMentorshipsCount;
+    if (acceptedCount > 0) {
+      activities.add(_ActivityItem(
+        '$acceptedCount active mentorship(s)',
+        'You are currently mentoring students',
+        Icons.handshake_rounded,
+        AppTheme.success,
+      ));
+    }
+
+    final completedCount = mentorship.completedMentorshipsCount;
+    if (completedCount > 0) {
+      activities.add(_ActivityItem(
+        '$completedCount completed mentorship(s)',
+        'Mentorship journeys successfully finished',
+        Icons.celebration_outlined,
+        AppTheme.primaryBlue,
+      ));
+    }
+
+    // Activity feed items
+    for (final a in activityFeed.allActivities.take(3)) {
+      activities.add(_ActivityItem(
+        a.title,
+        a.description,
+        a.icon,
+        a.iconColor,
+      ));
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Recent Activities',
+          style: AppTheme.titleMedium.copyWith(
+            fontWeight: FontWeight.w600,
+            color: isDark ? Colors.white : AppTheme.gray900,
+          ),
+        ),
+        const SizedBox(height: AppTheme.space16),
+        Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: isDark ? AppTheme.darkSurface : AppTheme.surface,
+            borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+            border: Border.all(
+              color: isDark ? AppTheme.gray700 : AppTheme.gray200,
+            ),
+            boxShadow: AppTheme.shadowSmall,
+          ),
+          child: activities.isEmpty
+              ? Padding(
+                  padding: const EdgeInsets.all(AppTheme.space24),
+                  child: Center(
+                    child: Text(
+                      'No recent activities',
+                      style: AppTheme.bodySmall.copyWith(
+                        color: isDark ? AppTheme.gray400 : AppTheme.gray500,
+                      ),
+                    ),
+                  ),
+                )
+              : Column(
+                  children: activities
+                      .map((a) => _buildActivityItem(context, a, isDark))
+                      .toList(),
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActivityItem(
+      BuildContext context, _ActivityItem activity, bool isDark) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppTheme.space16,
+        vertical: AppTheme.space12,
+      ),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: isDark ? AppTheme.gray700 : AppTheme.gray200,
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(AppTheme.space8),
+            decoration: BoxDecoration(
+              color: activity.color.withValues(alpha: isDark ? 0.2 : 0.1),
+              borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+            ),
+            child: Icon(activity.icon, color: activity.color, size: 18),
+          ),
+          const SizedBox(width: AppTheme.space12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  activity.title,
+                  style: AppTheme.bodyMedium.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white : AppTheme.gray900,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  activity.subtitle,
+                  style: AppTheme.caption.copyWith(
+                    color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── PROFESSIONAL TOOLS ─────────────────────────────────────────
+  Widget _buildProfessionalTools(BuildContext context, bool isDark) {
+    final tools = [
+      _ToolItem(
+        'Mentorship',
+        Icons.school_outlined,
+        AppTheme.primaryBlue,
+        mentorshipRequestsRoute,
+      ),
+      _ToolItem(
+        'Opportunities',
+        Icons.work_outline,
+        AppTheme.success,
+        opportunitiesRoute,
+      ),
+      _ToolItem(
+        'Chats',
+        Icons.chat_outlined,
+        AppTheme.warning,
+        chatsListRoute,
+      ),
+      _ToolItem(
+        'Public Profile',
+        Icons.public_outlined,
+        AppTheme.secondaryIndigo,
+        editProfileRoute,
+      ),
+      _ToolItem(
+        'AI Career',
+        Icons.auto_awesome,
+        AppTheme.primaryBlue,
+        aiChatRoute,
+      ),
+      _ToolItem(
+        'Notifications',
+        Icons.notifications_outlined,
+        AppTheme.error,
+        notificationsRoute,
+      ),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Professional Tools',
+          style: AppTheme.titleMedium.copyWith(
+            fontWeight: FontWeight.w600,
+            color: isDark ? Colors.white : AppTheme.gray900,
+          ),
+        ),
+        const SizedBox(height: AppTheme.space16),
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 3,
+            crossAxisSpacing: AppTheme.space12,
+            mainAxisSpacing: AppTheme.space12,
+            childAspectRatio: 0.85,
+          ),
+          itemCount: tools.length,
+          itemBuilder: (context, index) {
+            final tool = tools[index];
+            return _buildToolCard(context, tool, isDark);
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildToolCard(BuildContext context, _ToolItem tool, bool isDark) {
+    return InkWell(
+      onTap: () => Navigator.pushNamed(context, tool.route),
+      borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+      child: Container(
+        padding: const EdgeInsets.all(AppTheme.space12),
+        decoration: BoxDecoration(
+          color: isDark ? AppTheme.darkSurface : AppTheme.surface,
+          borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+          border: Border.all(
+            color: isDark ? AppTheme.gray700 : AppTheme.gray200,
+          ),
+          boxShadow: AppTheme.shadowSmall,
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(AppTheme.space8),
+              decoration: BoxDecoration(
+                color: tool.color.withValues(alpha: isDark ? 0.2 : 0.1),
+                borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+              ),
+              child: Icon(tool.icon, color: tool.color, size: 22),
+            ),
+            const SizedBox(height: AppTheme.space8),
+            Text(
+              tool.title,
+              style: AppTheme.caption.copyWith(
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white : AppTheme.gray800,
+              ),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─── MY IMPACT ──────────────────────────────────────────────────
+  Widget _buildMyImpact(
+    BuildContext context,
+    MentorshipProvider mentorship,
+    OpportunityProvider opportunities,
+    StudentProfile? profile,
+    bool isDark,
+  ) {
+    final totalMentees =
+        mentorship.acceptedMentorshipsCount + mentorship.completedMentorshipsCount;
+    final totalOppsShared = opportunities.myOpportunities?.length ?? 0;
+    final skillsCount = profile?.skills?.length ?? 0;
+    final engagementScore = context.watch<EngagementProvider>().engagementScore;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              'My Impact',
+              style: AppTheme.titleMedium.copyWith(
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white : AppTheme.gray900,
+              ),
+            ),
+            const SizedBox(width: AppTheme.space8),
+            Icon(Icons.auto_awesome,
+                size: 18, color: AppTheme.secondaryIndigo),
+          ],
+        ),
+        const SizedBox(height: AppTheme.space16),
+        Row(
+          children: [
+            Expanded(
+              child: _buildImpactCard(
+                'Mentees',
+                '$totalMentees',
+                Icons.people,
+                AppTheme.primaryBlue,
+                isDark,
+              ),
+            ),
+            const SizedBox(width: AppTheme.space12),
+            Expanded(
+              child: _buildImpactCard(
+                'Opps Shared',
+                '$totalOppsShared',
+                Icons.share_outlined,
+                AppTheme.success,
+                isDark,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppTheme.space12),
+        Row(
+          children: [
+            Expanded(
+              child: _buildImpactCard(
+                'Skills',
+                '$skillsCount',
+                Icons.lightbulb_outline,
+                AppTheme.warning,
+                isDark,
+              ),
+            ),
+            const SizedBox(width: AppTheme.space12),
+            Expanded(
+              child: _buildImpactCard(
+                'Engagement',
+                '$engagementScore%',
+                Icons.trending_up_rounded,
+                AppTheme.secondaryIndigo,
+                isDark,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildImpactCard(
+    String title,
+    String value,
+    IconData icon,
+    Color color,
+    bool isDark,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(AppTheme.space16),
+      decoration: BoxDecoration(
+        color: isDark ? AppTheme.darkSurface : AppTheme.surface,
+        borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+        border: Border.all(
+          color: isDark ? AppTheme.gray700 : AppTheme.gray200,
+        ),
+        boxShadow: AppTheme.shadowSmall,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(AppTheme.space8),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: isDark ? 0.2 : 0.1),
+                  borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+                ),
+                child: Icon(icon, color: color, size: 18),
+              ),
+              const Spacer(),
+              Text(
+                value,
+                style: AppTheme.titleMedium.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? Colors.white : AppTheme.gray900,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppTheme.space8),
+          Text(
+            title,
+            style: AppTheme.caption.copyWith(
+              color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── QUICK ACTIONS ──────────────────────────────────────────────
+  Widget _buildQuickActions(BuildContext context, bool isDark) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Quick Actions',
+          style: AppTheme.titleMedium.copyWith(
+            fontWeight: FontWeight.w600,
+            color: isDark ? Colors.white : AppTheme.gray900,
+          ),
+        ),
+        const SizedBox(height: AppTheme.space16),
+        Row(
+          children: [
+            Expanded(
+              child: _buildActionButton(
+                context,
+                icon: Icons.add_circle_outline,
+                label: 'Create Opp.',
+                color: AppTheme.primaryBlue,
+                route: createOpportunityRoute,
+                isDark: isDark,
+              ),
+            ),
+            const SizedBox(width: AppTheme.space12),
+            Expanded(
+              child: _buildActionButton(
+                context,
+                icon: Icons.list_alt_outlined,
+                label: 'Manage Opps.',
+                color: AppTheme.success,
+                route: opportunitiesRoute,
+                isDark: isDark,
+              ),
+            ),
+            Expanded(
+              child: _buildActionButton(
+                context,
+                icon: Icons.edit_outlined,
+                label: 'Edit Profile',
+                color: AppTheme.warning,
+                route: editProfileRoute,
+                isDark: isDark,
+              ),
+            ),
+            const SizedBox(width: AppTheme.space12),
+            Expanded(
+              child: _buildActionButton(
+                context,
+                icon: Icons.people_outline,
+                label: 'Directory',
+                color: AppTheme.secondaryIndigo,
+                route: alumniDirectoryRoute,
+                isDark: isDark,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActionButton(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required Color color,
+    required String route,
+    required bool isDark,
+  }) {
+    return InkWell(
+      onTap: () => Navigator.pushNamed(context, route),
+      borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          vertical: AppTheme.space12,
+          horizontal: AppTheme.space8,
+        ),
+        decoration: BoxDecoration(
+          color: isDark ? AppTheme.darkSurface : AppTheme.surface,
+          borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+          border: Border.all(
+            color: isDark ? AppTheme.gray700 : AppTheme.gray200,
+          ),
+          boxShadow: AppTheme.shadowSmall,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(AppTheme.space8),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: isDark ? 0.2 : 0.1),
+                borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+              ),
+              child: Icon(icon, color: color, size: 20),
+            ),
+            const SizedBox(height: AppTheme.space8),
+            Text(
+              label,
+              style: AppTheme.caption.copyWith(
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white : AppTheme.gray800,
+              ),
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── DATA CLASSES ─────────────────────────────────────────────────
+class _ActivityItem {
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final Color color;
+  _ActivityItem(this.title, this.subtitle, this.icon, this.color);
+}
+
+class _ToolItem {
+  final String title;
+  final IconData icon;
+  final Color color;
+  final String route;
+  _ToolItem(this.title, this.icon, this.color, this.route);
 }

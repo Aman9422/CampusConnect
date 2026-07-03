@@ -17,7 +17,7 @@ class FeaturedCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
         boxShadow: [
           BoxShadow(
-            color: AppTheme.primaryBlue.withOpacity(0.3),
+            color: AppTheme.primaryBlue.withValues(alpha: 0.3),
             blurRadius: 20,
             offset: const Offset(0, 8),
           ),
@@ -52,7 +52,7 @@ class FeaturedCard extends StatelessWidget {
                     children: [
                       Icon(
                         Icons.school,
-                        color: Colors.white.withOpacity(0.9),
+                        color: Colors.white.withValues(alpha: 0.9),
                         size: 20,
                       ),
                       const SizedBox(width: AppTheme.space8),
@@ -60,7 +60,7 @@ class FeaturedCard extends StatelessWidget {
                         child: Text(
                           'CA DU RANCHI - COMMUNITY CENTER',
                           style: AppTheme.bodySmall.copyWith(
-                            color: Colors.white.withOpacity(0.9),
+                            color: Colors.white.withValues(alpha: 0.9),
                             fontWeight: FontWeight.w500,
                             letterSpacing: 0.5,
                             fontSize: 11,
@@ -94,7 +94,7 @@ class FeaturedCard extends StatelessWidget {
                                 Text(
                                   'Department of Data Science',
                                   style: AppTheme.caption.copyWith(
-                                    color: Colors.white.withOpacity(0.7),
+                                    color: Colors.white.withValues(alpha: 0.7),
                                     fontSize: 11,
                                   ),
                                 ),
@@ -115,7 +115,7 @@ class FeaturedCard extends StatelessWidget {
                       Text(
                         '19 March, 12 pm - 03 pm',
                         style: AppTheme.caption.copyWith(
-                          color: Colors.white.withOpacity(0.9),
+                          color: Colors.white.withValues(alpha: 0.9),
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -175,8 +175,8 @@ class SkillsGrid extends StatelessWidget {
               boxShadow: [
                 BoxShadow(
                   color: isDark
-                      ? Colors.black.withOpacity(0.3)
-                      : AppTheme.gray200.withOpacity(0.5),
+                      ? Colors.black.withValues(alpha: 0.3)
+                      : AppTheme.gray200.withValues(alpha: 0.5),
                   blurRadius: 8,
                   offset: const Offset(0, 2),
                 ),

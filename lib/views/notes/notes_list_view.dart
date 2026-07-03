@@ -128,15 +128,15 @@ class _NoteCard extends StatelessWidget {
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       colors: [
-                        AppTheme.primaryBlue.withOpacity(0.1),
-                        AppTheme.primaryBlue.withOpacity(0.05),
+                        AppTheme.primaryBlue.withValues(alpha: 0.1),
+                        AppTheme.primaryBlue.withValues(alpha: 0.05),
                       ],
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                     ),
                     borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
                     border: Border.all(
-                      color: AppTheme.primaryBlue.withOpacity(0.3),
+                      color: AppTheme.primaryBlue.withValues(alpha: 0.3),
                       width: 0.5,
                     ),
                   ),
@@ -158,14 +158,14 @@ class _NoteCard extends StatelessWidget {
                     gradient: LinearGradient(
                       colors: [
                         AppTheme.successBg,
-                        AppTheme.successBg.withOpacity(0.5),
+                        AppTheme.successBg.withValues(alpha: 0.5),
                       ],
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                     ),
                     borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
                     border: Border.all(
-                      color: AppTheme.success.withOpacity(0.3),
+                      color: AppTheme.success.withValues(alpha: 0.3),
                       width: 0.5,
                     ),
                   ),

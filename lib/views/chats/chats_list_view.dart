@@ -115,8 +115,8 @@ class _ChatTile extends StatelessWidget {
       onTap: onTap,
       leading: CircleAvatar(
         backgroundColor: hasUnread
-            ? theme.colorScheme.primary.withOpacity(0.15)
-            : Colors.grey.withOpacity(0.15),
+            ? theme.colorScheme.primary.withValues(alpha: 0.15)
+            : Colors.grey.withValues(alpha: 0.15),
         child: Text(
           initial,
           style: TextStyle(

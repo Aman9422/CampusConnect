@@ -127,7 +127,7 @@ class _CreateMentorshipRequestViewState
         color: isDark ? AppTheme.darkSurface : Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isDark ? AppTheme.gray700.withOpacity(0.3) : AppTheme.gray200,
+          color: isDark ? AppTheme.gray700.withValues(alpha: 0.3) : AppTheme.gray200,
         ),
       ),
       child: Row(
@@ -177,7 +177,7 @@ class _CreateMentorshipRequestViewState
         color: isDark ? AppTheme.darkSurface : Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isDark ? AppTheme.gray700.withOpacity(0.3) : AppTheme.gray200,
+          color: isDark ? AppTheme.gray700.withValues(alpha: 0.3) : AppTheme.gray200,
         ),
       ),
       child: Column(
@@ -330,10 +330,10 @@ class _CreateMentorshipRequestViewState
                       vertical: 6,
                     ),
                     decoration: BoxDecoration(
-                      color: AppTheme.primaryBlue.withOpacity(0.1),
+                      color: AppTheme.primaryBlue.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
-                        color: AppTheme.primaryBlue.withOpacity(0.2),
+                        color: AppTheme.primaryBlue.withValues(alpha: 0.2),
                       ),
                     ),
                     child: Row(
@@ -452,7 +452,7 @@ class _CreateMentorshipRequestViewState
                     ),
                     decoration: BoxDecoration(
                       color: isDark
-                          ? AppTheme.gray700.withOpacity(0.5)
+                          ? AppTheme.gray700.withValues(alpha: 0.5)
                           : AppTheme.gray100,
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
@@ -532,9 +532,9 @@ class _CreateMentorshipRequestViewState
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppTheme.error.withOpacity(0.1),
+        color: AppTheme.error.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppTheme.error.withOpacity(0.3)),
+        border: Border.all(color: AppTheme.error.withValues(alpha: 0.3)),
       ),
       child: Row(
         children: [

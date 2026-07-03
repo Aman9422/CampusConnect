@@ -145,8 +145,8 @@ class _AIAnalysisSection extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
         side: BorderSide(
           color: isDark
-              ? AppTheme.primaryBlue.withOpacity(0.3)
-              : AppTheme.primaryBlue.withOpacity(0.2),
+              ? AppTheme.primaryBlue.withValues(alpha: 0.3)
+              : AppTheme.primaryBlue.withValues(alpha: 0.2),
         ),
       ),
       child: Padding(
@@ -163,7 +163,7 @@ class _AIAnalysisSection extends StatelessWidget {
                     gradient: LinearGradient(
                       colors: [
                         AppTheme.primaryBlue,
-                        AppTheme.primaryBlue.withOpacity(0.7),
+                        AppTheme.primaryBlue.withValues(alpha: 0.7),
                       ],
                     ),
                     borderRadius: BorderRadius.circular(8),
@@ -442,8 +442,8 @@ class _AIAnalysisResult extends StatelessWidget {
             padding: const EdgeInsets.all(AppTheme.space12),
             decoration: BoxDecoration(
               color: isDark
-                  ? AppTheme.primaryBlue.withOpacity(0.1)
-                  : AppTheme.primaryBlue.withOpacity(0.05),
+                  ? AppTheme.primaryBlue.withValues(alpha: 0.1)
+                  : AppTheme.primaryBlue.withValues(alpha: 0.05),
               borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
             ),
             child: Text(
@@ -684,7 +684,7 @@ class _RoadmapPhase extends StatelessWidget {
                     width: 20,
                     height: 20,
                     decoration: BoxDecoration(
-                      color: color.withOpacity(0.15),
+                      color: color.withValues(alpha: 0.15),
                       shape: BoxShape.circle,
                     ),
                     child: Center(
@@ -857,7 +857,7 @@ class _TrendChartCard extends StatelessWidget {
             isCurved: true,
             gradient: LinearGradient(
               colors: [
-                AppTheme.primaryBlue.withOpacity(0.8),
+                AppTheme.primaryBlue.withValues(alpha: 0.8),
                 AppTheme.primaryBlue,
               ],
             ),
@@ -878,8 +878,8 @@ class _TrendChartCard extends StatelessWidget {
               show: true,
               gradient: LinearGradient(
                 colors: [
-                  AppTheme.primaryBlue.withOpacity(0.2),
-                  AppTheme.primaryBlue.withOpacity(0.05),
+                  AppTheme.primaryBlue.withValues(alpha: 0.2),
+                  AppTheme.primaryBlue.withValues(alpha: 0.05),
                 ],
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,

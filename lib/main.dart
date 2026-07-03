@@ -9,12 +9,10 @@ import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
 import 'package:campusconnect/providers/resume_review_provider.dart';
 import 'package:campusconnect/providers/role_provider.dart';
-import 'package:campusconnect/providers/theme_provider.dart';
-// v7.2: Multi-role ecosystem providers
+import 'package:campusconnect/providers/theme_provider.dart';// v7.2: Multi-role ecosystem providers
 import 'package:campusconnect/providers/alumni_directory_provider.dart';
 import 'package:campusconnect/providers/mentorship_provider.dart';
-import 'package:campusconnect/providers/opportunity_provider.dart';
-// v7.3: Chat provider
+import 'package:campusconnect/providers/opportunity_provider.dart';// v7.3: Chat provider
 import 'package:campusconnect/providers/chat_provider.dart';
 import 'package:campusconnect/providers/teacher_analytics_provider.dart'; // v7.3
 import 'package:campusconnect/providers/activity_feed_provider.dart'; // v7.3: Activity feed

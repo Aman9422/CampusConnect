@@ -248,7 +248,7 @@ class _StudentAnalyticsViewState extends State<StudentAnalyticsView> {
       decoration: BoxDecoration(
         color: color.withOpacity(isDark ? 0.15 : 0.08),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withOpacity(0.2)),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -680,12 +680,12 @@ class _StudentAnalyticsViewState extends State<StudentAnalyticsView> {
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: index < 3
-                  ? provider.getScoreColor(score).withOpacity(0.05)
+                  ? provider.getScoreColor(score).withValues(alpha: 0.05)
                   : (isDark ? AppTheme.gray800 : AppTheme.gray50),
               borderRadius: BorderRadius.circular(8),
               border: index < 3
                   ? Border.all(
-                      color: provider.getScoreColor(score).withOpacity(0.3),
+                      color: provider.getScoreColor(score).withValues(alpha: 0.3),
                     )
                   : null,
             ),

@@ -259,7 +259,7 @@ class _HistoryCard extends StatelessWidget {
                           decoration: BoxDecoration(
                             color: _getScoreColor(
                               review.atsScore,
-                            ).withOpacity(0.1),
+                            ).withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(
                               AppTheme.radiusSmall,
                             ),
@@ -353,7 +353,7 @@ class _ScoreCircle extends StatelessWidget {
       height: 60,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha: 0.1),
         border: Border.all(color: color, width: 2),
       ),
       child: Center(

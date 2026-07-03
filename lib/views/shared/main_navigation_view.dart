@@ -60,10 +60,10 @@ class _MainNavigationViewState extends State<MainNavigationView> {
       ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
-          color: isDark ? AppTheme.darkSurface : Colors.white.withOpacity(0.95),
+          color: isDark ? AppTheme.darkSurface : Colors.white.withValues(alpha: 0.95),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(isDark ? 0.3 : 0.08),
+              color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.08),
               blurRadius: 16,
               offset: const Offset(0, -4),
             ),
@@ -72,7 +72,7 @@ class _MainNavigationViewState extends State<MainNavigationView> {
             top: BorderSide(
               color: isDark
                   ? AppTheme.gray700
-                  : AppTheme.gray200.withOpacity(0.5),
+                  : AppTheme.gray200.withValues(alpha: 0.5),
               width: 1,
             ),
           ),

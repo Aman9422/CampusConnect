@@ -113,15 +113,15 @@ class _UploadNotesViewState extends State<UploadNotesView> {
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: [
-                    AppTheme.success.withOpacity(0.1),
-                    AppTheme.success.withOpacity(0.05),
+                    AppTheme.success.withValues(alpha: 0.1),
+                    AppTheme.success.withValues(alpha: 0.05),
                   ],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
                 borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
                 border: Border.all(
-                  color: AppTheme.success.withOpacity(0.2),
+                  color: AppTheme.success.withValues(alpha: 0.2),
                   width: 1,
                 ),
               ),
@@ -134,7 +134,7 @@ class _UploadNotesViewState extends State<UploadNotesView> {
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: AppTheme.success.withOpacity(0.3),
+                          color: AppTheme.success.withValues(alpha: 0.3),
                           blurRadius: 8,
                           offset: const Offset(0, 2),
                         ),
@@ -511,7 +511,7 @@ class _RecentUploadItem extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: AppTheme.success.withOpacity(0.1),
+            color: AppTheme.success.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
           ),
           child: Icon(Icons.description, color: AppTheme.success, size: 20),

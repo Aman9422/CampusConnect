@@ -80,7 +80,7 @@ class ProfileView extends StatelessWidget {
                         AppTheme.radiusMedium,
                       ),
                       border: Border.all(
-                        color: AppTheme.warning.withOpacity(0.3),
+                        color: AppTheme.warning.withValues(alpha: 0.3),
                         width: 1,
                       ),
                     ),
@@ -121,7 +121,7 @@ class ProfileView extends StatelessWidget {
                         ? null
                         : [
                             BoxShadow(
-                              color: AppTheme.gray200.withOpacity(0.5),
+                              color: AppTheme.gray200.withValues(alpha: 0.5),
                               blurRadius: 8,
                               offset: const Offset(0, 2),
                             ),

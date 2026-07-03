@@ -373,14 +373,14 @@ class _AlumniDirectoryViewState extends State<AlumniDirectoryView> {
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: isDark
-                ? AppTheme.gray700.withOpacity(0.3)
+                ? AppTheme.gray700.withValues(alpha: 0.3)
                 : AppTheme.gray200,
           ),
           boxShadow: isDark
               ? null
               : [
                   BoxShadow(
-                    color: AppTheme.gray900.withOpacity(0.05),
+                    color: AppTheme.gray900.withValues(alpha: 0.05),
                     blurRadius: 10,
                     offset: const Offset(0, 2),
                   ),
@@ -483,7 +483,7 @@ class _AlumniDirectoryViewState extends State<AlumniDirectoryView> {
                             vertical: 2,
                           ),
                           decoration: BoxDecoration(
-                            color: AppTheme.primaryBlue.withOpacity(0.1),
+                            color: AppTheme.primaryBlue.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Text(

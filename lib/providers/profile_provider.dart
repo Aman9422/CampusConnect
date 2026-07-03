@@ -1,23 +1,12 @@
 import 'package:campusconnect/models/student_profile.dart';
-import 'package:campusconnect/models/user_activity.dart';
 import 'package:campusconnect/services/firestore/profile_service.dart';
-import 'package:campusconnect/services/firestore/recommendation_service.dart';
-import 'package:campusconnect/services/firestore/engagement_service.dart';
 import 'package:flutter/material.dart';
 
 class ProfileProvider extends ChangeNotifier {
   final ProfileService _profileService;
-  final RecommendationService _recommendationService;
-  final EngagementService _engagementService;
 
-  ProfileProvider({
-    ProfileService? service,
-    RecommendationService? recommendationService,
-    EngagementService? engagementService,
-  }) : _profileService = service ?? ProfileService.instance(),
-       _recommendationService =
-           recommendationService ?? RecommendationService.instance(),
-       _engagementService = engagementService ?? EngagementService.instance();
+  ProfileProvider({ProfileService? service})
+    : _profileService = service ?? ProfileService.instance();
 
   // State
   StudentProfile? _profile;
@@ -46,7 +35,7 @@ class ProfileProvider extends ChangeNotifier {
     if (_isInitialized && _profile?.uid == userId) {
       return;
     }
-
+    
     _isDisposed = false; // V6.3: Reset disposed flag
 
     _isLoading = true;
@@ -56,22 +45,6 @@ class ProfileProvider extends ChangeNotifier {
     try {
       _profile = await _profileService.initializeProfile(userId, email);
       if (_isDisposed) return; // V6.3: Stop if logged out during async
-
-      if (_profile != null) {
-        try {
-          await _recommendationService.refreshRecommendations(
-            userId: userId,
-            profile: _profile!,
-          );
-          await _engagementService.recomputeEngagement(
-            userId: userId,
-            profile: _profile!,
-          );
-        } catch (e) {
-          debugPrint('ProfileProvider init side-effects error: $e');
-        }
-      }
-
       _isInitialized = true;
       _error = null;
     } catch (e) {
@@ -98,26 +71,6 @@ class ProfileProvider extends ChangeNotifier {
     try {
       await _profileService.updateProfile(updatedProfile);
       _profile = updatedProfile;
-
-      try {
-        await _engagementService.logActivity(
-          userId: updatedProfile.uid,
-          eventType: ActivityEventType.profileUpdated,
-          points: 3,
-          metadata: {'source': 'profile_provider'},
-        );
-        await _recommendationService.refreshRecommendations(
-          userId: updatedProfile.uid,
-          profile: updatedProfile,
-        );
-        await _engagementService.recomputeEngagement(
-          userId: updatedProfile.uid,
-          profile: updatedProfile,
-        );
-      } catch (e) {
-        debugPrint('ProfileProvider update side-effects error: $e');
-      }
-
       _isSaving = false;
       _error = null;
       notifyListeners();

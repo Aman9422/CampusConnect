@@ -194,14 +194,14 @@ class _RecommendedHeader extends StatelessWidget {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            AppTheme.primaryBlue.withOpacity(0.1),
-            AppTheme.primaryBlue.withOpacity(0.05),
+            AppTheme.primaryBlue.withValues(alpha: 0.1),
+            AppTheme.primaryBlue.withValues(alpha: 0.05),
           ],
           begin: Alignment.centerLeft,
           end: Alignment.centerRight,
         ),
         borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
-        border: Border.all(color: AppTheme.primaryBlue.withOpacity(0.2)),
+        border: Border.all(color: AppTheme.primaryBlue.withValues(alpha: 0.2)),
       ),
       child: Row(
         children: [
@@ -221,7 +221,7 @@ class _RecommendedHeader extends StatelessWidget {
               vertical: AppTheme.space4,
             ),
             decoration: BoxDecoration(
-              color: AppTheme.primaryBlue.withOpacity(0.15),
+              color: AppTheme.primaryBlue.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(AppTheme.radiusFull),
             ),
             child: Text(
@@ -273,8 +273,8 @@ class _PlacementCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
           gradient: LinearGradient(
             colors: isDark
-                ? [AppTheme.darkSurface, AppTheme.primaryBlue.withOpacity(0.05)]
-                : [Colors.white, AppTheme.primaryBlue.withOpacity(0.02)],
+                ? [AppTheme.darkSurface, AppTheme.primaryBlue.withValues(alpha: 0.05)]
+                : [Colors.white, AppTheme.primaryBlue.withValues(alpha: 0.02)],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
@@ -322,7 +322,7 @@ class _PlacementCard extends StatelessWidget {
                               ? LinearGradient(
                                   colors: [
                                     AppTheme.errorBg,
-                                    AppTheme.errorBg.withOpacity(0.7),
+                                    AppTheme.errorBg.withValues(alpha: 0.7),
                                   ],
                                   begin: Alignment.topLeft,
                                   end: Alignment.bottomRight,
@@ -330,7 +330,7 @@ class _PlacementCard extends StatelessWidget {
                               : LinearGradient(
                                   colors: [
                                     AppTheme.successBg,
-                                    AppTheme.successBg.withOpacity(0.7),
+                                    AppTheme.successBg.withValues(alpha: 0.7),
                                   ],
                                   begin: Alignment.topLeft,
                                   end: Alignment.bottomRight,
@@ -340,15 +340,15 @@ class _PlacementCard extends StatelessWidget {
                           ),
                           border: Border.all(
                             color: isClosed
-                                ? AppTheme.error.withOpacity(0.3)
-                                : AppTheme.success.withOpacity(0.3),
+                                ? AppTheme.error.withValues(alpha: 0.3)
+                                : AppTheme.success.withValues(alpha: 0.3),
                             width: 0.5,
                           ),
                           boxShadow: [
                             BoxShadow(
                               color: isClosed
-                                  ? AppTheme.error.withOpacity(0.15)
-                                  : AppTheme.success.withOpacity(0.15),
+                                  ? AppTheme.error.withValues(alpha: 0.15)
+                                  : AppTheme.success.withValues(alpha: 0.15),
                               blurRadius: 8,
                               offset: const Offset(0, 2),
                             ),
@@ -500,20 +500,20 @@ class _ApplyButton extends StatelessWidget {
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: [
-                  AppTheme.primaryBlue.withOpacity(0.12),
-                  AppTheme.primaryBlue.withOpacity(0.06),
+                  AppTheme.primaryBlue.withValues(alpha: 0.12),
+                  AppTheme.primaryBlue.withValues(alpha: 0.06),
                 ],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
               border: Border.all(
-                color: AppTheme.primaryBlue.withOpacity(0.3),
+                color: AppTheme.primaryBlue.withValues(alpha: 0.3),
                 width: 1,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: AppTheme.primaryBlue.withOpacity(0.1),
+                  color: AppTheme.primaryBlue.withValues(alpha: 0.1),
                   blurRadius: 6,
                   offset: const Offset(0, 2),
                 ),
@@ -560,7 +560,7 @@ class _ApplyButton extends StatelessWidget {
               style: AppTheme.bodySmall.copyWith(fontWeight: FontWeight.w600),
             ),
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.primaryBlue.withOpacity(0.6),
+              backgroundColor: AppTheme.primaryBlue.withValues(alpha: 0.6),
               foregroundColor: Colors.white,
               elevation: 0,
               padding: const EdgeInsets.symmetric(
@@ -583,7 +583,7 @@ class _ApplyButton extends StatelessWidget {
             gradient: LinearGradient(
               colors: [
                 AppTheme.primaryBlue,
-                AppTheme.primaryBlue.withOpacity(0.85),
+                AppTheme.primaryBlue.withValues(alpha: 0.85),
               ],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
@@ -591,7 +591,7 @@ class _ApplyButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
             boxShadow: [
               BoxShadow(
-                color: AppTheme.primaryBlue.withOpacity(0.3),
+                color: AppTheme.primaryBlue.withValues(alpha: 0.3),
                 blurRadius: 12,
                 offset: const Offset(0, 4),
               ),

@@ -160,14 +160,14 @@ class _VerifyEmailViewState extends State<VerifyEmailView>
                         ),
                         border: Border.all(
                           color: isDark
-                              ? AppTheme.gray700.withOpacity(0.5)
+                              ? AppTheme.gray700.withValues(alpha: 0.5)
                               : AppTheme.gray200,
                         ),
                         boxShadow: isDark
                             ? []
                             : [
                                 BoxShadow(
-                                  color: Colors.black.withOpacity(0.04),
+                                  color: Colors.black.withValues(alpha: 0.04),
                                   blurRadius: 24,
                                   offset: const Offset(0, 8),
                                 ),
@@ -190,7 +190,7 @@ class _VerifyEmailViewState extends State<VerifyEmailView>
                                 ),
                                 borderRadius: BorderRadius.circular(10),
                                 border: Border.all(
-                                  color: AppTheme.success.withOpacity(0.3),
+                                  color: AppTheme.success.withValues(alpha: 0.3),
                                 ),
                               ),
                               child: Row(

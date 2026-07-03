@@ -32,7 +32,7 @@ class InitialsAvatar extends StatelessWidget {
         gradient: gradient,
         boxShadow: [
           BoxShadow(
-            color: gradient.colors.first.withOpacity(0.3),
+            color: gradient.colors.first.withValues(alpha: 0.3),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -84,7 +84,7 @@ class InitialsAvatar extends StatelessWidget {
   static final List<LinearGradient> _gradients = [
     // Blue
     LinearGradient(
-      colors: [AppTheme.primaryBlue, AppTheme.primaryBlue.withOpacity(0.7)],
+      colors: [AppTheme.primaryBlue, AppTheme.primaryBlue.withValues(alpha: 0.7)],
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
     ),

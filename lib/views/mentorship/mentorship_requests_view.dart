@@ -157,7 +157,7 @@ class _MentorshipRequestsViewState extends State<MentorshipRequestsView> {
         color: isDark ? AppTheme.darkSurface : Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isDark ? AppTheme.gray700.withOpacity(0.3) : AppTheme.gray200,
+          color: isDark ? AppTheme.gray700.withValues(alpha: 0.3) : AppTheme.gray200,
         ),
       ),
       child: Padding(
@@ -197,7 +197,7 @@ class _MentorshipRequestsViewState extends State<MentorshipRequestsView> {
                     vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: _getStatusColor(request.status).withOpacity(0.1),
+                    color: _getStatusColor(request.status).withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
@@ -246,7 +246,7 @@ class _MentorshipRequestsViewState extends State<MentorshipRequestsView> {
                           vertical: 4,
                         ),
                         decoration: BoxDecoration(
-                          color: AppTheme.primaryBlue.withOpacity(0.1),
+                          color: AppTheme.primaryBlue.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(

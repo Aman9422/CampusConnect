@@ -360,7 +360,7 @@ class _EditProfileViewState extends State<EditProfileView> {
                           ),
                         ),
                         disabledBackgroundColor: AppTheme.primaryBlue
-                            .withOpacity(0.5),
+                            .withValues(alpha: 0.5),
                       ),
                       child: profileProvider.isSaving
                           ? const SizedBox(

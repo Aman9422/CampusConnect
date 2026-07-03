@@ -201,7 +201,7 @@ class _AlumniProfileViewState extends State<AlumniProfileView> {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF4F46E5).withOpacity(0.3),
+            color: const Color(0xFF4F46E5).withValues(alpha: 0.3),
             blurRadius: 20,
             offset: const Offset(0, 8),
           ),
@@ -226,7 +226,7 @@ class _AlumniProfileViewState extends State<AlumniProfileView> {
             Text(
               profile.jobRole!,
               style: AppTheme.titleMedium.copyWith(
-                color: Colors.white.withOpacity(0.9),
+                color: Colors.white.withValues(alpha: 0.9),
                 fontWeight: FontWeight.w500,
               ),
               textAlign: TextAlign.center,
@@ -236,7 +236,7 @@ class _AlumniProfileViewState extends State<AlumniProfileView> {
             Text(
               'at ${profile.company}',
               style: AppTheme.bodyMedium.copyWith(
-                color: Colors.white.withOpacity(0.8),
+                color: Colors.white.withValues(alpha: 0.8),
               ),
               textAlign: TextAlign.center,
             ),
@@ -253,7 +253,7 @@ class _AlumniProfileViewState extends State<AlumniProfileView> {
         color: isDark ? AppTheme.darkSurface : Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isDark ? AppTheme.gray700.withOpacity(0.3) : AppTheme.gray200,
+          color: isDark ? AppTheme.gray700.withValues(alpha: 0.3) : AppTheme.gray200,
         ),
       ),
       child: Column(
@@ -307,7 +307,7 @@ class _AlumniProfileViewState extends State<AlumniProfileView> {
         color: isDark ? AppTheme.darkSurface : Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isDark ? AppTheme.gray700.withOpacity(0.3) : AppTheme.gray200,
+          color: isDark ? AppTheme.gray700.withValues(alpha: 0.3) : AppTheme.gray200,
         ),
       ),
       child: Column(
@@ -361,7 +361,7 @@ class _AlumniProfileViewState extends State<AlumniProfileView> {
         color: isDark ? AppTheme.darkSurface : Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isDark ? AppTheme.gray700.withOpacity(0.3) : AppTheme.gray200,
+          color: isDark ? AppTheme.gray700.withValues(alpha: 0.3) : AppTheme.gray200,
         ),
       ),
       child: Column(
@@ -386,10 +386,10 @@ class _AlumniProfileViewState extends State<AlumniProfileView> {
                       vertical: 6,
                     ),
                     decoration: BoxDecoration(
-                      color: AppTheme.primaryBlue.withOpacity(0.1),
+                      color: AppTheme.primaryBlue.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
-                        color: AppTheme.primaryBlue.withOpacity(0.2),
+                        color: AppTheme.primaryBlue.withValues(alpha: 0.2),
                       ),
                     ),
                     child: Text(
@@ -415,7 +415,7 @@ class _AlumniProfileViewState extends State<AlumniProfileView> {
         color: isDark ? AppTheme.darkSurface : Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isDark ? AppTheme.gray700.withOpacity(0.3) : AppTheme.gray200,
+          color: isDark ? AppTheme.gray700.withValues(alpha: 0.3) : AppTheme.gray200,
         ),
       ),
       child: Column(
@@ -554,7 +554,7 @@ class _AlumniProfileViewState extends State<AlumniProfileView> {
         color: isDark ? AppTheme.darkSurface : Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isDark ? AppTheme.gray700.withOpacity(0.3) : AppTheme.gray200,
+          color: isDark ? AppTheme.gray700.withValues(alpha: 0.3) : AppTheme.gray200,
         ),
       ),
       child: Column(
@@ -603,7 +603,7 @@ class _AlumniProfileViewState extends State<AlumniProfileView> {
         color: isDark ? AppTheme.darkSurface : Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isDark ? AppTheme.gray700.withOpacity(0.3) : AppTheme.gray200,
+          color: isDark ? AppTheme.gray700.withValues(alpha: 0.3) : AppTheme.gray200,
         ),
       ),
       child: Column(
