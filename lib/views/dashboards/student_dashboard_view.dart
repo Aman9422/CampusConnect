@@ -6,10 +6,18 @@ import 'package:campusconnect/models/recommendation.dart';
 import 'package:campusconnect/providers/activity_feed_provider.dart';
 import 'package:campusconnect/providers/ai_chat_provider.dart';
 import 'package:campusconnect/providers/ai_usage_provider.dart';
+import 'package:campusconnect/providers/alumni_directory_provider.dart';
+import 'package:campusconnect/providers/chat_provider.dart';
 import 'package:campusconnect/providers/engagement_provider.dart';
+import 'package:campusconnect/providers/mentorship_provider.dart';
+import 'package:campusconnect/providers/notifications_provider.dart';
+import 'package:campusconnect/providers/opportunity_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
 import 'package:campusconnect/providers/recommendation_provider.dart';
+import 'package:campusconnect/providers/resume_review_provider.dart';
+import 'package:campusconnect/providers/role_provider.dart';
+import 'package:campusconnect/providers/teacher_analytics_provider.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/views/widgets/chat_badge.dart';
@@ -135,7 +143,9 @@ class _StudentDashboardTab extends StatelessWidget {
                 case MenuAction.logout:
                   final shouldLogout = await _showLogOutDialog(context);
                   if (shouldLogout && context.mounted) {
-                    // CRITICAL: Reset all providers BEFORE logout
+                    // CRITICAL: Reset ALL stream-based providers BEFORE logout
+                    // to prevent Firestore permission errors from triggering
+                    // notifyListeners() during AuthGuard's rebuild cycle.
                     context.read<ProfileProvider>().reset();
                     context.read<PlacementsProvider>().reset();
                     context.read<AIUsageProvider>().reset();
@@ -143,6 +153,14 @@ class _StudentDashboardTab extends StatelessWidget {
                     context.read<RecommendationProvider>().reset();
                     context.read<EngagementProvider>().reset();
                     context.read<AIChatProvider>().reset();
+                    context.read<ChatProvider>().reset();    // Has active Firestore stream subscriptions
+                    context.read<NotificationsProvider>().reset(); // Has active Firestore stream
+                    context.read<RoleProvider>().reset();
+                    context.read<ResumeReviewProvider>().reset();
+                    context.read<MentorshipProvider>().reset();
+                    context.read<OpportunityProvider>().reset();
+                    context.read<AlumniDirectoryProvider>().reset();
+                    context.read<TeacherAnalyticsProvider>().reset();
                     try {
                       await AuthService.firebase().logOut();
                     } catch (_) {

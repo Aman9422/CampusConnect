@@ -84,6 +84,30 @@ class ProfileProvider extends ChangeNotifier {
     }
   }
 
+  /// Mark profile as completed (wraps service call + internal state update)
+  Future<bool> markProfileCompleted() async {
+    if (_profile == null) return false;
+
+    _isSaving = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      await _profileService.markProfileCompleted(_profile!.uid);
+      _profile = _profile!.copyWith(profileCompleted: true);
+      _isSaving = false;
+      _error = null;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _isSaving = false;
+      _error = 'Failed to mark profile as completed';
+      debugPrint('ProfileProvider markProfileCompleted error: $e');
+      notifyListeners();
+      return false;
+    }
+  }
+
   /// Refresh profile from Firestore
   Future<void> refresh() async {
     if (_profile == null) return;

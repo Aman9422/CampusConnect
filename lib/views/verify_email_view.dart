@@ -1,16 +1,7 @@
-import 'package:campusconnect/providers/ai_usage_provider.dart';
-import 'package:campusconnect/providers/notifications_provider.dart';
-import 'package:campusconnect/providers/placements_provider.dart';
-import 'package:campusconnect/providers/profile_provider.dart';
-import 'package:campusconnect/providers/recommendation_provider.dart';
-import 'package:campusconnect/providers/resume_review_provider.dart';
-import 'package:campusconnect/providers/role_provider.dart';
-import 'package:campusconnect/providers/engagement_provider.dart';
-import 'package:campusconnect/providers/ai_chat_provider.dart';
+import 'package:campusconnect/constants/routes.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 
 class VerifyEmailView extends StatefulWidget {
   const VerifyEmailView({super.key});
@@ -59,23 +50,17 @@ class _VerifyEmailViewState extends State<VerifyEmailView>
   }
 
   Future<void> _backToLogin() async {
-    context.read<ProfileProvider>().reset();
-    context.read<PlacementsProvider>().reset();
-    context.read<AIUsageProvider>().reset();
-    context.read<NotificationsProvider>().reset();
-    context.read<ResumeReviewProvider>().reset();
-    context.read<RoleProvider>().reset();
-    context.read<RecommendationProvider>().reset();
-    context.read<EngagementProvider>().reset();
-    context.read<AIChatProvider>().reset();
+    // v7.6: Use AuthGuard's centralized reset via logout.
+    // AuthGuard's StreamBuilder detects sign-out, resets all providers.
+    // This avoids tight coupling to every provider in the app.
     try {
       await AuthService.firebase().logOut();
     } catch (_) {
       // User may already be signed out — AuthGuard will handle the state
     }
-    // Pop any pushed routes so AuthGuard's StreamBuilder is visible
+    // Clear navigation stack to login (no longer uses fragile popUntil)
     if (mounted) {
-      Navigator.of(context).popUntil((route) => route.isFirst);
+      Navigator.of(context).pushNamedAndRemoveUntil(loginRoute, (_) => false);
     }
   }
 
@@ -112,8 +97,8 @@ class _VerifyEmailViewState extends State<VerifyEmailView>
                       width: 80,
                       height: 80,
                       decoration: BoxDecoration(
-                        color: AppTheme.primaryBlue.withOpacity(
-                          isDark ? 0.15 : 0.08,
+                        color: AppTheme.primaryBlue.withValues(
+                          alpha: isDark ? 0.15 : 0.08,
                         ),
                         shape: BoxShape.circle,
                       ),
@@ -185,8 +170,8 @@ class _VerifyEmailViewState extends State<VerifyEmailView>
                               ),
                               margin: const EdgeInsets.only(bottom: 16),
                               decoration: BoxDecoration(
-                                color: AppTheme.success.withOpacity(
-                                  isDark ? 0.12 : 0.06,
+                                color: AppTheme.success.withValues(
+                                  alpha: isDark ? 0.12 : 0.06,
                                 ),
                                 borderRadius: BorderRadius.circular(10),
                                 border: Border.all(

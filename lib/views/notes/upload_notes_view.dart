@@ -3,7 +3,6 @@ import 'package:campusconnect/providers/layout_provider.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
 import 'package:campusconnect/services/firestore/notes_service.dart';
 import 'package:campusconnect/theme/app_theme.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -27,6 +26,7 @@ class _UploadNotesViewState extends State<UploadNotesView> {
   final _departmentController = TextEditingController();
   final _descriptionController =
       TextEditingController(); // Optional - for future use
+  final _urlController = TextEditingController(); // Download URL field
 
   bool _isUploading = false;
   String _selectedYear = '1';
@@ -44,6 +44,7 @@ class _UploadNotesViewState extends State<UploadNotesView> {
     _subjectController.dispose();
     _departmentController.dispose();
     _descriptionController.dispose();
+    _urlController.dispose();
     super.dispose();
   }
 
@@ -349,6 +350,23 @@ class _UploadNotesViewState extends State<UploadNotesView> {
 
           const SizedBox(height: 16),
 
+          // Download URL field
+          TextFormField(
+            controller: _urlController,
+            enabled: !_isUploading,
+            decoration: InputDecoration(
+              labelText: 'Download Link (optional)',
+              hintText: 'e.g., Google Drive, OneDrive URL',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+              ),
+              prefixIcon: const Icon(Icons.link),
+            ),
+            keyboardType: TextInputType.url,
+          ),
+
+          const SizedBox(height: 16),
+
           // Description field (optional)
           TextFormField(
             controller: _descriptionController,
@@ -421,6 +439,8 @@ class _UploadNotesViewState extends State<UploadNotesView> {
       final profile = context.read<ProfileProvider>().profile;
       final teacherName = profile?.personal.effectiveDisplayName ?? 'Teacher';
 
+      final url = _urlController.text.trim();
+
       // Create note object with proper fields
       final note = Note(
         id: '', // Will be set by Firestore
@@ -430,7 +450,7 @@ class _UploadNotesViewState extends State<UploadNotesView> {
         department: _departmentController.text.trim(),
         uploadedBy: teacherName,
         uploadedAt: DateTime.now(),
-        downloadUrl: null, // No download URL in Phase 1
+        downloadUrl: url.isNotEmpty ? url : null,
       );
 
       // Add the note to Firestore
@@ -443,6 +463,7 @@ class _UploadNotesViewState extends State<UploadNotesView> {
         _subjectController.clear();
         _departmentController.clear();
         _descriptionController.clear();
+        _urlController.clear(); // v7.6: Clear URL field after successful submission
         setState(() {
           _selectedYear = '1';
         });
@@ -452,17 +473,10 @@ class _UploadNotesViewState extends State<UploadNotesView> {
 
         // Show success message
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Note entry created successfully!'),
+          const SnackBar(
+            content: Text('Note entry created successfully!'),
             backgroundColor: AppTheme.success,
             behavior: SnackBarBehavior.floating,
-            action: SnackBarAction(
-              label: 'View',
-              textColor: Colors.white,
-              onPressed: () {
-                Navigator.pop(context);
-              },
-            ),
           ),
         );
       }
@@ -479,10 +493,9 @@ class _UploadNotesViewState extends State<UploadNotesView> {
     }
   }
 
-  /// Add note to Firestore using existing service pattern
+  /// Add note to Firestore using NotesService
   Future<void> _addNoteToFirestore(Note note) async {
-    final firestore = FirebaseFirestore.instance;
-    await firestore.collection('notes').add(note.toFirestore());
+    await NotesService.instance().addNote(note);
   }
 
   void _showErrorSnackbar(String message) {

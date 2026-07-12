@@ -1,7 +1,9 @@
+import 'package:campusconnect/constants/routes.dart';
 import 'package:campusconnect/enums/user_role.dart';
 import 'package:campusconnect/providers/role_provider.dart';
 import 'package:campusconnect/services/auth/auth_exceptions.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
+import 'package:campusconnect/services/auth/auth_user.dart';
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/utilities/show_error_dialog.dart';
 import 'package:flutter/material.dart';
@@ -92,18 +94,33 @@ class _RegisterViewState extends State<RegisterView>
         final roleProvider = context.read<RoleProvider>();
         roleProvider.setRole(_selectedRole!);
 
-        // Save role and name to Firestore immediately
-        final user = AuthService.firebase().currentUser;
+        // v7.6: Use a retry-safe approach to save role to Firestore.
+        // If currentUser is null transiently after registration, retry.
+        final authService = AuthService.firebase();
+        AuthUser? user = authService.currentUser;
+        if (user == null) {
+          // Wait briefly for Firebase Auth to settle, then retry
+          await Future.delayed(const Duration(milliseconds: 500));
+          user = AuthService.firebase().currentUser;
+        }
         if (user != null) {
           await roleProvider.saveRole(user.id, _selectedRole!);
+        } else {
+          // Delegate: save to local store so RoleProvider still has it
+          // The role will be persisted to Firestore when it becomes available
+          debugPrint('currentUser null post-registration — role saved in-memory only');
         }
       }
 
-      AuthService.firebase().sendEmailVerification();
+      try {
+        await AuthService.firebase().sendEmailVerification();
+      } catch (e) {
+        debugPrint('Failed to send verification email: $e');
+        // Don't block registration — user can resend from VerifyEmailView
+      }
       if (!mounted) return;
-      // Pop back to AuthGuard — the StreamBuilder will detect the new user
-      // and show VerifyEmailView automatically since email is not yet verified
-      Navigator.of(context).popUntil((route) => route.isFirst);
+      // Clear navigation stack back to AuthGuard (no longer uses fragile popUntil)
+      Navigator.of(context).pushNamedAndRemoveUntil(verifyEmailRoute, (_) => false);
     } on WeakPasswordAuthException {
       if (!mounted) return;
       await showErrorDialog(

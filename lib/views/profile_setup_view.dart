@@ -1,7 +1,7 @@
 import 'package:campusconnect/enums/user_role.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
 import 'package:campusconnect/providers/role_provider.dart';
-import 'package:campusconnect/services/firestore/profile_service.dart';
+import 'package:campusconnect/constants/routes.dart';
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -172,14 +172,27 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
       final success = await profileProvider.updateProfile(updatedProfile);
       if (!success) throw Exception('Failed to save profile');
 
-      await ProfileService.instance().markProfileCompleted(currentProfile.uid);
-      await profileProvider.refresh();
+      // Use provider method instead of direct service call
+      final marked = await profileProvider.markProfileCompleted();
+      if (!marked) throw Exception('Failed to mark profile as completed');
+
+      // Sync role to RoleProvider so dashboard routing picks it up immediately
+      if (role != null) {
+        roleProvider.setRole(role);
+      }
 
       if (!mounted) return;
       setState(() => _isSaving = false);
-      // Consumer2 in AuthGuard will auto-rebuild after profileProvider.refresh()
-      // Just pop back so AuthGuard's StreamBuilder handles routing
-      Navigator.of(context).popUntil((route) => route.isFirst);
+      // Consumer2 in AuthGuard will auto-rebuild after markProfileCompleted
+      // triggers notifyListeners. Navigate to correct dashboard route
+      final dashboardRoute = role != null
+          ? switch (role) {
+              UserRole.student => studentDashboardRoute,
+              UserRole.alumni => alumniDashboardRoute,
+              UserRole.teacher => teacherDashboardRoute,
+            }
+          : studentDashboardRoute;
+      Navigator.of(context).pushNamedAndRemoveUntil(dashboardRoute, (_) => false);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -234,7 +247,7 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
                     vertical: 6,
                   ),
                   decoration: BoxDecoration(
-                    color: AppTheme.primaryBlue.withOpacity(isDark ? 0.15 : 0.08),
+                    color: AppTheme.primaryBlue.withValues(alpha: isDark ? 0.15 : 0.08),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Row(

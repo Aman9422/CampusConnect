@@ -36,6 +36,12 @@ const createOpportunityRoute = '/create-opportunity';
 const opportunityDetailRoute = '/opportunity-detail';
 const studentAnalyticsRoute = '/student-analytics';
 
+// v7.5: Teacher notes management route
+const teacherNotesRoute = '/teacher-notes';
+
+// v7.6: Password reset route
+const passwordResetRoute = '/password-reset';
+
 // v7.3: Chat routes
 const chatsListRoute = '/chats';
 const chatRoute = '/chat';

@@ -236,7 +236,26 @@ class _LoginViewState extends State<LoginView>
                                 },
                               ),
                             ),
-                            const SizedBox(height: AppTheme.space24),
+                            const SizedBox(height: AppTheme.space12),
+                            
+                            // Forgot Password link
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: GestureDetector(
+                                onTap: () {
+                                  Navigator.of(context).pushNamed(passwordResetRoute);
+                                },
+                                child: Text(
+                                  'Forgot Password?',
+                                  style: AppTheme.bodySmall.copyWith(
+                                    color: AppTheme.primaryBlue,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ),
+
+                            const SizedBox(height: AppTheme.space20),
 
                             // Login button
                             SizedBox(

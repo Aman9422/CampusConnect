@@ -68,6 +68,10 @@ import 'package:campusconnect/views/chats/chat_view.dart';
 // v7.3: Extracted feature views (Phase 1 NotesView decomposition)
 import 'package:campusconnect/views/notes/notes_list_view.dart';
 import 'package:campusconnect/views/notes/upload_notes_view.dart';
+// v7.5: Teacher notes management view
+import 'package:campusconnect/views/notes/teacher_notes_view.dart';
+// v7.6: Password reset view
+import 'package:campusconnect/views/password_reset_view.dart';
 import 'package:campusconnect/views/placements/placements_list_view.dart';
 import 'package:campusconnect/views/chat/ai_chat_view.dart';
 import 'package:campusconnect/views/profile/profile_view.dart'
@@ -278,6 +282,8 @@ class MyApp extends StatelessWidget {
               studentAnalyticsRoute: (context) => const StudentAnalyticsView(),
               // v7.3: Chat routes
               chatsListRoute: (context) => const ChatsListView(),
+              // v7.5: Teacher notes management route
+              teacherNotesRoute: (context) => const TeacherNotesView(),
               // v7.3: Extracted feature routes (Phase 1 NotesView decomposition)
               notesListRoute: (context) => const NotesListView(),
               uploadNotesRoute: (context) => const UploadNotesView(),
@@ -285,6 +291,8 @@ class MyApp extends StatelessWidget {
               aiChatRoute: (context) => const AIChatView(),
               profileViewRoute: (context) =>
                   const extracted_profile.ProfileView(),
+              // v7.6: Password reset route
+              passwordResetRoute: (context) => const PasswordResetView(),
             },
           );
         },

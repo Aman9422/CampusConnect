@@ -119,11 +119,13 @@ service cloud.firestore {
 
     // ===============================================
     // NOTES (SHARED RESOURCES)
+    // Students: read-only
+    // Teachers: full CRUD
     // ===============================================
     match /notes/{noteId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && userRole() == 'teacher';
+      allow update, delete: if isAuthenticated() && userRole() == 'teacher';
     }
 
     // ===============================================

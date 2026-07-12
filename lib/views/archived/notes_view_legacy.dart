@@ -12,8 +12,8 @@ import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
 import 'package:campusconnect/providers/resume_review_provider.dart'; // v6.7
 import 'package:campusconnect/providers/role_provider.dart'; // v7.1
-// import 'package:campusconnect/providers/chat_provider.dart'; // v7.3 - TODO: Enable when implemented
-// import 'package:campusconnect/providers/teacher_analytics_provider.dart'; // v7.3 - TODO: Enable when implemented
+// import 'package:campusconnect/providers/chat_provider.dart'; // v7.3 
+// import 'package:campusconnect/providers/teacher_analytics_provider.dart'; // v7.3 
 import 'package:campusconnect/services/ai/ai_service.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/services/firestore/notes_service.dart';

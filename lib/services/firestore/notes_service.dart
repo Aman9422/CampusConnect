@@ -10,10 +10,11 @@ class NotesService {
     return NotesService(FirebaseFirestore.instance);
   }
 
+  CollectionReference get _notesCollection => _firestore.collection('notes');
+
   // Get all notes as a stream for real-time updates
   Stream<List<Note>> getAllNotes() {
-    return _firestore
-        .collection('notes')
+    return _notesCollection
         .orderBy('uploadedAt', descending: true)
         .snapshots()
         .map((snapshot) {
@@ -23,8 +24,7 @@ class NotesService {
 
   // Get notes filtered by subject
   Stream<List<Note>> getNotesBySubject(String subject) {
-    return _firestore
-        .collection('notes')
+    return _notesCollection
         .where('subject', isEqualTo: subject)
         .orderBy('uploadedAt', descending: true)
         .snapshots()
@@ -35,9 +35,19 @@ class NotesService {
 
   // Get notes filtered by year
   Stream<List<Note>> getNotesByYear(String year) {
-    return _firestore
-        .collection('notes')
+    return _notesCollection
         .where('year', isEqualTo: year)
+        .orderBy('uploadedAt', descending: true)
+        .snapshots()
+        .map((snapshot) {
+          return snapshot.docs.map((doc) => Note.fromFirestore(doc)).toList();
+        });
+  }
+
+  // Get notes uploaded by a specific teacher/user
+  Stream<List<Note>> getNotesByUploader(String uploaderName) {
+    return _notesCollection
+        .where('uploadedBy', isEqualTo: uploaderName)
         .orderBy('uploadedAt', descending: true)
         .snapshots()
         .map((snapshot) {
@@ -48,7 +58,7 @@ class NotesService {
   // Get a single note by ID
   Future<Note?> getNote(String noteId) async {
     try {
-      final doc = await _firestore.collection('notes').doc(noteId).get();
+      final doc = await _notesCollection.doc(noteId).get();
       if (doc.exists) {
         return Note.fromFirestore(doc);
       }
@@ -58,13 +68,41 @@ class NotesService {
     }
   }
 
+  // Add a new note
+  Future<void> addNote(Note note) async {
+    try {
+      await _notesCollection.add(note.toFirestore());
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Update an existing note
+  Future<void> updateNote(String noteId, Map<String, dynamic> updates) async {
+    try {
+      await _notesCollection.doc(noteId).update(updates);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Delete a note
+  Future<void> deleteNote(String noteId) async {
+    try {
+      await _notesCollection.doc(noteId).delete();
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   // Get available subjects
   Future<List<String>> getAvailableSubjects() async {
     try {
-      final snapshot = await _firestore.collection('notes').get();
+      final snapshot = await _notesCollection.get();
       final subjects = <String>{};
       for (var doc in snapshot.docs) {
-        final subject = (doc.data())['subject'] as String?;
+        final data = doc.data() as Map<String, dynamic>?;
+        final subject = data?['subject'] as String?;
         if (subject != null && subject.isNotEmpty) {
           subjects.add(subject);
         }

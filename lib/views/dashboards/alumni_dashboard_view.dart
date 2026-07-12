@@ -32,35 +32,50 @@ class AlumniDashboardView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: isDark ? AppTheme.darkBackground : AppTheme.background,
       appBar: AppBar(
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.workspace_premium, color: AppTheme.gray900, size: 24),
+            Icon(
+              Icons.workspace_premium,
+              color: isDark ? Colors.white : AppTheme.gray900,
+              size: 24,
+            ),
             const SizedBox(width: 8),
             Text(
               'Alumni Dashboard',
               style: AppTheme.titleMedium.copyWith(
                 fontWeight: FontWeight.w600,
-                color: AppTheme.gray900,
+                color: isDark ? Colors.white : AppTheme.gray900,
               ),
             ),
           ],
         ),
-        backgroundColor: AppTheme.surface,
+        backgroundColor: isDark ? AppTheme.darkSurface : AppTheme.surface,
         elevation: 0,
         actions: [
           NotificationBadge(
             onTap: () => Navigator.pushNamed(context, notificationsRoute),
+            iconColor: isDark ? AppTheme.gray400 : null,
           ),
-          ChatBadge(),
-          PopupMenuButton<MenuAction>(
-            icon: Icon(Icons.more_vert, color: AppTheme.gray700),
+          ChatBadge(iconColor: isDark ? AppTheme.gray400 : null),
+          PopupMenuButton<String>(
+            icon: Icon(
+              Icons.more_vert,
+              color: isDark ? AppTheme.gray400 : AppTheme.gray700,
+            ),
             onSelected: (value) async {
               switch (value) {
-                case MenuAction.logout:
+                case 'profile':
+                  Navigator.pushNamed(context, profileViewRoute);
+                  break;
+                case 'settings':
+                  Navigator.pushNamed(context, settingsRoute);
+                  break;
+                case 'logout':
                   final shouldLogout = await _showLogOutDialog(context);
                   if (shouldLogout && context.mounted) {
                     _resetProviders(context);
@@ -71,9 +86,28 @@ class AlumniDashboardView extends StatelessWidget {
                   break;
               }
             },
-            itemBuilder: (context) => const [
-              PopupMenuItem<MenuAction>(
-                value: MenuAction.logout,
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'profile',
+                child: ListTile(
+                  leading: Icon(Icons.person_outline, size: 20, color: isDark ? AppTheme.gray400 : null),
+                  title: Text('Profile', style: TextStyle(color: isDark ? Colors.white : null)),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              PopupMenuItem(
+                value: 'settings',
+                child: ListTile(
+                  leading: Icon(Icons.settings_outlined, size: 20, color: isDark ? AppTheme.gray400 : null),
+                  title: Text('Settings', style: TextStyle(color: isDark ? Colors.white : null)),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              const PopupMenuDivider(),
+              const PopupMenuItem(
+                value: 'logout',
                 child: Text('Log out'),
               ),
             ],
@@ -98,6 +132,7 @@ class AlumniDashboardView extends StatelessWidget {
     context.read<EngagementProvider>().reset();
     context.read<AIChatProvider>().reset();
     context.read<ActivityFeedProvider>().reset();
+    context.read<ChatProvider>().reset();
   }
 
   Future<bool> _showLogOutDialog(BuildContext context) async {
@@ -116,8 +151,10 @@ class AlumniDashboardView extends StatelessWidget {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.error,
                 ),
-                child: const Text('Sign Out',
-                    style: TextStyle(color: Colors.white)),
+                child: const Text(
+                  'Sign Out',
+                  style: TextStyle(color: Colors.white),
+                ),
               ),
             ],
           ),
@@ -165,11 +202,8 @@ class _AlumniDashboardBodyState extends State<_AlumniDashboardBody> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Hero Section
             _buildHeroSection(context, profile, isDark),
             const SizedBox(height: AppTheme.space24),
-
-            // Quick Stats
             _buildQuickStats(
               context,
               profile,
@@ -179,20 +213,12 @@ class _AlumniDashboardBodyState extends State<_AlumniDashboardBody> {
               isDark,
             ),
             const SizedBox(height: AppTheme.space24),
-
-            // Activity Feed
             _buildActivityFeed(context, activityFeed, mentorship, isDark),
             const SizedBox(height: AppTheme.space24),
-
-            // Professional Tools
             _buildProfessionalTools(context, isDark),
             const SizedBox(height: AppTheme.space24),
-
-            // My Impact
             _buildMyImpact(context, mentorship, opportunities, profile, isDark),
             const SizedBox(height: AppTheme.space24),
-
-            // Quick Actions
             _buildQuickActions(context, isDark),
             const SizedBox(height: AppTheme.space24),
           ],
@@ -201,9 +227,11 @@ class _AlumniDashboardBodyState extends State<_AlumniDashboardBody> {
     );
   }
 
-  // ─── HERO SECTION ───────────────────────────────────────────────
   Widget _buildHeroSection(
-      BuildContext context, StudentProfile? profile, bool isDark) {
+    BuildContext context,
+    StudentProfile? profile,
+    bool isDark,
+  ) {
     final name = profile?.personal.effectiveDisplayName ?? 'Alumni';
 
     return Container(
@@ -313,7 +341,6 @@ class _AlumniDashboardBodyState extends State<_AlumniDashboardBody> {
     );
   }
 
-  // ─── QUICK STATS ────────────────────────────────────────────────
   Widget _buildQuickStats(
     BuildContext context,
     StudentProfile? profile,
@@ -322,11 +349,12 @@ class _AlumniDashboardBodyState extends State<_AlumniDashboardBody> {
     ChatProvider chatProvider,
     bool isDark,
   ) {
-    final studentsMentored = mentorship.completedMentorshipsCount +
+    final studentsMentored =
+        mentorship.completedMentorshipsCount +
         mentorship.acceptedMentorshipsCount;
     final activeChats = chatProvider.chats?.length ?? 0;
     final opportunitiesPosted = opportunities.myOpportunities?.length ?? 0;
-    final profileViews = 0; // Placeholder - would require analytics
+    final profileViews = 0;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -402,9 +430,7 @@ class _AlumniDashboardBodyState extends State<_AlumniDashboardBody> {
       decoration: BoxDecoration(
         color: isDark ? AppTheme.darkSurface : AppTheme.surface,
         borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
-        border: Border.all(
-          color: isDark ? AppTheme.gray700 : AppTheme.gray200,
-        ),
+        border: Border.all(color: isDark ? AppTheme.gray700 : AppTheme.gray200),
         boxShadow: AppTheme.shadowSmall,
       ),
       child: Column(
@@ -442,7 +468,6 @@ class _AlumniDashboardBodyState extends State<_AlumniDashboardBody> {
     );
   }
 
-  // ─── ACTIVITY FEED ──────────────────────────────────────────────
   Widget _buildActivityFeed(
     BuildContext context,
     ActivityFeedProvider activityFeed,
@@ -451,45 +476,46 @@ class _AlumniDashboardBodyState extends State<_AlumniDashboardBody> {
   ) {
     final activities = <_ActivityItem>[];
 
-    // Mentorship requests
     final pendingCount = mentorship.pendingRequestsCount;
     if (pendingCount > 0) {
-      activities.add(_ActivityItem(
-        '$pendingCount pending mentorship request(s)',
-        'Review mentorship requests from students',
-        Icons.school_outlined,
-        AppTheme.warning,
-      ));
+      activities.add(
+        _ActivityItem(
+          '$pendingCount pending mentorship request(s)',
+          'Review mentorship requests from students',
+          Icons.school_outlined,
+          AppTheme.warning,
+        ),
+      );
     }
 
     final acceptedCount = mentorship.acceptedMentorshipsCount;
     if (acceptedCount > 0) {
-      activities.add(_ActivityItem(
-        '$acceptedCount active mentorship(s)',
-        'You are currently mentoring students',
-        Icons.handshake_rounded,
-        AppTheme.success,
-      ));
+      activities.add(
+        _ActivityItem(
+          '$acceptedCount active mentorship(s)',
+          'You are currently mentoring students',
+          Icons.handshake_rounded,
+          AppTheme.success,
+        ),
+      );
     }
 
     final completedCount = mentorship.completedMentorshipsCount;
     if (completedCount > 0) {
-      activities.add(_ActivityItem(
-        '$completedCount completed mentorship(s)',
-        'Mentorship journeys successfully finished',
-        Icons.celebration_outlined,
-        AppTheme.primaryBlue,
-      ));
+      activities.add(
+        _ActivityItem(
+          '$completedCount completed mentorship(s)',
+          'Mentorship journeys successfully finished',
+          Icons.celebration_outlined,
+          AppTheme.primaryBlue,
+        ),
+      );
     }
 
-    // Activity feed items
     for (final a in activityFeed.allActivities.take(3)) {
-      activities.add(_ActivityItem(
-        a.title,
-        a.description,
-        a.icon,
-        a.iconColor,
-      ));
+      activities.add(
+        _ActivityItem(a.title, a.description, a.icon, a.iconColor),
+      );
     }
 
     return Column(
@@ -536,7 +562,10 @@ class _AlumniDashboardBodyState extends State<_AlumniDashboardBody> {
   }
 
   Widget _buildActivityItem(
-      BuildContext context, _ActivityItem activity, bool isDark) {
+    BuildContext context,
+    _ActivityItem activity,
+    bool isDark,
+  ) {
     return Container(
       padding: const EdgeInsets.symmetric(
         horizontal: AppTheme.space16,
@@ -589,45 +618,14 @@ class _AlumniDashboardBodyState extends State<_AlumniDashboardBody> {
     );
   }
 
-  // ─── PROFESSIONAL TOOLS ─────────────────────────────────────────
   Widget _buildProfessionalTools(BuildContext context, bool isDark) {
     final tools = [
-      _ToolItem(
-        'Mentorship',
-        Icons.school_outlined,
-        AppTheme.primaryBlue,
-        mentorshipRequestsRoute,
-      ),
-      _ToolItem(
-        'Opportunities',
-        Icons.work_outline,
-        AppTheme.success,
-        opportunitiesRoute,
-      ),
-      _ToolItem(
-        'Chats',
-        Icons.chat_outlined,
-        AppTheme.warning,
-        chatsListRoute,
-      ),
-      _ToolItem(
-        'Public Profile',
-        Icons.public_outlined,
-        AppTheme.secondaryIndigo,
-        editProfileRoute,
-      ),
-      _ToolItem(
-        'AI Career',
-        Icons.auto_awesome,
-        AppTheme.primaryBlue,
-        aiChatRoute,
-      ),
-      _ToolItem(
-        'Notifications',
-        Icons.notifications_outlined,
-        AppTheme.error,
-        notificationsRoute,
-      ),
+      _ToolItem('Mentorship', Icons.school_outlined, AppTheme.primaryBlue, mentorshipRequestsRoute),
+      _ToolItem('Opportunities', Icons.work_outline, AppTheme.success, opportunitiesRoute),
+      _ToolItem('Chats', Icons.chat_outlined, AppTheme.warning, chatsListRoute),
+      _ToolItem('Profile', Icons.person_outline, AppTheme.secondaryIndigo, profileViewRoute),
+      _ToolItem('AI Career', Icons.auto_awesome, AppTheme.primaryBlue, aiChatRoute),
+      _ToolItem('Notifications', Icons.notifications_outlined, AppTheme.error, notificationsRoute),
     ];
 
     return Column(
@@ -702,7 +700,6 @@ class _AlumniDashboardBodyState extends State<_AlumniDashboardBody> {
     );
   }
 
-  // ─── MY IMPACT ──────────────────────────────────────────────────
   Widget _buildMyImpact(
     BuildContext context,
     MentorshipProvider mentorship,
@@ -729,31 +726,18 @@ class _AlumniDashboardBodyState extends State<_AlumniDashboardBody> {
               ),
             ),
             const SizedBox(width: AppTheme.space8),
-            Icon(Icons.auto_awesome,
-                size: 18, color: AppTheme.secondaryIndigo),
+            Icon(Icons.auto_awesome, size: 18, color: AppTheme.secondaryIndigo),
           ],
         ),
         const SizedBox(height: AppTheme.space16),
         Row(
           children: [
             Expanded(
-              child: _buildImpactCard(
-                'Mentees',
-                '$totalMentees',
-                Icons.people,
-                AppTheme.primaryBlue,
-                isDark,
-              ),
+              child: _buildImpactCard('Mentees', '$totalMentees', Icons.people, AppTheme.primaryBlue, isDark),
             ),
             const SizedBox(width: AppTheme.space12),
             Expanded(
-              child: _buildImpactCard(
-                'Opps Shared',
-                '$totalOppsShared',
-                Icons.share_outlined,
-                AppTheme.success,
-                isDark,
-              ),
+              child: _buildImpactCard('Opps Shared', '$totalOppsShared', Icons.share_outlined, AppTheme.success, isDark),
             ),
           ],
         ),
@@ -761,23 +745,11 @@ class _AlumniDashboardBodyState extends State<_AlumniDashboardBody> {
         Row(
           children: [
             Expanded(
-              child: _buildImpactCard(
-                'Skills',
-                '$skillsCount',
-                Icons.lightbulb_outline,
-                AppTheme.warning,
-                isDark,
-              ),
+              child: _buildImpactCard('Skills', '$skillsCount', Icons.lightbulb_outline, AppTheme.warning, isDark),
             ),
             const SizedBox(width: AppTheme.space12),
             Expanded(
-              child: _buildImpactCard(
-                'Engagement',
-                '$engagementScore%',
-                Icons.trending_up_rounded,
-                AppTheme.secondaryIndigo,
-                isDark,
-              ),
+              child: _buildImpactCard('Engagement', '$engagementScore%', Icons.trending_up_rounded, AppTheme.secondaryIndigo, isDark),
             ),
           ],
         ),
@@ -785,21 +757,13 @@ class _AlumniDashboardBodyState extends State<_AlumniDashboardBody> {
     );
   }
 
-  Widget _buildImpactCard(
-    String title,
-    String value,
-    IconData icon,
-    Color color,
-    bool isDark,
-  ) {
+  Widget _buildImpactCard(String title, String value, IconData icon, Color color, bool isDark) {
     return Container(
       padding: const EdgeInsets.all(AppTheme.space16),
       decoration: BoxDecoration(
         color: isDark ? AppTheme.darkSurface : AppTheme.surface,
         borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
-        border: Border.all(
-          color: isDark ? AppTheme.gray700 : AppTheme.gray200,
-        ),
+        border: Border.all(color: isDark ? AppTheme.gray700 : AppTheme.gray200),
         boxShadow: AppTheme.shadowSmall,
       ),
       child: Column(
@@ -816,28 +780,16 @@ class _AlumniDashboardBodyState extends State<_AlumniDashboardBody> {
                 child: Icon(icon, color: color, size: 18),
               ),
               const Spacer(),
-              Text(
-                value,
-                style: AppTheme.titleMedium.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: isDark ? Colors.white : AppTheme.gray900,
-                ),
-              ),
+              Text(value, style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700, color: isDark ? Colors.white : AppTheme.gray900)),
             ],
           ),
           const SizedBox(height: AppTheme.space8),
-          Text(
-            title,
-            style: AppTheme.caption.copyWith(
-              color: isDark ? AppTheme.gray400 : AppTheme.gray600,
-            ),
-          ),
+          Text(title, style: AppTheme.caption.copyWith(color: isDark ? AppTheme.gray400 : AppTheme.gray600)),
         ],
       ),
     );
   }
 
-  // ─── QUICK ACTIONS ──────────────────────────────────────────────
   Widget _buildQuickActions(BuildContext context, bool isDark) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -852,76 +804,28 @@ class _AlumniDashboardBodyState extends State<_AlumniDashboardBody> {
         const SizedBox(height: AppTheme.space16),
         Row(
           children: [
-            Expanded(
-              child: _buildActionButton(
-                context,
-                icon: Icons.add_circle_outline,
-                label: 'Create Opp.',
-                color: AppTheme.primaryBlue,
-                route: createOpportunityRoute,
-                isDark: isDark,
-              ),
-            ),
+            Expanded(child: _buildActionButton(context, icon: Icons.add_circle_outline, label: 'Create Opp.', color: AppTheme.primaryBlue, route: createOpportunityRoute, isDark: isDark)),
             const SizedBox(width: AppTheme.space12),
-            Expanded(
-              child: _buildActionButton(
-                context,
-                icon: Icons.list_alt_outlined,
-                label: 'Manage Opps.',
-                color: AppTheme.success,
-                route: opportunitiesRoute,
-                isDark: isDark,
-              ),
-            ),
-            Expanded(
-              child: _buildActionButton(
-                context,
-                icon: Icons.edit_outlined,
-                label: 'Edit Profile',
-                color: AppTheme.warning,
-                route: editProfileRoute,
-                isDark: isDark,
-              ),
-            ),
+            Expanded(child: _buildActionButton(context, icon: Icons.list_alt_outlined, label: 'Manage Opps.', color: AppTheme.success, route: opportunitiesRoute, isDark: isDark)),
+            Expanded(child: _buildActionButton(context, icon: Icons.edit_outlined, label: 'Edit Profile', color: AppTheme.warning, route: editProfileRoute, isDark: isDark)),
             const SizedBox(width: AppTheme.space12),
-            Expanded(
-              child: _buildActionButton(
-                context,
-                icon: Icons.people_outline,
-                label: 'Directory',
-                color: AppTheme.secondaryIndigo,
-                route: alumniDirectoryRoute,
-                isDark: isDark,
-              ),
-            ),
+            Expanded(child: _buildActionButton(context, icon: Icons.people_outline, label: 'Directory', color: AppTheme.secondaryIndigo, route: alumniDirectoryRoute, isDark: isDark)),
           ],
         ),
       ],
     );
   }
 
-  Widget _buildActionButton(
-    BuildContext context, {
-    required IconData icon,
-    required String label,
-    required Color color,
-    required String route,
-    required bool isDark,
-  }) {
+  Widget _buildActionButton(BuildContext context, {required IconData icon, required String label, required Color color, required String route, required bool isDark}) {
     return InkWell(
       onTap: () => Navigator.pushNamed(context, route),
       borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
       child: Container(
-        padding: const EdgeInsets.symmetric(
-          vertical: AppTheme.space12,
-          horizontal: AppTheme.space8,
-        ),
+        padding: const EdgeInsets.symmetric(vertical: AppTheme.space12, horizontal: AppTheme.space8),
         decoration: BoxDecoration(
           color: isDark ? AppTheme.darkSurface : AppTheme.surface,
           borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
-          border: Border.all(
-            color: isDark ? AppTheme.gray700 : AppTheme.gray200,
-          ),
+          border: Border.all(color: isDark ? AppTheme.gray700 : AppTheme.gray200),
           boxShadow: AppTheme.shadowSmall,
         ),
         child: Column(
@@ -936,16 +840,7 @@ class _AlumniDashboardBodyState extends State<_AlumniDashboardBody> {
               child: Icon(icon, color: color, size: 20),
             ),
             const SizedBox(height: AppTheme.space8),
-            Text(
-              label,
-              style: AppTheme.caption.copyWith(
-                fontWeight: FontWeight.w600,
-                color: isDark ? Colors.white : AppTheme.gray800,
-              ),
-              textAlign: TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
+            Text(label, style: AppTheme.caption.copyWith(fontWeight: FontWeight.w600, color: isDark ? Colors.white : AppTheme.gray800), textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis),
           ],
         ),
       ),
@@ -953,7 +848,6 @@ class _AlumniDashboardBodyState extends State<_AlumniDashboardBody> {
   }
 }
 
-// ─── DATA CLASSES ─────────────────────────────────────────────────
 class _ActivityItem {
   final String title;
   final String subtitle;
