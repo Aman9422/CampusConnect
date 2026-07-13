@@ -1,4 +1,3 @@
-import 'package:campusconnect/constants/routes.dart';
 import 'package:campusconnect/services/auth/auth_exceptions.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/theme/app_theme.dart';

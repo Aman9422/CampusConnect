@@ -1,4 +1,6 @@
 import 'package:campusconnect/constants/routes.dart';
+import 'package:campusconnect/enums/user_role.dart';
+import 'package:campusconnect/models/student_profile.dart';
 import 'package:campusconnect/providers/ai_usage_provider.dart';
 import 'package:campusconnect/providers/notifications_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
@@ -10,6 +12,7 @@ import 'package:campusconnect/providers/engagement_provider.dart';
 import 'package:campusconnect/providers/ai_chat_provider.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/theme/app_theme.dart';
+import 'package:campusconnect/views/profile/alumni_profile_sections.dart';
 import 'package:campusconnect/views/widgets/initials_avatar.dart';
 import 'package:campusconnect/views/widgets/notification_badge.dart';
 import 'package:flutter/material.dart';
@@ -19,14 +22,18 @@ import 'package:provider/provider.dart';
 ///
 /// Phase 1 of NotesView decomposition: Clean, focused profile management view
 /// with comprehensive user information display, settings access, and secure logout.
+///
+/// v7.5: Role-based branching — alumni see a professional layout with career-focused
+/// sections (impact stats, work history, mentorship profile, social links, etc.)
+/// while student/teacher users see the current academic-focused layout unchanged.
 class ProfileView extends StatelessWidget {
   const ProfileView({super.key});
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Consumer<ProfileProvider>(
-      builder: (context, profileProvider, child) {
+    return Consumer2<ProfileProvider, RoleProvider>(
+      builder: (context, profileProvider, roleProvider, child) {
         if (profileProvider.isLoading && !profileProvider.isInitialized) {
           return Scaffold(
             backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -36,6 +43,18 @@ class ProfileView extends StatelessWidget {
 
         final profile = profileProvider.profile;
         final isIncomplete = profile?.isIncomplete ?? true;
+        final isAlumni = roleProvider.userRole == UserRole.alumni;
+
+        // v7.5: Alumni see a professional networking profile layout
+        if (isAlumni) {
+          return _buildAlumniProfile(
+            context,
+            isDark,
+            profile,
+            profileProvider,
+            isIncomplete,
+          );
+        }
 
         return Scaffold(
           backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -334,6 +353,199 @@ class ProfileView extends StatelessWidget {
     );
   }
 
+  /// v7.5: Alumni-specific profile layout with professional sections.
+  /// Renders career-focused sections while preserving the same logout/reset logic.
+  Widget _buildAlumniProfile(
+    BuildContext context,
+    bool isDark,
+    StudentProfile? profile,
+    ProfileProvider profileProvider,
+    bool isIncomplete,
+  ) {
+    final p = profile;
+    return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      appBar: AppBar(
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+        elevation: 0,
+        title: Text(
+          'Profile',
+          style: AppTheme.titleMedium.copyWith(
+            fontWeight: FontWeight.w600,
+            color: isDark ? Colors.white : AppTheme.gray900,
+          ),
+        ),
+        actions: [
+          NotificationBadge(
+            onTap: () => Navigator.pushNamed(context, notificationsRoute),
+          ),
+          IconButton(
+            icon: Icon(
+              Icons.settings_outlined,
+              color: isDark ? AppTheme.gray400 : AppTheme.gray700,
+            ),
+            onPressed: () => Navigator.pushNamed(context, settingsRoute),
+            tooltip: 'Settings',
+          ),
+        ],
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(AppTheme.space20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Incomplete profile warning
+            if (isIncomplete) ...[
+              Container(
+                padding: const EdgeInsets.all(AppTheme.space16),
+                decoration: BoxDecoration(
+                  color: AppTheme.warningBg,
+                  borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+                  border: Border.all(
+                    color: AppTheme.warning.withValues(alpha: 0.3),
+                    width: 1,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline, color: AppTheme.warning, size: 20),
+                    const SizedBox(width: AppTheme.space12),
+                    Expanded(
+                      child: Text(
+                        'Complete your profile to get personalized recommendations',
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.gray800,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: AppTheme.space20),
+            ],
+
+            // 1. Professional Header — gradient card with name, company, job role
+            AlumniProfileHeader(profile: p, isDark: isDark),
+            const SizedBox(height: AppTheme.space24),
+
+            // 2. About — bio display
+            AlumniAboutSection(bio: p?.personal.bio, isDark: isDark),
+            if (p?.personal.bio != null &&
+                (p?.personal.bio ?? '').trim().isNotEmpty)
+              const SizedBox(height: AppTheme.space24),
+
+            // 3. Quick Impact Stats — mentees, opportunities, engagement, strength
+            const AlumniImpactStrip(),
+            const SizedBox(height: AppTheme.space24),
+
+            // 4. Professional Info — company, job role, industry, work mode, etc.
+            AlumniProfessionalInfo(profile: p, isDark: isDark),
+            const SizedBox(height: AppTheme.space24),
+
+            // 5. Skills & Expertise — skill chips
+            AlumniSkillsSection(skills: p?.skills, isDark: isDark),
+            const SizedBox(height: AppTheme.space24),
+
+            // 6. Career Timeline — work history entries
+            AlumniCareerTimeline(workHistory: p?.workHistory, isDark: isDark),
+            const SizedBox(height: AppTheme.space24),
+
+            // 7. Mentorship Profile — active/completed, topics, languages
+            AlumniMentorshipSection(profile: p, isDark: isDark),
+            const SizedBox(height: AppTheme.space24),
+
+            // 8. Social Links — LinkedIn, GitHub, portfolio, etc.
+            AlumniSocialLinks(profile: p, isDark: isDark),
+            const SizedBox(height: AppTheme.space24),
+
+            // 9. Achievements — certifications, awards, publications
+            AlumniAchievementsSection(
+              achievements: p?.achievements,
+              isDark: isDark,
+            ),
+            const SizedBox(height: AppTheme.space24),
+
+            // 10. Public Profile — toggle + shareable key
+            AlumniPublicProfileSection(
+              isPublic: p?.isPublicProfile ?? false,
+              publicKey: p?.publicProfileKey,
+              isDark: isDark,
+              onToggle: (value) async {
+                final updatedProfile = p?.copyWith(
+                  isPublicProfile: value,
+                  publicProfileKey: p?.publicProfileKey,
+                );
+                if (updatedProfile != null) {
+                  await profileProvider.updateProfile(updatedProfile);
+                }
+              },
+            ),
+            const SizedBox(height: AppTheme.space24),
+
+            // Edit Profile Button
+            _ProfileMenuCard(
+              icon: Icons.edit_outlined,
+              title: 'Edit Profile',
+              subtitle: 'Update your professional information',
+              onTap: () {
+                Navigator.of(context).pushNamed('/edit-profile');
+              },
+            ),
+            const SizedBox(height: AppTheme.space24),
+
+            // App Info
+            Container(
+              padding: const EdgeInsets.all(AppTheme.space16),
+              decoration: BoxDecoration(
+                color: AppTheme.gray100,
+                borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'App Version',
+                    style: AppTheme.bodySmall.copyWith(color: AppTheme.gray600),
+                  ),
+                  Text(
+                    'v7.5.0',
+                    style: AppTheme.bodySmall.copyWith(
+                      color: AppTheme.gray600,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AppTheme.space32),
+
+            // Logout Button
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () => _handleProfileLogout(context),
+                icon: const Icon(Icons.logout),
+                label: const Text('Logout'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.error,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(
+                    vertical: AppTheme.space12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _handleProfileLogout(BuildContext context) async {
     final shouldLogout = await _showLogOutDialog(context);
     if (shouldLogout && context.mounted) {
@@ -419,7 +631,7 @@ class _ProfileMenuCard extends StatelessWidget {
         leading: Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: AppTheme.primaryBlue.withOpacity(isDark ? 0.2 : 0.1),
+            color: AppTheme.primaryBlue.withValues(alpha: isDark ? 0.2 : 0.1),
             borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
           ),
           child: Icon(icon, color: AppTheme.primaryBlue, size: 20),

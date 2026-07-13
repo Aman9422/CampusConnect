@@ -1,6 +1,130 @@
 import 'package:campusconnect/enums/user_role.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+/// v7.5: Professional work experience entry for alumni career timeline
+class WorkExperience {
+  final String id;
+  final String company;
+  final String role;
+  final String? description;
+  final DateTime startDate;
+  final DateTime? endDate;
+  final bool isCurrent;
+
+  WorkExperience({
+    required this.id,
+    required this.company,
+    required this.role,
+    this.description,
+    required this.startDate,
+    this.endDate,
+    this.isCurrent = false,
+  });
+
+  factory WorkExperience.fromMap(Map<String, dynamic> map) {
+    return WorkExperience(
+      id: map['id'] ?? '',
+      company: map['company'] ?? '',
+      role: map['role'] ?? '',
+      description: map['description'] as String?,
+      startDate: (map['startDate'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      endDate: (map['endDate'] as Timestamp?)?.toDate(),
+      isCurrent: map['isCurrent'] as bool? ?? false,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'company': company,
+      'role': role,
+      'description': description,
+      'startDate': Timestamp.fromDate(startDate),
+      'endDate': endDate != null ? Timestamp.fromDate(endDate!) : null,
+      'isCurrent': isCurrent,
+    };
+  }
+
+  WorkExperience copyWith({
+    String? id,
+    String? company,
+    String? role,
+    String? description,
+    DateTime? startDate,
+    DateTime? endDate,
+    bool? isCurrent,
+  }) {
+    return WorkExperience(
+      id: id ?? this.id,
+      company: company ?? this.company,
+      role: role ?? this.role,
+      description: description ?? this.description,
+      startDate: startDate ?? this.startDate,
+      endDate: endDate ?? this.endDate,
+      isCurrent: isCurrent ?? this.isCurrent,
+    );
+  }
+}
+
+/// v7.5: Professional achievement entry for alumni
+class Achievement {
+  final String id;
+  final String title;
+  final String? issuer;
+  final String? description;
+  final DateTime? date;
+  final String type; // certification, award, publication, openSource, volunteer
+
+  Achievement({
+    required this.id,
+    required this.title,
+    this.issuer,
+    this.description,
+    this.date,
+    this.type = 'certification',
+  });
+
+  factory Achievement.fromMap(Map<String, dynamic> map) {
+    return Achievement(
+      id: map['id'] ?? '',
+      title: map['title'] ?? '',
+      issuer: map['issuer'] as String?,
+      description: map['description'] as String?,
+      date: (map['date'] as Timestamp?)?.toDate(),
+      type: map['type'] ?? 'certification',
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'title': title,
+      'issuer': issuer,
+      'description': description,
+      'date': date != null ? Timestamp.fromDate(date!) : null,
+      'type': type,
+    };
+  }
+
+  Achievement copyWith({
+    String? id,
+    String? title,
+    String? issuer,
+    String? description,
+    DateTime? date,
+    String? type,
+  }) {
+    return Achievement(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      issuer: issuer ?? this.issuer,
+      description: description ?? this.description,
+      date: date ?? this.date,
+      type: type ?? this.type,
+    );
+  }
+}
+
 class StudentProfile {
   final String uid;
   final PersonalInfo personal;
@@ -22,6 +146,24 @@ class StudentProfile {
   final bool isPublicProfile; // v7.4 optional public alumni profile
   final String? publicProfileKey; // v7.4 shareable profile key
 
+  // v7.5: Alumni professional networking fields
+  final int? yearsOfExperience;
+  final String? industry;
+  final String? employmentType;
+  final String? workMode;
+  final String? workLocation;
+  final String? githubUrl;
+  final String? portfolioUrl;
+  final String? websiteUrl;
+  final String? leetcodeUrl;
+  final String? hackerrankUrl;
+  final int? maxMentees;
+  final List<String>? mentorshipTopics;
+  final String? officeHours;
+  final List<String>? languages;
+  final List<WorkExperience>? workHistory;
+  final List<Achievement>? achievements;
+
   StudentProfile({
     required this.uid,
     required this.personal,
@@ -40,6 +182,23 @@ class StudentProfile {
     this.designation,
     this.isPublicProfile = false,
     this.publicProfileKey,
+    // v7.5: Alumni professional fields
+    this.yearsOfExperience,
+    this.industry,
+    this.employmentType,
+    this.workMode,
+    this.workLocation,
+    this.githubUrl,
+    this.portfolioUrl,
+    this.websiteUrl,
+    this.leetcodeUrl,
+    this.hackerrankUrl,
+    this.maxMentees,
+    this.mentorshipTopics,
+    this.officeHours,
+    this.languages,
+    this.workHistory,
+    this.achievements,
   });
 
   // Create a default/empty profile
@@ -132,6 +291,27 @@ class StudentProfile {
       designation: data['designation'] as String?,
       isPublicProfile: data['isPublicProfile'] as bool? ?? false,
       publicProfileKey: data['publicProfileKey'] as String?,
+      // v7.5: Alumni professional networking fields
+      yearsOfExperience: data['yearsOfExperience'] as int?,
+      industry: data['industry'] as String?,
+      employmentType: data['employmentType'] as String?,
+      workMode: data['workMode'] as String?,
+      workLocation: data['workLocation'] as String?,
+      githubUrl: data['githubUrl'] as String?,
+      portfolioUrl: data['portfolioUrl'] as String?,
+      websiteUrl: data['websiteUrl'] as String?,
+      leetcodeUrl: data['leetcodeUrl'] as String?,
+      hackerrankUrl: data['hackerrankUrl'] as String?,
+      maxMentees: data['maxMentees'] as int?,
+      mentorshipTopics: (data['mentorshipTopics'] as List<dynamic>?)?.cast<String>(),
+      officeHours: data['officeHours'] as String?,
+      languages: (data['languages'] as List<dynamic>?)?.cast<String>(),
+      workHistory: (data['workHistory'] as List<dynamic>?)
+          ?.map((e) => WorkExperience.fromMap(e as Map<String, dynamic>))
+          .toList(),
+      achievements: (data['achievements'] as List<dynamic>?)
+          ?.map((e) => Achievement.fromMap(e as Map<String, dynamic>))
+          .toList(),
     );
   }
 
@@ -157,6 +337,28 @@ class StudentProfile {
     if (designation != null) map['designation'] = designation;
     map['isPublicProfile'] = isPublicProfile;
     if (publicProfileKey != null) map['publicProfileKey'] = publicProfileKey;
+
+    // v7.5: Alumni professional fields
+    if (yearsOfExperience != null) map['yearsOfExperience'] = yearsOfExperience;
+    if (industry != null) map['industry'] = industry;
+    if (employmentType != null) map['employmentType'] = employmentType;
+    if (workMode != null) map['workMode'] = workMode;
+    if (workLocation != null) map['workLocation'] = workLocation;
+    if (githubUrl != null) map['githubUrl'] = githubUrl;
+    if (portfolioUrl != null) map['portfolioUrl'] = portfolioUrl;
+    if (websiteUrl != null) map['websiteUrl'] = websiteUrl;
+    if (leetcodeUrl != null) map['leetcodeUrl'] = leetcodeUrl;
+    if (hackerrankUrl != null) map['hackerrankUrl'] = hackerrankUrl;
+    if (maxMentees != null) map['maxMentees'] = maxMentees;
+    if (mentorshipTopics != null) map['mentorshipTopics'] = mentorshipTopics;
+    if (officeHours != null) map['officeHours'] = officeHours;
+    if (languages != null) map['languages'] = languages;
+    if (workHistory != null) {
+      map['workHistory'] = workHistory!.map((e) => e.toMap()).toList();
+    }
+    if (achievements != null) {
+      map['achievements'] = achievements!.map((e) => e.toMap()).toList();
+    }
 
     return map;
   }
@@ -187,6 +389,23 @@ class StudentProfile {
     String? designation,
     bool? isPublicProfile,
     String? publicProfileKey,
+    // v7.5: Alumni professional fields
+    int? yearsOfExperience,
+    String? industry,
+    String? employmentType,
+    String? workMode,
+    String? workLocation,
+    String? githubUrl,
+    String? portfolioUrl,
+    String? websiteUrl,
+    String? leetcodeUrl,
+    String? hackerrankUrl,
+    int? maxMentees,
+    List<String>? mentorshipTopics,
+    String? officeHours,
+    List<String>? languages,
+    List<WorkExperience>? workHistory,
+    List<Achievement>? achievements,
   }) {
     return StudentProfile(
       uid: uid,
@@ -206,6 +425,23 @@ class StudentProfile {
       designation: designation ?? this.designation,
       isPublicProfile: isPublicProfile ?? this.isPublicProfile,
       publicProfileKey: publicProfileKey ?? this.publicProfileKey,
+      // v7.5: Alumni professional fields
+      yearsOfExperience: yearsOfExperience ?? this.yearsOfExperience,
+      industry: industry ?? this.industry,
+      employmentType: employmentType ?? this.employmentType,
+      workMode: workMode ?? this.workMode,
+      workLocation: workLocation ?? this.workLocation,
+      githubUrl: githubUrl ?? this.githubUrl,
+      portfolioUrl: portfolioUrl ?? this.portfolioUrl,
+      websiteUrl: websiteUrl ?? this.websiteUrl,
+      leetcodeUrl: leetcodeUrl ?? this.leetcodeUrl,
+      hackerrankUrl: hackerrankUrl ?? this.hackerrankUrl,
+      maxMentees: maxMentees ?? this.maxMentees,
+      mentorshipTopics: mentorshipTopics ?? this.mentorshipTopics,
+      officeHours: officeHours ?? this.officeHours,
+      languages: languages ?? this.languages,
+      workHistory: workHistory ?? this.workHistory,
+      achievements: achievements ?? this.achievements,
     );
   }
 }
