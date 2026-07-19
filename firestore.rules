@@ -24,12 +24,18 @@ service cloud.firestore {
         (userRole() == 'teacher' || userRole() == 'alumni');
     }
 
+    function isTeacher() {
+      return isAuthenticated() && userRole() == 'teacher';
+    }
+
     // ===============================================
     // USERS COLLECTION (with subcollections)
     // ===============================================
     match /users/{userId} {
       // Users can always read/write their own profile
       allow read, write: if isOwner(userId);
+      // v8.1: Teachers can read any user profile for analytics
+      allow read: if isTeacher();
       // v7.2: Alumni directory - authenticated users can read alumni profiles
       allow read: if isAuthenticated() &&
         resource.data.role == 'alumni' &&
@@ -81,8 +87,9 @@ service cloud.firestore {
       // v6.8: Resume Review History
       // v6.95: Added aiAnalysis, aiGeneratedAt, aiProviderUsed fields
       //        (written by Cloud Function generateResumeAnalysis)
+      // v8.1: Teachers can read any student's resume reviews for analytics
       match /resumeReviews/{reviewId} {
-        allow read: if isOwner(userId);
+        allow read: if isOwner(userId) || isTeacher();
         allow create: if isOwner(userId);
         allow update, delete: if isOwner(userId);
       }
@@ -258,6 +265,15 @@ service cloud.firestore {
         allow create: if isAuthenticated() &&
                       request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
       }
+    }
+
+    // ===============================================
+    // v8.1: TEACHER ANALYTICS — collectionGroup queries
+    // Allow teachers to query resume reviews across all users
+    // for aggregate analytics (stats, skill gaps, trends).
+    // ===============================================
+    match /{path=**}/resumeReviews/{reviewId} {
+      allow read: if isTeacher();
     }
 
     // ===============================================

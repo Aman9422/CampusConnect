@@ -37,10 +37,12 @@ class MainNavigationView extends StatefulWidget {
   });
 
   @override
-  State<MainNavigationView> createState() => _MainNavigationViewState();
+  State<MainNavigationView> createState() => MainNavigationViewState();
 }
 
-class _MainNavigationViewState extends State<MainNavigationView> {
+/// State class for MainNavigationView — made public so child widgets
+/// can programmatically switch tabs via findAncestorStateOfType.
+class MainNavigationViewState extends State<MainNavigationView> {
   late int _selectedIndex;
 
   @override
@@ -129,7 +131,7 @@ mixin TabbedNavigationMixin {
   void switchToTab(BuildContext context, int tabIndex) {
     // Find the MainNavigationView in the widget tree and switch tabs
     final navState = context
-        .findAncestorStateOfType<_MainNavigationViewState>();
+        .findAncestorStateOfType<MainNavigationViewState>();
     navState?.setSelectedIndex(tabIndex);
   }
 

@@ -24,7 +24,11 @@ class _StudentAnalyticsViewState extends State<StudentAnalyticsView> {
   @override
   void initState() {
     super.initState();
-    _loadAnalytics();
+    // Use addPostFrameCallback to avoid calling notifyListeners() during build phase
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _loadAnalytics();
+    });
   }
 
   void _loadAnalytics() {
