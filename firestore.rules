@@ -73,8 +73,9 @@ service cloud.firestore {
       }
 
       // v7.4: Engagement score summary (Cloud Functions / service managed)
+      // v8.2: Teachers can read any student's engagement summary for analytics
       match /engagement_summary/{summaryId} {
-        allow read: if isOwner(userId);
+        allow read: if isOwner(userId) || isTeacher();
         allow write: if false;
       }
 
@@ -274,6 +275,15 @@ service cloud.firestore {
     // ===============================================
     match /{path=**}/resumeReviews/{reviewId} {
       allow read: if isTeacher();
+    }
+
+    // ===============================================
+    // v8.2.1: TEACHER ANALYTICS — collectionGroup for applications
+    // Allow teachers to count applications across all placements
+    // for pipeline analytics.
+    // ===============================================
+    match /{path=**}/applications/{appId} {
+      allow read: if isTeacher() || isOwner(appId);
     }
 
     // ===============================================

@@ -1,10 +1,12 @@
+import 'package:campusconnect/models/placement_pipeline_data.dart';
 import 'package:campusconnect/services/firestore/teacher_analytics_service.dart';
 import 'package:flutter/material.dart';
 
-/// TeacherAnalyticsProvider - v7.3: Teacher analytics enhancement
+/// TeacherAnalyticsProvider - v8.2
 ///
 /// Simple provider for teacher analytics (no streams needed, one-time load).
 /// Manages analytics data for resume review aggregations.
+/// v8.2: Added department analytics, pipeline counts, engagement aggregates.
 class TeacherAnalyticsProvider extends ChangeNotifier {
   final TeacherAnalyticsService _analyticsService;
 
@@ -21,14 +23,40 @@ class TeacherAnalyticsProvider extends ChangeNotifier {
   String? _error;
   bool _isDisposed = false;
 
+  // v8.2: New data
+  List<Map<String, dynamic>>? _departmentAnalytics;
+  PlacementPipelineData? _pipelineData;
+  Map<String, dynamic>? _engagementAggregates;
+
   // Getters
   Map<String, dynamic>? get stats => _stats;
   List<Map<String, dynamic>>? get studentData => _studentData;
   Map<String, dynamic>? get predictionIndicators => _predictionIndicators;
   List<Map<String, dynamic>>? get skillGapAnalysis => _skillGapAnalysis;
   List<Map<String, dynamic>>? get performanceTrends => _performanceTrends;
+  List<Map<String, dynamic>>? get departmentAnalytics => _departmentAnalytics;
+
+  /// Pipeline data — typed, always represents unique student counts.
+  PlacementPipelineData? get pipelineData => _pipelineData;
+
+  Map<String, dynamic>? get engagementAggregates => _engagementAggregates;
   bool get isLoading => _isLoading;
   String? get error => _error;
+
+  /// v8.2: Engagement aggregate getters
+  int get avgEngagement => (_engagementAggregates?['avgEngagement'] as num? ?? 0).round();
+  int get avgProfileStrength => (_engagementAggregates?['avgProfileStrength'] as num? ?? 0).round();
+  int get activeAlumni => (_engagementAggregates?['activeAlumni'] as int? ?? 0);
+  int get engagementStudentCount => (_engagementAggregates?['studentCount'] as int? ?? 0);
+
+  /// v8.2.3: Pipeline getters — backward-compatible, all return unique student counts.
+  PlacementPipelineData? get pipelineCounts => _pipelineData;
+  int get pipelineEligible => _pipelineData?.eligibleStudents ?? 0;
+  int get pipelineApplied => _pipelineData?.appliedStudents ?? 0;
+  int get pipelineTotalStudents => _pipelineData?.eligibleStudents ?? 0;
+  int get pipelineTotalPlacements => 0; // Dead getter — placement count comes from PlacementsProvider
+  @Deprecated('Use pipelineData instead') List<int> get allStageValues =>
+      _pipelineData?.allStageValues ?? [];
 
   /// Load all analytics data
   Future<void> loadAnalytics() async {
@@ -39,13 +67,16 @@ class TeacherAnalyticsProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // Load both stats and student data in parallel
+      // Load all data in parallel — v8.2 adds 3 more queries
       final results = await Future.wait([
         _analyticsService.getResumeReviewStats(),
         _analyticsService.getStudentResumeData(),
         _analyticsService.getPlacementPredictionIndicators(),
         _analyticsService.getSkillGapAnalysis(),
         _analyticsService.getPerformanceTrendInsights(),
+        _analyticsService.getDepartmentAnalytics(),
+        _analyticsService.getApplicationPipelineCounts(),
+        _analyticsService.getEngagementAggregates(),
       ]);
 
       if (_isDisposed) return; // Safety check
@@ -55,7 +86,19 @@ class TeacherAnalyticsProvider extends ChangeNotifier {
       _predictionIndicators = results[2] as Map<String, dynamic>;
       _skillGapAnalysis = results[3] as List<Map<String, dynamic>>;
       _performanceTrends = results[4] as List<Map<String, dynamic>>;
+      _departmentAnalytics = results[5] as List<Map<String, dynamic>>;
+      _pipelineData = results[6] as PlacementPipelineData;
+      _engagementAggregates = results[7] as Map<String, dynamic>;
       _error = null;
+
+      debugPrint(
+        'TeacherAnalyticsProvider: Loaded '
+        '${_stats?['totalReviews'] ?? 0} reviews, '
+        '${_studentData?.length ?? 0} students, '
+        '${_departmentAnalytics?.length ?? 0} depts, '
+        '${_pipelineData?.eligibleStudents ?? 0} pipeline eligible, '
+        '${_engagementAggregates?['studentCount'] ?? 0} engagement summaries'
+      );
     } catch (e) {
       if (_isDisposed) return; // Safety check
       _error = 'Failed to load analytics data';
@@ -178,21 +221,26 @@ class TeacherAnalyticsProvider extends ChangeNotifier {
     }
   }
 
-  /// Reset state (called on logout)
+  /// Reset state (called on logout).
+  /// Clears all analytics data so the provider is ready for a fresh load
+  /// on the next login. Does NOT set _isDisposed — that is only for
+  /// actual widget tree disposal, not for logout/reset cycles.
   void reset() {
-    _isDisposed = true; // Set FIRST
-
-    // Clear all state
+    // Clear all state — do NOT set _isDisposed here, otherwise
+    // loadAnalytics() will be permanently blocked after logout→relogin.
     _stats = null;
     _studentData = null;
     _predictionIndicators = null;
     _skillGapAnalysis = null;
     _performanceTrends = null;
+    _departmentAnalytics = null;
+    _pipelineData = null;
+    _engagementAggregates = null;
     _isLoading = false;
     _error = null;
 
-    // DON'T call notifyListeners() after setting _isDisposed
-    // This prevents any further updates
+    // notifyListeners is safe here because _isDisposed is still false
+    notifyListeners();
   }
 
   @override

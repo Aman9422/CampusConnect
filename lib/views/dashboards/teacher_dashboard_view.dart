@@ -88,89 +88,144 @@ class _TeacherDashboardTab extends StatefulWidget {
 }
 
 class _TeacherDashboardTabState extends State<_TeacherDashboardTab> {
+  int _loadRetryCount = 0;
+  static const int _maxRetries = 2;
+  static const Duration _retryDelay = Duration(seconds: 4);
+  bool _historyRefreshed = false;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      context.read<TeacherAnalyticsProvider>().loadAnalytics();
-      context.read<PlacementsProvider>().refresh();
-      context.read<ResumeReviewProvider>().refreshHistory();
+      _loadAll(firstLoad: true);
     });
+  }
+
+  Future<void> _loadAll({bool firstLoad = false}) async {
+    await context.read<TeacherAnalyticsProvider>().loadAnalytics();
+    await context.read<PlacementsProvider>().refresh();
+    // Only refresh resume history on the first attempt — retries skip
+    // it since the provider already has the data cached.
+    if (firstLoad || !_historyRefreshed) {
+      _historyRefreshed = true;
+      await context.read<ResumeReviewProvider>().refreshHistory();
+    }
+    _checkAndRetry();
+  }
+
+  void _checkAndRetry() {
+    if (_loadRetryCount >= _maxRetries) return;
+    if (!mounted) return;
+
+    final analytics = context.read<TeacherAnalyticsProvider>();
+    // Retry if we got zero students on the first load — indicates Firestore
+    // connection wasn't fully established yet (common on first login).
+    final isEmpty = (analytics.pipelineTotalStudents == 0) &&
+        (analytics.studentData == null || analytics.studentData!.isEmpty) &&
+        !analytics.isLoading;
+    if (isEmpty) {
+      _loadRetryCount++;
+      Future.delayed(_retryDelay, () {
+        if (!mounted) return;
+        _loadAll();
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Scaffold(
-      backgroundColor: isDark ? AppTheme.darkBackground : AppTheme.background,
-      appBar: _buildAppBar(context, isDark),
-      body: RefreshIndicator(
-        onRefresh: () async {
-          await context.read<TeacherAnalyticsProvider>().loadAnalytics();
-          await context.read<PlacementsProvider>().refresh();
-          await context.read<ResumeReviewProvider>().refreshHistory();
-        },
-        child: SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.all(AppTheme.space16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 1. Welcome Header
-              const WelcomeHeader(),
-              const SizedBox(height: AppTheme.space24),
+    return Column(
+      children: [
+        _buildAppBar(context, isDark),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: () async {
+              await context.read<TeacherAnalyticsProvider>().loadAnalytics();
+              await context.read<PlacementsProvider>().refresh();
+              await context.read<ResumeReviewProvider>().refreshHistory();
+            },
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(AppTheme.space16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 1. Welcome Header
+                  const WelcomeHeader(),
+                  const SizedBox(height: AppTheme.space24),
 
-              // 2. Quick Statistics (8 metrics)
-              const QuickStatistics(),
-              const SizedBox(height: AppTheme.space24),
+                  // 2. Quick Statistics (8 metrics)
+                  const QuickStatistics(),
+                  const SizedBox(height: AppTheme.space24),
 
-              // 3. Department Overview
-              const DepartmentOverview(),
-              const SizedBox(height: AppTheme.space20),
+                  // 3. Department Overview
+                  const DepartmentOverview(),
+                  const SizedBox(height: AppTheme.space20),
 
-              // 4. Placement Pipeline
-              const PlacementPipeline(),
-              const SizedBox(height: AppTheme.space20),
+                  // 4. Placement Pipeline
+                  const PlacementPipeline(),
+                  const SizedBox(height: AppTheme.space20),
 
-              // 5. Resume Review Analytics
-              const ResumeReviewAnalytics(),
-              const SizedBox(height: AppTheme.space20),
+                  // 5. Resume Review Analytics
+                  const ResumeReviewAnalytics(),
+                  const SizedBox(height: AppTheme.space20),
 
-              // 6. Skill Gap Analysis
-              const SkillGapAnalysis(),
-              const SizedBox(height: AppTheme.space20),
+                  // 6. Skill Gap Analysis
+                  const SkillGapAnalysis(),
+                  const SizedBox(height: AppTheme.space20),
 
-              // 7. AI Insights Overview
-              const AIInsightsOverview(),
-              const SizedBox(height: AppTheme.space20),
+                  // 7. AI Insights Overview
+                  const AIInsightsOverview(),
+                  const SizedBox(height: AppTheme.space20),
 
-              // 8. At-Risk Students
-              const AtRiskStudents(),
-              const SizedBox(height: AppTheme.space24),
+                  // 8. At-Risk Students
+                  const AtRiskStudents(),
+                  const SizedBox(height: AppTheme.space24),
 
-              // 9. Recent Activity
-              const RecentActivity(),
-              const SizedBox(height: AppTheme.space24),
+                  // 9. Student Growth (v8.2 Phase 6)
+                  const StudentGrowth(),
+                  const SizedBox(height: AppTheme.space24),
 
-              // 10. Quick Actions
-              const QuickActionsGrid(),
-              const SizedBox(height: AppTheme.space32),
-            ],
+                  // 10. Recent Activity
+                  const RecentActivity(),
+                  const SizedBox(height: AppTheme.space24),
+
+                  // 11. Quick Actions
+                  const QuickActionsGrid(),
+                  const SizedBox(height: AppTheme.space32),
+                ],
+              ),
+            ),
           ),
         ),
-      ),
+      ],
     );
   }
 
-  PreferredSizeWidget _buildAppBar(BuildContext context, bool isDark) {
-    return AppBar(
-      title: Row(
-        mainAxisSize: MainAxisSize.min,
+  Widget _buildAppBar(BuildContext context, bool isDark) {
+    return Container(
+      padding: EdgeInsets.only(
+        top: MediaQuery.of(context).padding.top,
+        bottom: AppTheme.space8,
+        left: AppTheme.space16,
+        right: AppTheme.space8,
+      ),
+      decoration: BoxDecoration(
+        color: isDark ? AppTheme.darkSurface : AppTheme.surface,
+        border: Border(
+          bottom: BorderSide(
+            color: isDark ? AppTheme.gray700 : AppTheme.gray200,
+            width: 1,
+          ),
+        ),
+      ),
+      child: Row(
         children: [
           Icon(Icons.school, color: isDark ? Colors.white : AppTheme.gray900, size: 24),
-          const SizedBox(width: 8),
+          const SizedBox(width: AppTheme.space8),
           Text(
             'Dashboard',
             style: AppTheme.titleMedium.copyWith(
@@ -178,64 +233,62 @@ class _TeacherDashboardTabState extends State<_TeacherDashboardTab> {
               color: isDark ? Colors.white : AppTheme.gray900,
             ),
           ),
+          const Spacer(),
+          NotificationBadge(
+            onTap: () => Navigator.pushNamed(context, notificationsRoute),
+            iconColor: isDark ? AppTheme.gray400 : null,
+          ),
+          const SizedBox(width: AppTheme.space4),
+          ChatBadge(iconColor: isDark ? AppTheme.gray400 : null),
+          PopupMenuButton<String>(
+            icon: Icon(Icons.more_vert, color: isDark ? AppTheme.gray400 : AppTheme.gray700),
+            onSelected: (value) async {
+              switch (value) {
+                case 'profile':
+                  Navigator.pushNamed(context, profileViewRoute);
+                  break;
+                case 'settings':
+                  Navigator.pushNamed(context, settingsRoute);
+                  break;
+                case 'logout':
+                  final shouldLogout = await _showLogOutDialog(context);
+                  if (shouldLogout && context.mounted) {
+                    _resetProviders(context);
+                    try {
+                      await AuthService.firebase().logOut();
+                    } catch (_) {}
+                  }
+                  break;
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'profile',
+                child: ListTile(
+                  leading: Icon(Icons.person_outline, size: 20, color: isDark ? AppTheme.gray400 : null),
+                  title: Text('Profile', style: TextStyle(color: isDark ? Colors.white : null)),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              PopupMenuItem(
+                value: 'settings',
+                child: ListTile(
+                  leading: Icon(Icons.settings_outlined, size: 20, color: isDark ? AppTheme.gray400 : null),
+                  title: Text('Settings', style: TextStyle(color: isDark ? Colors.white : null)),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              const PopupMenuDivider(),
+              const PopupMenuItem(
+                value: 'logout',
+                child: Text('Log out'),
+              ),
+            ],
+          ),
         ],
       ),
-      backgroundColor: isDark ? AppTheme.darkSurface : AppTheme.surface,
-      elevation: 0,
-      actions: [
-        NotificationBadge(
-          onTap: () => Navigator.pushNamed(context, notificationsRoute),
-          iconColor: isDark ? AppTheme.gray400 : null,
-        ),
-        ChatBadge(iconColor: isDark ? AppTheme.gray400 : null),
-        PopupMenuButton<String>(
-          icon: Icon(Icons.more_vert, color: isDark ? AppTheme.gray400 : AppTheme.gray700),
-          onSelected: (value) async {
-            switch (value) {
-              case 'profile':
-                Navigator.pushNamed(context, profileViewRoute);
-                break;
-              case 'settings':
-                Navigator.pushNamed(context, settingsRoute);
-                break;
-              case 'logout':
-                final shouldLogout = await _showLogOutDialog(context);
-                if (shouldLogout && context.mounted) {
-                  _resetProviders(context);
-                  try {
-                    await AuthService.firebase().logOut();
-                  } catch (_) {}
-                }
-                break;
-            }
-          },
-          itemBuilder: (context) => [
-            PopupMenuItem(
-              value: 'profile',
-              child: ListTile(
-                leading: Icon(Icons.person_outline, size: 20, color: isDark ? AppTheme.gray400 : null),
-                title: Text('Profile', style: TextStyle(color: isDark ? Colors.white : null)),
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-              ),
-            ),
-            PopupMenuItem(
-              value: 'settings',
-              child: ListTile(
-                leading: Icon(Icons.settings_outlined, size: 20, color: isDark ? AppTheme.gray400 : null),
-                title: Text('Settings', style: TextStyle(color: isDark ? Colors.white : null)),
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-              ),
-            ),
-            const PopupMenuDivider(),
-            const PopupMenuItem(
-              value: 'logout',
-              child: Text('Log out'),
-            ),
-          ],
-        ),
-      ],
     );
   }
 

@@ -1,0 +1,13 @@
+{
+  "name": "campusconnect-seed",
+  "description": "Firestore demo data seeders for CampusConnect",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "seed": "node seed.js",
+    "cleanup": "node cleanup.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.0.0"
+  }
+}

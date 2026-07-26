@@ -43,3 +43,19 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Firebase Admin SDK key
+scripts/seed_firestore/serviceAccountKey.json
+
+# Seed script dependencies
+scripts/seed_firestore/node_modules/
+scripts/seed_firestore/serviceAccountKey.json
+scripts/seed_firestore/serviceAccountKey.json.json
+
+# Optional
+scripts/seed_firestore/.env
+scripts/seed_firestore/*.log
+scripts/seed_firestore/exports/
+
+# Development notes
+project_info_*.md
