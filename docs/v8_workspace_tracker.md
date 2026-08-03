@@ -1,7 +1,7 @@
-# CampusConnect v8.3 — Workspace Tracker
+# CampusConnect v8.4 — Workspace Tracker
 
 ## Status: COMPLETED
-## Version: CampusConnect v8.3 — Firestore Demo Data Seeder & Codebase Architecture Documentation
+## Version: CampusConnect v8.4 — Student Resume Portfolio
 
 ---
 
@@ -22,6 +22,8 @@
 | 10 | **v8.2.2 — Layout Fix & Data Pipeline Investigation** | ✅ |
 | 11 | **v8.3 — Codebase Architecture Documentation** | ✅ |
 | 12 | **v8.3 — Firestore Demo Data Seeder** | ✅ |
+| 13 | **v8.4 — Student Resume Portfolio** | ✅ |
+| 14 | **v8.4.6 — Final Audit Fixes (F1–F12)** | ✅ |
 
 **Overall Progress: 100%**
 
@@ -388,11 +390,168 @@ The spec says *"Sort departments by placement rate"*, but placement rate per dep
 
 ---
 
+## v8.4 — Student Resume Portfolio
+
+### Objective
+
+Transform every student profile into a complete professional portfolio (resume, skills, projects, certifications, experience, education, achievements, social links, career preferences) stored under `users/{uid}/portfolio`. This becomes the foundation for future AI recommendations and mentorship matching — no AI logic added (out of scope).
+
+### Files Created
+
+| File | Purpose |
+|------|---------|
+| `lib/models/portfolio/portfolio_model.dart` | Portfolio aggregate model (resume, skills, projects, certifications, experience, achievements, links, preferences) |
+| `lib/models/portfolio/skill_model.dart` | Skill with name, category, proficiency |
+| `lib/models/portfolio/project_model.dart` | Project with title, description, technologies, URLs, dates, currentlyWorking |
+| `lib/models/portfolio/certification_model.dart` | Certification (title, issuer, issueDate, credentialId/Url) |
+| `lib/models/portfolio/experience_model.dart` | Experience (company, role, employmentType, dates) |
+| `lib/models/portfolio/achievement_model.dart` | Achievement (title, description, date, category) |
+| `lib/models/portfolio/career_preferences.dart` | Preferred roles/locations, expected salary, remote/relocation |
+| `lib/models/portfolio/social_links.dart` | GitHub, LinkedIn, Portfolio, LeetCode, Codeforces, HackerRank |
+| `lib/models/portfolio/resume_metadata.dart` | downloadUrl, uploadDate, lastUpdated, version, atsScore, parserVersion |
+| `lib/services/firestore/portfolio_service.dart` | CRUD under `users/{uid}/portfolio` via merge-set (backward compatible) |
+| `lib/services/storage/storage_service.dart` | Resume PDF upload/delete at `resumes/{uid}/resume.pdf`, 5 MB validation |
+| `lib/providers/portfolio_provider.dart` | Init/save/upload/delete/refresh/reset with `_isDisposed` guard |
+| `lib/utilities/portfolio_validators.dart` | Required fields, URLs, duplicate skills, empty projects, max size |
+| `lib/views/portfolio/widgets/portfolio_section_card.dart` | Shared section card + `PortfolioInfoRow` |
+| `lib/views/portfolio/widgets/portfolio_text_field.dart` | Shared form field matching app design language |
+| `lib/views/portfolio/student_portfolio_screen.dart` | Portfolio preview with strength bar |
+| `lib/views/portfolio/edit_portfolio_screen.dart` | Edit hub (skills, links, preferences, manager tiles) |
+| `lib/views/portfolio/projects_manager_screen.dart` | Projects list + form + delete |
+| `lib/views/portfolio/certifications_manager_screen.dart` | Certifications list + form + delete |
+| `lib/views/portfolio/experience_manager_screen.dart` | Experience list + form + delete |
+| `lib/views/portfolio/achievements_manager_screen.dart` | Achievements list + form + delete |
+| `lib/views/portfolio/resume_upload_screen.dart` | PDF picker, upload/replace/remove, guidelines |
+| `lib/views/portfolio/portfolio_read_only_view.dart` | Teacher/alumni read-only view (direct service reads) |
+| `storage.rules` | New Firebase Storage rules for `resumes/{uid}/*` |
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `lib/constants/routes.dart` | 8 portfolio routes |
+| `lib/main.dart` | PortfolioProvider registration, 8 routes, per-user init, logout reset |
+| `lib/views/dashboards/student_dashboard_view.dart` | "My Portfolio" shortcut in Today section + logout reset |
+| `lib/views/profile/profile_view.dart` | "My Portfolio" menu card + logout reset |
+| `lib/views/mentorship/mentorship_request_detail_view.dart` | "View Student Portfolio" for alumni |
+| `lib/views/teacher/student_analytics_view.dart` | View-portfolio icon on leaderboard rows |
+| `firestore.rules` | Alumni read-only access to student portfolios |
+| `firebase.json` | Registered `storage.rules` |
+
+### Security
+
+- **Firestore**: owners can always read/write their own doc (portfolio is a nested field); teachers can read any user; alumni get read-only access to student docs (`role == 'student'`) — never write
+- **Storage**: `resumes/{uid}/{fileName}` — owner write; owner/teacher/alumni read; deny-all for everything else
+- No schema changes — portfolio stored as nested map under existing `users` collection via merge-set
+
+### Validation
+
+- `flutter analyze` → **0 errors**; remaining issues are pre-existing info-level style lints used across the app (`withOpacity`, deprecated `value:` on form fields)
+
+### Out of Scope
+
+AI Recommendation Engine, Mentorship AI, Resume Parsing, Resume History, Resume Versioning, Notification System, Admin Dashboard, Analytics Changes.
+
+---
+
+## v8.4.5 — Student Resume Portfolio Bugfix
+
+### Objective
+
+Resolve every issue raised in the v8.4 audit (`docs/issues.md`) — resume upload broken on non-web platforms, inflated completion score, broken teacher resume access, weak storage rules, form re-seeding, URL validator bug, whole-map save clobbering, dead code, and the accompanying quality gaps. All fixes are code-level; no architecture changes.
+
+### Files Changed (Modified)
+
+| File | Change |
+|------|--------|
+| `lib/views/portfolio/resume_upload_screen.dart` | **C1** platform-split upload (`filePath` non-web / `bytes` web), `file.size` validation, `withData: kIsWeb`; **M6** typed `ResumeMetadata`; **L7** single busy flag |
+| `lib/models/portfolio/portfolio_model.dart` | **C2** `profileCompletion(educationFilled:)` parameter; **L1** `isEmpty` includes preferences; **M10** tolerant `fromMap` |
+| `lib/models/portfolio/career_preferences.dart` | **M4/L1** `isEmpty` considers role/location/salary + non-default remote/relocation |
+| `lib/views/portfolio/student_portfolio_screen.dart` | **C2** pass real `educationFilled`; **M6/L2** typed project tile with duration + links; **M9** inverted date guard; **M4** preferences visibility |
+| `lib/views/portfolio/portfolio_read_only_view.dart` | **C2** pass real `educationFilled`; **M9** inverted date guard; **M4** preferences visibility |
+| `lib/services/firestore/portfolio_service.dart` | **H4** per-section diff saves (`previous` param); **M8** removed dead methods |
+| `lib/providers/portfolio_provider.dart` | **H4** passes `previous`; **L4** re-init on different uid; **L5** `_isDisposed` guard in `refresh` |
+| `lib/utilities/portfolio_validators.dart` | **H3** `optionalUrl` allowHttp fix; **M8** removed dead validators |
+| `lib/services/storage/storage_service.dart` | **M8** slimmed `ResumeUploadResult` (dropped unused `version`/`toMetadataMap`) |
+| `lib/views/portfolio/edit_portfolio_screen.dart` | **H1** `_isSeeded` single-seed; **M1** edit-on-tap skill dialog |
+| `lib/views/profile/profile_view.dart` | **M5** My Portfolio gated to students; **M13** dynamic app version label |
+| `lib/views/dashboards/teacher_dashboard_view.dart` | **M12** logout resets `PortfolioProvider` |
+| `storage.rules` | **C3** teacher/alumni read via Firestore role lookup + `exists()`; **H2** PDF-only + 5 MB server-side |
+| `firestore.rules` | **M3** `userRole()` `exists()` guard; **M2** privacy note for alumni whole-doc read |
+
+### Files Created
+
+| File | Purpose |
+|------|---------|
+| `test/portfolio_model_test.dart` | **H5** completion (C2), isEmpty (L1), copyWith, round-trip, tolerant fromMap (M10) |
+| `test/portfolio_validators_test.dart` | **H5** required + optionalUrl H3 (allowHttp on/off, malformed) |
+| `project_info__9_bugfix_of_v8.4.md` | Implementation report for the bugfix pass |
+
+### Validation
+
+- `flutter analyze` → **0 errors, 0 warnings** — only pre-existing info-level lints (69, unchanged from baseline)
+- `flutter test` → **41/41 pass** (auth 25 + portfolio model/validators 16 new)
+- `firebase deploy --only firestore:rules` → **deployed** (rules compiled + released)
+
+### Deployment Note (Firebase Storage)
+
+`firebase deploy --only storage` is **blocked**: Firebase Storage is not yet provisioned on `campusconnect-firebase-project`. The fixed `storage.rules` (C3/H2) is ready; enable Storage in the Firebase Console (Get Started) and run `firebase deploy --only storage` to make teacher resume reads and server-side PDF/5 MB enforcement live.
+
+---
+
+## v8.4.6 — Final Audit Fixes (F1–F12)
+
+### Objective
+
+Close out every remaining finding from the final audit (`docs/confirmation.md` §9): role self-elevation, an unregistered chat route, a missing composite index that silently dropped system notifications, unreachable mentorship completion UI, whole-map portfolio saves clobbering sibling edits, provider lifecycle guards, dead code, misleading empty portfolio states, inverted date display, and code hygiene. Tracked in `docs/todo.md`.
+
+### Files Changed
+
+| Fix | File | Change |
+|-----|------|--------|
+| **F1** 🔴 | `firestore.rules` | `canWriteRole()` guard on the owner write rule — `role` immutable once persisted (closes student→teacher/alumni self-elevation that granted PII/resume/analytics read access) |
+| **F2** 🔴 | `lib/main.dart` | `onGenerateRoute` now handles `chatDetailRoute` (same as `chatRoute`) — activity-feed chat taps open `ChatView` instead of crashing |
+| **F3** 🔴 | `firestore.indexes.json` | Added `notifications` `type ASC / createdAt ASC` composite index — `maybeCreateNotification` range query (`type == … AND createdAt >= …`) requires ASC; previously only DESC existed, silently dropping all system notifications |
+| **F4** 🟠 | `lib/views/mentorship/mentorship_request_detail_view.dart` | Completion block moved outside the `status == pending` branch — "Mark as Completed" (accepted) and completion info (completed) were dead code; now reachable |
+| **F5** 🟠 | `lib/services/firestore/portfolio_service.dart`, `lib/providers/portfolio_provider.dart` | `savePortfolio` now writes per-section dotted-path diffs (`portfolio.skills`, `portfolio.projects`, …) via new `previous` param; provider passes `previous` — sibling/remote edits no longer clobbered |
+| **F6** 🟠 | `lib/providers/portfolio_provider.dart` | L4: uid-based `_lastUid` guard in `initWithUser`; L5: `_isDisposed` guards in `refresh`/`uploadResume`/`deleteResume` — no `notifyListeners` after logout |
+| **F7** 🟡 | `firestore.rules` | Notifications create rule tightened from `isAuthenticated()` → `isOwner(userId)`; system notifications are Admin SDK writes (bypass rules) so nothing breaks |
+| **F8** 🟡 | `lib/services/firestore/portfolio_service.dart`, `lib/services/storage/storage_service.dart` | Removed dead `updateResumeMetadata`/`deletePortfolio`; slimmed `ResumeUploadResult` (dropped unused `version`/`toMetadataMap` + unused import) |
+| **F9** 🟡 | `lib/services/firestore/portfolio_service.dart` | `getPortfolio` rethrows real errors — read-only view shows "Failed to load portfolio." instead of a misleading empty state on permission/network failures |
+| **F10** 🔵 | `lib/views/portfolio/projects_manager_screen.dart`, `lib/views/portfolio/experience_manager_screen.dart` | `_formatDuration` guards `end.isBefore(start)` (matches the read-only view's M9 defense) |
+| **F11** 🔵 | `lib/views/portfolio/student_portfolio_screen.dart`, `pubspec.yaml` | `_buildCompletionHeader`/`_buildEducationSection` take `StudentProfile?` instead of `dynamic`; version bumped `5.1.2+3` → `8.4.0+84` |
+
+### Deployment
+
+`firebase deploy --only firestore:rules,firestore:indexes,storage` → **Deploy complete**:
+- `firestore.rules` **compiled successfully** and **released** (F1 + F7 live)
+- `firestore.indexes.json` **deployed** (F3 live — system notifications no longer dropped)
+- 8 pre-existing project indexes not declared locally were left untouched (no `--force`)
+
+### Log Verification
+
+`docs/logs.md` reviewed across 3 launches:
+- Zero unhandled Flutter exceptions
+- Multi-role logins/outs clean under the tightened rules (student/teacher/alumni)
+- Chat flows work (`Started listening to messages …`, `Chat marked as read`)
+- Remaining log noise is emulator/Google-Play-Services chatter only (`Skipped frames`, `GoogleApiManager`, `App Check placeholder`, `WatchStream Target id not found`)
+
+### Validation
+
+- `flutter analyze` → **0 errors** — only pre-existing info-level lints (flat from recent baseline)
+- `flutter test` → **45/45 pass**
+- (2 verify-email navigation tests flaked on first run with an off-screen-tap warning and passed on immediate re-run — pre-existing test robustness issue, unrelated to these changes)
+
+---
+
 ## Version Changelog
 
 | Version | Date | Description |
 |---------|------|-------------|
-| v8.3.1 | Current | First-login data load retry — Firestore warm-up fix |
+| v8.4.6 | Current | Final audit fixes (F1–F12): role immutability, chat route, notifications index, mentorship completion, per-section saves, provider guards, dead code, error/empty UX, date guards, typed params |
+| v8.4.5 | Previous | Student Resume Portfolio bugfix (C1/H1–H5/M1–M13/L1–L7) |
+| v8.4 | Previous | Student Resume Portfolio |
+| v8.3.1 | Previous | First-login data load retry — Firestore warm-up fix |
 | v8.3 | Previous | Codebase architecture documentation + Firestore demo data seeder |
 | v8.2.2 | Previous | Layout fix + Data Pipeline Investigation |
 | v8.2.1 | Previous | Data pipeline fix — corrected engagement path, fixed misleading metric labels |

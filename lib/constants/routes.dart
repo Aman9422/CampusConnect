@@ -46,3 +46,13 @@ const passwordResetRoute = '/password-reset';
 const chatsListRoute = '/chats';
 const chatRoute = '/chat';
 const chatDetailRoute = '/chat-detail';
+
+// v8.4: Student Resume Portfolio routes
+const studentPortfolioRoute = '/student-portfolio';
+const editPortfolioRoute = '/edit-portfolio';
+const projectsManagerRoute = '/portfolio/projects';
+const certificationsManagerRoute = '/portfolio/certifications';
+const experienceManagerRoute = '/portfolio/experience';
+const achievementsManagerRoute = '/portfolio/achievements';
+const resumeUploadRoute = '/portfolio/resume-upload';
+const portfolioReadOnlyRoute = '/portfolio/readonly';

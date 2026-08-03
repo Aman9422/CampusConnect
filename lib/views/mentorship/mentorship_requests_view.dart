@@ -10,7 +10,15 @@ import 'package:campusconnect/views/widgets/initials_avatar.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-/// MentorshipRequestsView - Student can view their mentorship requests
+/// MentorshipRequestsView — shared mentorship list used by students and alumni.
+///
+/// Role-aware:
+/// - **Student**: shows requests the student sent to alumni, with the
+///   "+ Request Mentorship" action (empty state CTA → alumni directory).
+/// - **Alumni**: shows requests students sent to them (all statuses), with
+///   Accept/Decline buttons on pending ones, and NO "request" affordance —
+///   alumni are the mentors, not the requester. Card headers show the
+///   requesting student instead of the alumni's own name.
 class MentorshipRequestsView extends StatefulWidget {
   const MentorshipRequestsView({super.key});
 
@@ -39,6 +47,9 @@ class _MentorshipRequestsViewState extends State<MentorshipRequestsView> {
     }
   }
 
+  bool get _isAlumni =>
+      context.read<RoleProvider>().userRole == UserRole.alumni;
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -58,11 +69,15 @@ class _MentorshipRequestsViewState extends State<MentorshipRequestsView> {
         backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
         elevation: 0,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.add_rounded),
-            onPressed: _createNewRequest,
-            tooltip: 'Request Mentorship',
-          ),
+          // Only students request mentorship — alumni receive requests and
+          // should not get a "Request Mentorship" action (that routes to the
+          // alumni directory, which makes no sense for an alumni).
+          if (!_isAlumni)
+            IconButton(
+              icon: const Icon(Icons.add_rounded),
+              onPressed: _createNewRequest,
+              tooltip: 'Request Mentorship',
+            ),
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             onPressed: _refreshRequests,
@@ -120,6 +135,16 @@ class _MentorshipRequestsViewState extends State<MentorshipRequestsView> {
     final requests = mentorshipProvider.requests;
 
     if (requests == null || requests.isEmpty) {
+      // Alumni are the mentors — they never "request" mentorship, so the
+      // empty state only shows the request CTA for students.
+      if (_isAlumni) {
+        return const EmptyStateWidget(
+          icon: Icons.school_outlined,
+          title: 'No mentorship requests yet',
+          subtitle: 'When students request your mentorship, their requests '
+              'will appear here for you to review.',
+        );
+      }
       return EmptyStateWidget(
         icon: Icons.school_outlined,
         title: 'No mentorship requests yet',
@@ -151,6 +176,15 @@ class _MentorshipRequestsViewState extends State<MentorshipRequestsView> {
   }
 
   Widget _buildRequestCard(MentorshipRequest request, bool isDark) {
+    // Alumni view the requests students sent to them, so the header must show
+    // the requesting STUDENT. Students view the requests they sent, so the
+    // header shows the alumni they asked.
+    final isAlumni = _isAlumni;
+    final headerName = isAlumni ? request.studentName : request.alumniName;
+    final headerSubtitle = isAlumni
+        ? request.studentEmail
+        : (request.alumniCompany ?? request.alumniJobRole);
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
@@ -165,25 +199,25 @@ class _MentorshipRequestsViewState extends State<MentorshipRequestsView> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header with alumni info and status
+            // Header with requesting profile info and status
             Row(
               children: [
-                InitialsAvatar(name: request.alumniName, size: 40),
+                InitialsAvatar(name: headerName, size: 40),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        request.alumniName,
+                        headerName,
                         style: AppTheme.titleSmall.copyWith(
                           fontWeight: FontWeight.w600,
                           color: isDark ? Colors.white : AppTheme.gray900,
                         ),
                       ),
-                      if (request.alumniCompany != null)
+                      if (headerSubtitle != null && headerSubtitle.isNotEmpty)
                         Text(
-                          request.alumniCompany!,
+                          headerSubtitle,
                           style: AppTheme.caption.copyWith(
                             color: isDark ? AppTheme.gray400 : AppTheme.gray600,
                           ),

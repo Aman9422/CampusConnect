@@ -1,4 +1,3 @@
-import 'package:campusconnect/constants/routes.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:flutter/material.dart';
@@ -58,9 +57,14 @@ class _VerifyEmailViewState extends State<VerifyEmailView>
     } catch (_) {
       // User may already be signed out — AuthGuard will handle the state
     }
-    // Clear navigation stack to login (no longer uses fragile popUntil)
+    // Pop back to the root (AuthGuard). Do NOT push another login route on
+    // top of it: AuthGuard's home widget already renders LoginView while
+    // signed out. Pushing a second LoginView leaves a stale route above
+    // AuthGuard after login, so the successful-login rebuild (profile setup or
+    // dashboard) is hidden behind it forever — exactly the "can't login,
+    // restart lands in profile setup" bug.
     if (mounted) {
-      Navigator.of(context).pushNamedAndRemoveUntil(loginRoute, (_) => false);
+      Navigator.of(context).popUntil((route) => route.isFirst);
     }
   }
 

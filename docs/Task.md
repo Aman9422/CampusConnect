@@ -1,411 +1,406 @@
-Yes. At this stage, adding realistic seed data is the best approach. It will allow you to properly validate the Teacher Dashboard, AI Insights, analytics, placement funnel, engagement metrics, and every chart before your final deployment.
+You are the lead Flutter + Firebase architect for my production-level project called CampusConnect.
 
-Here's a prompt you can use with your coding model:
+IMPORTANT:
+This project already exists. Do NOT redesign the application.
+Do NOT change existing architecture.
+Do NOT break existing features.
 
----
+Current stack:
+- Flutter
+- Firebase Authentication
+- Cloud Firestore
+- Firebase Storage
+- Provider state management
+- Material 3
+- Existing Student, Teacher and Alumni dashboards
+- Existing ATS Resume Review system
+- Existing AI Assistant
+- Existing Firestore models and services
 
-# CampusConnect v8.3 — Firestore Demo Data Seeder
+Current version:
+CampusConnect v8.3
+Completed:
+✔ Teacher Dashboard
+✔ Teacher Analytics
+✔ AI Insights
+✔ Firestore Demo Data Seeder
 
-## Objective
+Now implement ONLY version v8.4.
 
-Create a comprehensive **demo dataset** for CampusConnect so every dashboard (Student, Alumni, Teacher) can be fully tested with realistic data.
+=========================================================
+VERSION 8.4
+Student Resume Portfolio
+=========================================================
 
-This data is **temporary development/demo data only** and will be deleted before production.
+Goal:
 
-Do NOT modify any existing production logic.
+Transform every student profile into a complete professional portfolio.
 
----
+The portfolio should become the foundation for future AI recommendations and mentorship matching.
 
-## Goals
+DO NOT implement AI recommendations yet.
 
-Populate Firestore with realistic interconnected data so that:
+=========================================================
+FEATURES
+=========================================================
 
-* Teacher Dashboard shows meaningful analytics
-* Student Dashboard displays recommendations and engagement
-* Alumni Dashboard displays mentorships and opportunities
-* AI Insights generates useful summaries
-* Resume Analytics has enough data
-* Placement Funnel contains realistic values
-* Department comparison charts work
-* Skill Gap Analysis has sufficient variation
+1. Resume Upload
 
----
+Students can upload a Resume PDF.
 
-# Data Requirements
+Store files inside Firebase Storage.
 
-Create interconnected demo records for:
+Example:
 
-### Students
+resumes/{uid}/resume.pdf
 
-Create **30 students**
+Store metadata in Firestore.
 
-Each student should contain:
+Resume metadata should include:
 
-* uid
-* fullName
-* email
-* role = student
-* department
-* year
-* skills
-* profileStrength
-* createdAt
+- downloadUrl
+- uploadDate
+- lastUpdated
+- version
+- ATS Score
+- parserVersion
 
-Departments should include:
+=========================================================
 
-* CSE
-* AIML
-* IT
-* AIDS
-* ETC
+2. Portfolio Model
 
-Distribute students across departments.
+Create a proper Dart model.
 
----
+Example fields:
 
-### Alumni
+resume
 
-Create **10 alumni**
+skills
 
-Each alumni should contain:
+projects
 
-* uid
-* fullName
-* email
-* company
-* designation
-* yearsExperience
-* skills
-* mentorshipEnabled
-* publicProfile
-* profileStrength
+certifications
 
----
+experience
 
-### Teachers
+education
 
-Create **5 teachers**
+achievements
 
-Include
+socialLinks
 
-* department
-* designation
-* experience
-* profile
+preferences
 
----
+=========================================================
 
-### Resume Reviews
+3. Skills
 
-For every student create
+Allow multiple skills.
 
-3–5 Resume Reviews
+Each skill should include:
 
-Each review should contain
+- name
+- category
+- proficiency
 
-* ATS Score
-* Missing Keywords
-* Suggestions
-* Review Date
-* Improvement Notes
+Proficiency:
 
-Generate realistic ATS values
+Beginner
 
-Example
+Intermediate
 
-45
-58
-67
-71
-84
-91
+Advanced
 
-Include progression so Student Growth charts become meaningful.
+=========================================================
 
----
+4. Projects
 
-### Engagement Summary
+Students can add multiple projects.
 
-For every student create
-
-engagement_summary/summary
-
-Include
-
-* engagementScore
-* profileStrength
-* streak
-* completedActions
-* badges
-
-Use different values.
-
----
-
-### Applications
-
-Create
-
-80–120 application documents
-
-Spread among students.
-
-Each application should contain
-
-* userId
-* placementId
-* appliedAt
-
-Ensure
-
-Applied Students <= Eligible Students
-
-Never count duplicate students incorrectly.
-
-Multiple applications by the same student are allowed.
-
----
-
-### Placements
-
-Create
-
-20 placement drives
-
-Mix
-
-* Active
-* Closed
-* Upcoming
-
-Include
-
-company
+Each project contains:
 
 title
 
-package
+description
 
-deadline
+technologies
 
-isActive
+githubUrl
 
----
+demoUrl
 
-### Opportunities
+startDate
 
-Create
+endDate
 
-15 Alumni Opportunities
+currentlyWorking
 
-Mix
+=========================================================
 
-Internships
+5. Certifications
 
-Jobs
+Store:
 
-Referral Posts
+title
 
-Hackathons
+issuer
 
----
+issueDate
 
-### Mentorship Requests
+credentialId
 
-Create
+credentialUrl
 
-40 mentorship requests
+=========================================================
 
-Mix
+6. Experience
 
-Pending
+Store:
 
-Accepted
+company
 
-Completed
+role
 
-Rejected
+employmentType
 
-Connect students and alumni realistically.
+description
 
----
+startDate
 
-### Recommendations
+endDate
 
-Populate
+currentlyWorking
 
-recommendations
+=========================================================
 
-collection
+7. Education
 
-Include
+Store:
 
-Job Recommendations
+college
 
-Mentor Recommendations
+department
 
-Skill Recommendations
+program
 
-Learning Recommendations
+semester
 
----
+cgpa
 
-### Activity Feed
+graduationYear
 
-Generate
+=========================================================
 
-150+
+8. Social Links
 
-activities
+Store:
 
-Examples
+GitHub
 
-Resume reviewed
+LinkedIn
 
-Profile updated
+Portfolio
 
-Placement applied
+LeetCode
 
-Mentorship accepted
+Codeforces
 
-Badge earned
+HackerRank
 
-Opportunity posted
+=========================================================
 
----
+9. Career Preferences
 
-### Notifications
+Store:
 
-Generate
+preferredRoles
 
-notifications
+preferredLocations
 
-for
+expectedSalary
 
-Students
+remotePreference
+
+relocationPreference
+
+=========================================================
+
+10. Achievements
+
+Allow multiple achievements.
+
+Each achievement contains:
+
+title
+
+description
+
+date
+
+category
+
+=========================================================
+UI
+=========================================================
+
+Create clean Material 3 pages.
+
+Do NOT redesign the app.
+
+Only add:
+
+Student Portfolio Screen
+
+Edit Portfolio Screen
+
+Projects Manager
+
+Certifications Manager
+
+Experience Manager
+
+Resume Upload
+
+Portfolio Preview
+
+Teacher Read-only Portfolio View
+
+Alumni Read-only Portfolio View
+
+Reuse existing design language.
+
+=========================================================
+FIRESTORE
+=========================================================
+
+Use the existing users collection.
+
+Store portfolio under each student document.
+
+Example:
+
+users/{uid}
+
+portfolio
+
+resume
+
+projects
+
+experience
+
+certifications
+
+skills
+
+preferences
+
+links
+
+achievements
+
+Keep everything compatible with the current Firestore structure.
+
+=========================================================
+SERVICES
+=========================================================
+
+Create:
+
+PortfolioService
+
+StorageService for Resume Upload
+
+PortfolioProvider
+
+PortfolioModel
+
+ProjectModel
+
+CertificationModel
+
+ExperienceModel
+
+AchievementModel
+
+Do not duplicate existing services.
+
+=========================================================
+VALIDATION
+=========================================================
+
+Validate:
+
+Required fields
+
+PDF upload only
+
+Maximum resume size
+
+Valid URLs
+
+Prevent duplicate skills
+
+Prevent empty projects
+
+=========================================================
+SECURITY
+=========================================================
+
+Update Firestore Rules.
+
+Only owner can edit portfolio.
 
 Teachers
 
 Alumni
 
-Use different notification types.
+Admin
 
----
+have read-only access.
 
-## Data Quality Rules
+=========================================================
+CODE QUALITY
+=========================================================
 
-Do NOT generate identical users.
+Follow existing architecture.
 
-Every student should have
+Use Provider.
 
-different
+Keep code modular.
 
-skills
+Avoid duplicate code.
 
-ATS scores
+Add documentation.
 
-profile strength
+Maintain production-quality code.
 
-engagement score
+=========================================================
+OUT OF SCOPE
+=========================================================
 
-resume history
+Do NOT implement:
 
-applications
+AI Recommendation Engine
 
-mentor
+Mentorship AI
 
-recommendations
+Resume Parsing
 
-Departments should have different average ATS scores.
+Resume History
 
-Some students should intentionally be
+Resume Versioning
 
-High performers
+Notification System
 
-Average performers
+Admin Dashboard
 
-At-risk students
+Analytics Changes
 
-Inactive students
+Those belong to future versions.
 
-Highly engaged students
+=========================================================
+EXPECTED OUTPUT
+=========================================================
 
-This allows AI analytics to work correctly.
-
----
-
-## Validation Targets
-
-After seeding:
-
-Teacher Dashboard should show
-
-* Total Students
-* Department Comparison
-* Resume Analytics
-* Skill Gap Analysis
-* Placement Funnel
-* Student Growth
-* At-Risk Students
-* AI Summary
-
-without empty states.
-
-Student Dashboard should show
-
-* Recommendations
-* Badges
-* Engagement
-* AI Chat History
-* Resume History
-
-Alumni Dashboard should show
-
-* Mentorship Queue
-* Opportunities
-* Student Requests
-* Impact Metrics
-
----
-
-## Safety
-
-* Create the seed script under a separate folder such as:
-
-```
-scripts/seed_firestore/
-```
-
-or
-
-```
-tools/demo_seed/
-```
-
-* Never execute automatically.
-* Run only when explicitly invoked.
-* Include a matching cleanup script that deletes all seeded demo data.
-* Prefix every demo document with a flag like:
-
-```
-isDemoData: true
-```
-
-or
-
-```
-environment: "demo"
-```
-
-so cleanup is safe and production data is never accidentally removed.
-
----
-
-## Deliverables
-
-1. Firebase Admin Node.js seed script
-2. Cleanup script
-3. README explaining how to run both
-4. Progress logging during seeding
-5. Validation summary showing how many documents were created in each collection
-6. Ensure the entire script is idempotent (safe to rerun without creating duplicate records).
+Implement the complete CampusConnect v8.4 Student Resume Portfolio feature while preserving all existing functionality.

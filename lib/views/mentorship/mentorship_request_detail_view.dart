@@ -212,7 +212,40 @@ class _MentorshipRequestDetailViewState
               ),
             ),
 
-            const SizedBox(height: 20),
+            // v8.4: Alumni can view the student's portfolio read-only
+            Consumer<RoleProvider>(
+              builder: (context, roleProvider, child) {
+                if (roleProvider.userRole != UserRole.alumni) {
+                  return const SizedBox.shrink();
+                }
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 20),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.pushNamed(
+                          context,
+                          portfolioReadOnlyRoute,
+                          arguments: request.studentId,
+                        );
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primaryBlue,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      icon: const Icon(Icons.workspace_premium_outlined,
+                          size: 20),
+                      label: const Text('View Student Portfolio'),
+                    ),
+                  ),
+                );
+              },
+            ),
 
             // Description
             Container(
@@ -389,7 +422,15 @@ class _MentorshipRequestDetailViewState
                 },
               ),
 
-              // v7.3: Completion section
+            ],
+
+            // v8.4 F4: Completion section — moved OUTSIDE the `pending` block.
+            // Previously this was nested inside `status == pending`, which made
+            // BOTH the "Mark as Completed" button (shown when status is
+            // `accepted`) AND the completion info (shown when status is
+            // `completed`) unreachable — the entire completion flow was dead
+            // code. Now it renders whenever the request is accepted/completed.
+            if (request.isAccepted || request.isCompleted) ...[
               const SizedBox(height: 20),
               // Mark as completed button for accepted mentorships
               if (request.isAccepted && !request.isCompleted)

@@ -2,12 +2,21 @@ import 'package:campusconnect/constants/routes.dart';
 import 'package:campusconnect/models/recommendation.dart';
 import 'package:campusconnect/models/student_profile.dart';
 import 'package:campusconnect/providers/activity_feed_provider.dart';
+import 'package:campusconnect/providers/ai_chat_provider.dart';
+import 'package:campusconnect/providers/ai_usage_provider.dart';
+import 'package:campusconnect/providers/alumni_directory_provider.dart';
 import 'package:campusconnect/providers/chat_provider.dart';
 import 'package:campusconnect/providers/engagement_provider.dart';
 import 'package:campusconnect/providers/mentorship_provider.dart';
+import 'package:campusconnect/providers/notifications_provider.dart';
 import 'package:campusconnect/providers/opportunity_provider.dart';
+import 'package:campusconnect/providers/placements_provider.dart';
+import 'package:campusconnect/providers/portfolio_provider.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
 import 'package:campusconnect/providers/recommendation_provider.dart';
+import 'package:campusconnect/providers/resume_review_provider.dart';
+import 'package:campusconnect/providers/role_provider.dart';
+import 'package:campusconnect/providers/teacher_analytics_provider.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/views/widgets/chat_badge.dart';
@@ -174,6 +183,26 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
               case 'logout':
                 final shouldLogout = await _showLogOutDialog(context);
                 if (shouldLogout && context.mounted) {
+                  // CRITICAL: Reset ALL stream-based providers BEFORE logout
+                  // to prevent Firestore permission errors from firing on
+                  // active listeners after signOut() revokes the token.
+                  // Mirrors StudentDashboardView / TeacherDashboardView.
+                  context.read<ProfileProvider>().reset();
+                  context.read<PlacementsProvider>().reset();
+                  context.read<AIUsageProvider>().reset();
+                  context.read<ResumeReviewProvider>().reset();
+                  context.read<RoleProvider>().reset();
+                  context.read<MentorshipProvider>().reset();
+                  context.read<OpportunityProvider>().reset();
+                  context.read<AlumniDirectoryProvider>().reset();
+                  context.read<RecommendationProvider>().reset();
+                  context.read<EngagementProvider>().reset();
+                  context.read<AIChatProvider>().reset();
+                  context.read<ActivityFeedProvider>().reset();
+                  context.read<TeacherAnalyticsProvider>().reset();
+                  context.read<ChatProvider>().reset();
+                  context.read<NotificationsProvider>().reset();
+                  context.read<PortfolioProvider>().reset();
                   try {
                     await AuthService.firebase().logOut();
                   } catch (_) {}

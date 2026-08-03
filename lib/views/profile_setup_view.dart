@@ -1,7 +1,6 @@
 import 'package:campusconnect/enums/user_role.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
 import 'package:campusconnect/providers/role_provider.dart';
-import 'package:campusconnect/constants/routes.dart';
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -64,8 +63,9 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
           ? ''
           : profile!.academic.cgpa.toString(),
     );
-    _selectedYear =
-        (profile?.academic.year ?? 0) == 0 ? 1 : profile!.academic.year;
+    _selectedYear = (profile?.academic.year ?? 0) == 0
+        ? 1
+        : profile!.academic.year;
     _userEmail = profile?.personal.email ?? '';
 
     // v7.1 fields
@@ -183,16 +183,20 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
 
       if (!mounted) return;
       setState(() => _isSaving = false);
-      // Consumer2 in AuthGuard will auto-rebuild after markProfileCompleted
-      // triggers notifyListeners. Navigate to correct dashboard route
-      final dashboardRoute = role != null
-          ? switch (role) {
-              UserRole.student => studentDashboardRoute,
-              UserRole.alumni => alumniDashboardRoute,
-              UserRole.teacher => teacherDashboardRoute,
-            }
-          : studentDashboardRoute;
-      Navigator.of(context).pushNamedAndRemoveUntil(dashboardRoute, (_) => false);
+      // C4 fix: do NOT push a dashboard route here. ProfileSetupView is
+      // rendered by AuthGuard's home widget, and markProfileCompleted() +
+      // setRole() above already notified both providers — AuthGuard's
+      // Consumer2 rebuilds and swaps this view for the role-aware dashboard
+      // on the next frame. The old
+      // pushNamedAndRemoveUntil(dashboardRoute, (_) => false) removed every
+      // route below — including the root AuthGuard route — killing the
+      // authStateChanges StreamBuilder so logout/relogin stopped working
+      // until restart (same root cause as the C4 login-stuck bug in
+      // RegisterView).
+      // Pop to the root defensively: a no-op when this view is the home
+      // content, and safely removes the pushed route when this view was
+      // opened on top of a dashboard via pushNamed(profileSetupRoute).
+      Navigator.of(context).popUntil((route) => route.isFirst);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -211,7 +215,9 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
     final role = context.watch<RoleProvider>().role;
 
     return Scaffold(
-      backgroundColor: isDark ? AppTheme.darkBackground : const Color(0xFFF8FAFC),
+      backgroundColor: isDark
+          ? AppTheme.darkBackground
+          : const Color(0xFFF8FAFC),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
@@ -247,7 +253,9 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
                     vertical: 6,
                   ),
                   decoration: BoxDecoration(
-                    color: AppTheme.primaryBlue.withValues(alpha: isDark ? 0.15 : 0.08),
+                    color: AppTheme.primaryBlue.withValues(
+                      alpha: isDark ? 0.15 : 0.08,
+                    ),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Row(
@@ -405,10 +413,7 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
                       // Role-specific fields
                       if (role != null) ...[
                         const SizedBox(height: AppTheme.space32),
-                        _sectionLabel(
-                          '${role.displayName} Details',
-                          isDark,
-                        ),
+                        _sectionLabel('${role.displayName} Details', isDark),
                         const SizedBox(height: AppTheme.space16),
                         ..._buildRoleFields(role, isDark),
                       ],
@@ -438,8 +443,9 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
                             width: 20,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              valueColor:
-                                  AlwaysStoppedAnimation<Color>(Colors.white),
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.white,
+                              ),
                             ),
                           )
                         : Text(
@@ -684,7 +690,11 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
           ),
           child: Row(
             children: [
-              Icon(icon, size: 20, color: isDark ? AppTheme.gray400 : AppTheme.gray500),
+              Icon(
+                icon,
+                size: 20,
+                color: isDark ? AppTheme.gray400 : AppTheme.gray500,
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(

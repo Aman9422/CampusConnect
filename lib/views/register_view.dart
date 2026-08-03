@@ -119,8 +119,12 @@ class _RegisterViewState extends State<RegisterView>
         // Don't block registration — user can resend from VerifyEmailView
       }
       if (!mounted) return;
-      // Clear navigation stack back to AuthGuard (no longer uses fragile popUntil)
-      Navigator.of(context).pushNamedAndRemoveUntil(verifyEmailRoute, (_) => false);
+      // Replace the register route with the verify screen, keeping the root
+      // AuthGuard route alive. pushNamedAndRemoveUntil(..., (_) => false) would
+      // tear down AuthGuard too, and without the home widget no one listens to
+      // authStateChanges — a later successful login would have no effect until
+      // the app is restarted (issue C4).
+      Navigator.of(context).pushReplacementNamed(verifyEmailRoute);
     } on WeakPasswordAuthException {
       if (!mounted) return;
       await showErrorDialog(

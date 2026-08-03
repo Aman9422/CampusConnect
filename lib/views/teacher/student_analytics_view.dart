@@ -1,3 +1,4 @@
+import 'package:campusconnect/constants/routes.dart';
 import 'package:campusconnect/models/placement.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/providers/resume_review_provider.dart';
@@ -678,6 +679,7 @@ class _StudentAnalyticsViewState extends State<StudentAnalyticsView> {
           final score = student['latestScore'] as int;
           final name = student['studentName'] as String;
           final reviewCount = student['reviewCount'] as int;
+          final studentId = student['studentId'] as String? ?? '';
 
           return Container(
             margin: const EdgeInsets.only(bottom: 8),
@@ -759,6 +761,24 @@ class _StudentAnalyticsViewState extends State<StudentAnalyticsView> {
                     ),
                   ),
                 ),
+
+                // v8.4: View student portfolio (read-only)
+                if (studentId.isNotEmpty)
+                  IconButton(
+                    icon: Icon(
+                      Icons.visibility_outlined,
+                      size: 20,
+                      color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+                    ),
+                    tooltip: 'View Portfolio',
+                    onPressed: () {
+                      Navigator.pushNamed(
+                        context,
+                        portfolioReadOnlyRoute,
+                        arguments: studentId,
+                      );
+                    },
+                  ),
               ],
             ),
           );

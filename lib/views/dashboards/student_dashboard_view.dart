@@ -13,6 +13,7 @@ import 'package:campusconnect/providers/mentorship_provider.dart';
 import 'package:campusconnect/providers/notifications_provider.dart';
 import 'package:campusconnect/providers/opportunity_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
+import 'package:campusconnect/providers/portfolio_provider.dart'; // v8.4
 import 'package:campusconnect/providers/profile_provider.dart';
 import 'package:campusconnect/providers/recommendation_provider.dart';
 import 'package:campusconnect/providers/resume_review_provider.dart';
@@ -161,6 +162,7 @@ class _StudentDashboardTab extends StatelessWidget {
                     context.read<OpportunityProvider>().reset();
                     context.read<AlumniDirectoryProvider>().reset();
                     context.read<TeacherAnalyticsProvider>().reset();
+                    context.read<PortfolioProvider>().reset(); // v8.4
                     try {
                       await AuthService.firebase().logOut();
                     } catch (_) {
@@ -317,6 +319,17 @@ class _StudentDashboardTab extends StatelessWidget {
                 subtitle: 'Get ATS score & improvement tips',
                 isDark: isDark,
                 onTap: () => Navigator.pushNamed(context, resumeReviewRoute),
+              ),
+              _buildDivider(isDark),
+              // v8.4: Static shortcut: My Portfolio
+              _buildStaticTodayItem(
+                context: context,
+                icon: Icons.workspace_premium_outlined,
+                iconColor: AppTheme.primaryBlue,
+                title: 'My Portfolio',
+                subtitle: 'Build & view your professional portfolio',
+                isDark: isDark,
+                onTap: () => Navigator.pushNamed(context, studentPortfolioRoute),
               ),
             ],
           ),

@@ -4,6 +4,7 @@ import 'package:campusconnect/models/student_profile.dart';
 import 'package:campusconnect/providers/ai_usage_provider.dart';
 import 'package:campusconnect/providers/notifications_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
+import 'package:campusconnect/providers/portfolio_provider.dart'; // v8.4
 import 'package:campusconnect/providers/profile_provider.dart';
 import 'package:campusconnect/providers/recommendation_provider.dart';
 import 'package:campusconnect/providers/resume_review_provider.dart';
@@ -16,6 +17,7 @@ import 'package:campusconnect/views/profile/alumni_profile_sections.dart';
 import 'package:campusconnect/views/widgets/initials_avatar.dart';
 import 'package:campusconnect/views/widgets/notification_badge.dart';
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 
 /// ProfileView - Extracted from monolithic NotesView
@@ -293,6 +295,19 @@ class ProfileView extends StatelessWidget {
                     Navigator.of(context).pushNamed('/edit-profile');
                   },
                 ),
+                // v8.4: My Portfolio entry — students only. Teachers fall into
+                // this (non-alumni) branch and must not see an editable
+                // portfolio tile (issue M5).
+                if (roleProvider.userRole == UserRole.student) ...[
+                  _ProfileMenuCard(
+                    icon: Icons.workspace_premium_outlined,
+                    title: 'My Portfolio',
+                    subtitle: 'Resume, projects, skills & career preferences',
+                    onTap: () {
+                      Navigator.of(context).pushNamed(studentPortfolioRoute);
+                    },
+                  ),
+                ],
                 const SizedBox(height: AppTheme.space24),
 
                 // App Info
@@ -311,13 +326,8 @@ class ProfileView extends StatelessWidget {
                           color: AppTheme.gray600,
                         ),
                       ),
-                      Text(
-                        'v7.3.0',
-                        style: AppTheme.bodySmall.copyWith(
-                          color: AppTheme.gray600,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
+                      // M13: dynamic version label instead of hardcoded v7.x
+                      const _AppVersionText(),
                     ],
                   ),
                 ),
@@ -474,7 +484,7 @@ class ProfileView extends StatelessWidget {
               onToggle: (value) async {
                 final updatedProfile = p?.copyWith(
                   isPublicProfile: value,
-                  publicProfileKey: p?.publicProfileKey,
+                  publicProfileKey: p.publicProfileKey,
                 );
                 if (updatedProfile != null) {
                   await profileProvider.updateProfile(updatedProfile);
@@ -508,13 +518,8 @@ class ProfileView extends StatelessWidget {
                     'App Version',
                     style: AppTheme.bodySmall.copyWith(color: AppTheme.gray600),
                   ),
-                  Text(
-                    'v7.5.0',
-                    style: AppTheme.bodySmall.copyWith(
-                      color: AppTheme.gray600,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+                  // M13: dynamic version label instead of hardcoded v7.x
+                  const _AppVersionText(),
                 ],
               ),
             ),
@@ -559,6 +564,7 @@ class ProfileView extends StatelessWidget {
       context.read<RecommendationProvider>().reset(); // v7.4
       context.read<EngagementProvider>().reset(); // v7.4
       context.read<AIChatProvider>().reset(); // v7.4
+      context.read<PortfolioProvider>().reset(); // v8.4
       try {
         await AuthService.firebase().logOut();
       } catch (_) {
@@ -655,6 +661,38 @@ class _ProfileMenuCard extends StatelessWidget {
         ),
         onTap: onTap,
       ),
+    );
+  }
+}
+
+/// M13: Renders the real app version from package_info_plus instead of a
+/// hardcoded stale label.
+class _AppVersionText extends StatelessWidget {
+  const _AppVersionText();
+
+  Future<String> _loadVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      return 'v${info.version}';
+    } catch (_) {
+      return 'v8.4';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<String>(
+      future: _loadVersion(),
+      initialData: 'v8.4',
+      builder: (context, snapshot) {
+        return Text(
+          snapshot.data ?? 'v8.4',
+          style: AppTheme.bodySmall.copyWith(
+            color: AppTheme.gray600,
+            fontWeight: FontWeight.w600,
+          ),
+        );
+      },
     );
   }
 }

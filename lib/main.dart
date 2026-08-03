@@ -4,6 +4,7 @@ import 'package:campusconnect/enums/user_role.dart';
 import 'package:campusconnect/firebase_options.dart';
 import 'package:campusconnect/providers/ai_usage_provider.dart';
 import 'package:campusconnect/providers/layout_provider.dart';
+import 'package:campusconnect/providers/portfolio_provider.dart'; // v8.4
 import 'package:campusconnect/providers/notifications_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
@@ -76,6 +77,15 @@ import 'package:campusconnect/views/placements/placements_list_view.dart';
 import 'package:campusconnect/views/chat/ai_chat_view.dart';
 import 'package:campusconnect/views/profile/profile_view.dart'
     as extracted_profile;
+// v8.4: Student resume portfolio views
+import 'package:campusconnect/views/portfolio/student_portfolio_screen.dart';
+import 'package:campusconnect/views/portfolio/edit_portfolio_screen.dart';
+import 'package:campusconnect/views/portfolio/projects_manager_screen.dart';
+import 'package:campusconnect/views/portfolio/certifications_manager_screen.dart';
+import 'package:campusconnect/views/portfolio/experience_manager_screen.dart';
+import 'package:campusconnect/views/portfolio/achievements_manager_screen.dart';
+import 'package:campusconnect/views/portfolio/resume_upload_screen.dart';
+import 'package:campusconnect/views/portfolio/portfolio_read_only_view.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -106,6 +116,8 @@ class MyApp extends StatelessWidget {
           create: (_) => AIUsageProvider(aiService: AIService.instance()),
         ),
         ChangeNotifierProvider(create: (_) => ProfileProvider()),
+        // v8.4: Student resume portfolio provider
+        ChangeNotifierProvider(create: (_) => PortfolioProvider()),
         // V6.4: Notifications provider
         ChangeNotifierProvider(
           create: (_) =>
@@ -217,7 +229,7 @@ class MyApp extends StatelessWidget {
                 );
               }
               // v7.3: Handle chat route with chatId argument
-              if (settings.name == chatRoute) {
+              if (settings.name == chatRoute || settings.name == chatDetailRoute) {
                 final args = settings.arguments;
                 final chatId = args is String ? args : null;
                 if (chatId == null || chatId.isEmpty) {
@@ -293,6 +305,21 @@ class MyApp extends StatelessWidget {
                   const extracted_profile.ProfileView(),
               // v7.6: Password reset route
               passwordResetRoute: (context) => const PasswordResetView(),
+              // v8.4: Student resume portfolio routes
+              studentPortfolioRoute: (context) =>
+                  const StudentPortfolioScreen(),
+              editPortfolioRoute: (context) => const EditPortfolioScreen(),
+              projectsManagerRoute: (context) =>
+                  const ProjectsManagerScreen(),
+              certificationsManagerRoute: (context) =>
+                  const CertificationsManagerScreen(),
+              experienceManagerRoute: (context) =>
+                  const ExperienceManagerScreen(),
+              achievementsManagerRoute: (context) =>
+                  const AchievementsManagerScreen(),
+              resumeUploadRoute: (context) => const ResumeUploadScreen(),
+              portfolioReadOnlyRoute: (context) =>
+                  const PortfolioReadOnlyView(),
             },
           );
         },
@@ -436,6 +463,8 @@ class _AuthGuardState extends State<AuthGuard> {
                         .read<RecommendationProvider>();
                     final engagementProvider = context
                         .read<EngagementProvider>();
+                    final portfolioProvider = context
+                        .read<PortfolioProvider>(); // v8.4
 
                     final roleString = roleProvider.role?.name ?? 'student';
 
@@ -457,6 +486,10 @@ class _AuthGuardState extends State<AuthGuard> {
                         user.id,
                         profileProvider.profile!,
                       );
+                    }
+                    // v8.4: Initialize portfolio for students (loads empty portfolio for other roles)
+                    if (!portfolioProvider.isInitialized) {
+                      portfolioProvider.initWithUser(user.id);
                     }
                   });
                 }
@@ -506,6 +539,8 @@ class _AuthGuardState extends State<AuthGuard> {
               context.read<RecommendationProvider>().reset();
               context.read<EngagementProvider>().reset();
               context.read<AIChatProvider>().reset();
+              // v8.4: Reset portfolio provider
+              context.read<PortfolioProvider>().reset();
             });
           }
 

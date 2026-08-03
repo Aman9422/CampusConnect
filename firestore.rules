@@ -13,8 +13,11 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    // M3: Guarded with exists() — get() throws (denying the request) when the
+    // requesting user's doc is missing or lacks a role field.
     function userRole() {
-      return isAuthenticated()
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid))
         ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
         : null;
     }
@@ -28,14 +31,50 @@ service cloud.firestore {
       return isAuthenticated() && userRole() == 'teacher';
     }
 
+    // F1 (security): Users may NEVER change their `role` once it has been
+    // persisted on their document. Role is chosen once at registration and is
+    // effectively immutable to the client afterwards — role changes must go
+    // through Cloud Functions/admin (see register_view.dart saveRole and
+    // profile_setup_view.dart _completeSetup for the legitimate paths).
+    //
+    // A write is allowed when:
+    //   - the document does not exist yet (first-time role persistence during
+    //     registration), or
+    //   - the existing document has no `role` field yet (fallback path where
+    //     the role was held only in-memory when currentUser was transiently
+    //     null post-registration), or
+    //   - the role value is unchanged.
+    //
+    // This closes the privilege-escalation hole where a signed-in student
+    // could set their own `role` to 'teacher'/'alumni' and thereby gain read
+    // access to every user document (PII), every resume and all analytics.
+    function canWriteRole(userId) {
+      return !exists(/databases/$(database)/documents/users/$(userId))
+          || !('role' in resource.data)
+          || !('role' in request.resource.data)
+          || resource.data.role == request.resource.data.role;
+    }
+
     // ===============================================
     // USERS COLLECTION (with subcollections)
     // ===============================================
     match /users/{userId} {
-      // Users can always read/write their own profile
-      allow read, write: if isOwner(userId);
+      // Users can always read/write their own profile, except their
+      // immutable `role` field (canWriteRole guard — see F1 above).
+      allow read, write: if isOwner(userId) && canWriteRole(userId);
       // v8.1: Teachers can read any user profile for analytics
       allow read: if isTeacher();
+      // v8.4: Alumni read-only access to student portfolios
+      // (read-only — never write) so alumni can view a student's portfolio
+      // from a mentorship request context.
+      // M2 (privacy note): the portfolio is a nested map on the user
+      // document, so this grants alumni read access to the WHOLE student doc
+      // (phone, email, academic data) — not just the portfolio. This is a
+      // deliberate trade-off of the nested-map design; moving the portfolio
+      // to a subcollection would be an architecture change (out of scope).
+      allow read: if isAuthenticated() &&
+        userRole() == 'alumni' &&
+        resource.data.role == 'student';
       // v7.2: Alumni directory - authenticated users can read alumni profiles
       allow read: if isAuthenticated() &&
         resource.data.role == 'alumni' &&
@@ -43,9 +82,13 @@ service cloud.firestore {
       
       // Notifications subcollection
       // v7.3: Enhanced - allow system notifications creation
+      // F7 (security): creation is owner-only. System notifications
+      // (placement status changes, announcements, etc.) are written by the
+      // Cloud Functions Admin SDK, which bypasses security rules entirely —
+      // so tightening this does not break system notifications.
       match /notifications/{notificationId} {
         allow read, update: if isOwner(userId);
-        allow create: if isAuthenticated(); // System can create notifications
+        allow create: if isOwner(userId);
       }
       
       // v6.5: AI Insights (read-only, Cloud Functions write)
