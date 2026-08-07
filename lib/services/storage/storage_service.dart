@@ -3,12 +3,13 @@ import 'dart:io';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 
-/// CampusConnect v8.4 — StorageService
+/// CampusConnect v8.4.1 — StorageService
 ///
 /// Handles resume PDF upload/delete in Firebase Storage.
 ///
-/// Files are stored at `resumes/{uid}/resume.pdf`. A new upload always
-/// overwrites the existing file (resume versioning is out of scope for v8.4).
+/// Files are stored at `resumes/{uid}/latest.pdf` (docs/Task.md Phase 1).
+/// A new upload always overwrites the existing file (resume versioning is out
+/// of scope for v8.4; the future `history/` layout is a sibling folder).
 class StorageService {
   final FirebaseStorage _storage;
 
@@ -21,10 +22,17 @@ class StorageService {
   /// Maximum accepted resume size — 5 MB.
   static const int maxResumeBytes = 5 * 1024 * 1024;
 
-  static const String resumeFileName = 'resume.pdf';
+  /// v8.4.1: storage layout follows the spec — `resumes/{uid}/latest.pdf`.
+  static const String resumeFileName = 'latest.pdf';
 
-  /// v8.4 storage layout: `resumes/{uid}/resume.pdf`
+  static const String resumeMimeType = 'application/pdf';
+
+  /// v8.4 storage layout: `resumes/{uid}/latest.pdf`
   String resumePath(String uid) => 'resumes/$uid/$resumeFileName';
+
+  /// Future-ready version-history path: `resumes/{uid}/history/v{n}.pdf`.
+  String resumeHistoryPath(String uid, int version) =>
+      'resumes/$uid/history/v$version.pdf';
 
   /// Validates that a picked file is a PDF and within the size limit.
   /// Returns an error message, or null when the file is valid.
@@ -44,7 +52,7 @@ class StorageService {
     return null;
   }
 
-  /// Uploads a resume PDF to `resumes/{uid}/resume.pdf`.
+  /// Uploads a resume PDF to `resumes/{uid}/latest.pdf`.
   ///
   /// On web, pass `bytes` (from `PlatformFile.bytes`). On mobile/desktop
   /// pass `filePath` of the picked file. Returns the upload result metadata.
@@ -63,9 +71,10 @@ class StorageService {
       throw StorageServiceException(validationError);
     }
 
-    final ref = _storage.ref(resumePath(uid));
+    final path = resumePath(uid);
+    final ref = _storage.ref(path);
     final metadata = SettableMetadata(
-      contentType: 'application/pdf',
+      contentType: resumeMimeType,
       customMetadata: {'uid': uid},
     );
 
@@ -79,20 +88,23 @@ class StorageService {
         }
         await ref.putData(data, metadata);
       } else {
-        final path = filePath;
-        if (path == null || path.isEmpty) {
+        final pickedPath = filePath;
+        if (pickedPath == null || pickedPath.isEmpty) {
           throw const StorageServiceException(
             'Could not read the selected file.',
           );
         }
-        await ref.putFile(File(path), metadata);
+        await ref.putFile(File(pickedPath), metadata);
       }
 
       final downloadUrl = await ref.getDownloadURL();
       final now = DateTime.now();
       return ResumeUploadResult(
         downloadUrl: downloadUrl,
-        fileName: resumeFileName,
+        storagePath: path,
+        fileName: fileName, // T1: preserve the original picked name.
+        fileSize: fileLength,
+        mimeType: resumeMimeType,
         uploadDate: now,
         lastUpdated: now,
         parserVersion: null,
@@ -119,19 +131,62 @@ class StorageService {
       rethrow;
     }
   }
+
+  /// Resolves a download URL from an arbitrary storage [path].
+  ///
+  /// Used by [ResumeService.getResumeUrl] for documents that only stored a
+  /// storage path. Throws on failure so callers can surface a real error.
+  Future<String> downloadUrlFromPath(String path) async {
+    try {
+      return await _storage.ref(path).getDownloadURL();
+    } catch (e) {
+      debugPrint('StorageService: Error resolving download URL: $e');
+      rethrow;
+    }
+  }
+
+  /// Downloads the object at [path] into memory.
+  ///
+  /// Used by [ResumeService.downloadResume] for the "Download Resume" action.
+  Future<Uint8List> downloadBytes(String path) async {
+    try {
+      final data = await _storage.ref(path).getData();
+      if (data == null || data.isEmpty) {
+        throw const StorageServiceException(
+          'Could not read the resume file.',
+        );
+      }
+      return data;
+    } on StorageServiceException {
+      rethrow;
+    } catch (e) {
+      debugPrint('StorageService: Error downloading bytes: $e');
+      throw const StorageServiceException(
+        'Failed to download resume. Please try again.',
+      );
+    }
+  }
 }
 
 /// Result of a successful resume upload.
 class ResumeUploadResult {
   final String downloadUrl;
+  /// Full storage path of the uploaded file — `resumes/{uid}/latest.pdf`.
+  final String storagePath;
+  /// Original file name selected by the user (e.g. `aman_resume.pdf`).
   final String fileName;
+  final int fileSize;
+  final String mimeType;
   final DateTime uploadDate;
   final DateTime lastUpdated;
   final String? parserVersion;
 
   const ResumeUploadResult({
     required this.downloadUrl,
+    required this.storagePath,
     required this.fileName,
+    required this.fileSize,
+    required this.mimeType,
     required this.uploadDate,
     required this.lastUpdated,
     this.parserVersion,

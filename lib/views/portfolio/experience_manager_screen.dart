@@ -192,6 +192,10 @@ class ExperienceManagerScreen extends StatelessWidget {
     if (exp.currentlyWorking) return '$startStr — Present';
     final end = exp.endDate;
     if (end == null) return startStr;
+    // v8.4.2 (S4a/M3): guard inverted legacy ranges ("Dec 2024 — Aug 2024")
+    // — mirrors the F10 guard used by projects manager, preview and
+    // read-only views.
+    if (end.isBefore(start)) return startStr;
     return '$startStr — ${DateFormat('MMM yyyy').format(end)}';
   }
 
@@ -348,6 +352,7 @@ class _ExpFormScreenState extends State<_ExpFormScreen> {
                       validator: (value) =>
                           value == null || value.trim().isEmpty ? 'Role is required' : null,
                       textCapitalization: TextCapitalization.words,
+                      maxLength: 200,
                     ),
                     const SizedBox(height: AppTheme.space16),
                     PortfolioTextField(
@@ -358,6 +363,7 @@ class _ExpFormScreenState extends State<_ExpFormScreen> {
                       validator: (value) =>
                           value == null || value.trim().isEmpty ? 'Company is required' : null,
                       textCapitalization: TextCapitalization.words,
+                      maxLength: 200,
                     ),
                     const SizedBox(height: AppTheme.space16),
                     _buildEmploymentTypeField(isDark),
@@ -376,6 +382,7 @@ class _ExpFormScreenState extends State<_ExpFormScreen> {
                   isDark: isDark,
                   maxLines: 5,
                   textCapitalization: TextCapitalization.sentences,
+                  maxLength: 1000,
                 ),
               ),
             ],

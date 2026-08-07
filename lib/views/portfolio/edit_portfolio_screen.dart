@@ -37,9 +37,13 @@ class _EditPortfolioScreenState extends State<EditPortfolioScreen> {
   final _roleController = TextEditingController();
   final _locationController = TextEditingController();
   final _salaryController = TextEditingController();
+  // v8.4.1 (T3): Career objective + languages (docs/Task.md Phase 3).
+  final _careerObjectiveController = TextEditingController();
+  final _languageController = TextEditingController();
 
   final _roleChips = <String>[];
   final _locationChips = <String>[];
+  final _languageChips = <String>[];
   String _remotePreference = 'Hybrid';
   String _relocationPreference = 'Open';
   bool _isSaving = false;
@@ -73,6 +77,11 @@ class _EditPortfolioScreenState extends State<EditPortfolioScreen> {
     _salaryController.text = portfolio.preferences.expectedSalary ?? '';
     _remotePreference = portfolio.preferences.remotePreference;
     _relocationPreference = portfolio.preferences.relocationPreference;
+    _careerObjectiveController.text =
+        portfolio.preferences.careerObjective ?? '';
+    _languageChips
+      ..clear()
+      ..addAll(portfolio.languages);
   }
 
   @override
@@ -86,6 +95,8 @@ class _EditPortfolioScreenState extends State<EditPortfolioScreen> {
     _roleController.dispose();
     _locationController.dispose();
     _salaryController.dispose();
+    _careerObjectiveController.dispose();
+    _languageController.dispose();
     super.dispose();
   }
 
@@ -228,8 +239,11 @@ class _EditPortfolioScreenState extends State<EditPortfolioScreen> {
                                   color: AppTheme.primaryBlue,
                                 ),
                                 deleteIcon: const Icon(Icons.close, size: 16),
-                                onPressed: () =>
-                                    _editSkill(context, portfolioProvider, skill),
+                                onPressed: () => _editSkill(
+                                  context,
+                                  portfolioProvider,
+                                  skill,
+                                ),
                                 onDeleted: () => _removeSkill(
                                   context,
                                   portfolioProvider,
@@ -297,6 +311,7 @@ class _EditPortfolioScreenState extends State<EditPortfolioScreen> {
                           hint: 'e.g. ₹8-12 LPA',
                           isDark: isDark,
                           keyboardType: TextInputType.text,
+                          maxLength: 50,
                         ),
                         const SizedBox(height: AppTheme.space16),
                         _buildDropdown(
@@ -316,7 +331,31 @@ class _EditPortfolioScreenState extends State<EditPortfolioScreen> {
                           onChanged: (v) =>
                               setState(() => _relocationPreference = v),
                         ),
+                        const SizedBox(height: AppTheme.space16),
+                        PortfolioTextField(
+                          controller: _careerObjectiveController,
+                          label: 'Career Objective',
+                          hint: 'e.g. Seeking a software engineering role...',
+                          isDark: isDark,
+                          keyboardType: TextInputType.multiline,
+                          maxLines: 3,
+                          maxLength: 500,
+                        ),
                       ],
+                    ),
+                  ),
+                  const SizedBox(height: AppTheme.space20),
+
+                  // Languages (v8.4.1 T3)
+                  PortfolioSectionCard(
+                    title: 'Languages',
+                    child: _buildChipInput(
+                      isDark,
+                      label: 'Languages',
+                      controller: _languageController,
+                      chips: _languageChips,
+                      hint: 'e.g. English, Hindi',
+                      onAdd: _addLanguage,
                     ),
                   ),
 
@@ -500,6 +539,7 @@ class _EditPortfolioScreenState extends State<EditPortfolioScreen> {
             Expanded(
               child: TextFormField(
                 controller: controller,
+                maxLength: 100,
                 decoration: InputDecoration(
                   hintText: hint,
                   hintStyle: AppTheme.bodyMedium.copyWith(
@@ -579,6 +619,16 @@ class _EditPortfolioScreenState extends State<EditPortfolioScreen> {
     _locationController.clear();
   }
 
+  void _addLanguage(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return;
+    if (_languageChips.any((l) => l.toLowerCase() == trimmed.toLowerCase())) {
+      return;
+    }
+    setState(() => _languageChips.add(trimmed));
+    _languageController.clear();
+  }
+
   // ──────────────────────────────────────────────
   // Fields / dropdowns
   // ──────────────────────────────────────────────
@@ -594,6 +644,7 @@ class _EditPortfolioScreenState extends State<EditPortfolioScreen> {
       isDark: isDark,
       keyboardType: TextInputType.url,
       validator: (value) => PortfolioValidators.optionalUrl(value),
+      maxLength: 500,
     );
   }
 
@@ -717,9 +768,13 @@ class _EditPortfolioScreenState extends State<EditPortfolioScreen> {
         expectedSalary: _salaryController.text.trim().isNotEmpty
             ? _salaryController.text.trim()
             : null,
+        careerObjective: _careerObjectiveController.text.trim().isNotEmpty
+            ? _careerObjectiveController.text.trim()
+            : null,
         remotePreference: _remotePreference,
         relocationPreference: _relocationPreference,
       ),
+      languages: List.from(_languageChips),
     );
 
     final success = await portfolioProvider.savePortfolio(updated);

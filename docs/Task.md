@@ -1,406 +1,412 @@
-You are the lead Flutter + Firebase architect for my production-level project called CampusConnect.
+# CampusConnect v8.4.1 — Resume Portfolio & Firebase Storage Foundation
 
-IMPORTANT:
-This project already exists. Do NOT redesign the application.
-Do NOT change existing architecture.
-Do NOT break existing features.
+## Objective
 
-Current stack:
-- Flutter
-- Firebase Authentication
-- Cloud Firestore
-- Firebase Storage
-- Provider state management
-- Material 3
-- Existing Student, Teacher and Alumni dashboards
-- Existing ATS Resume Review system
-- Existing AI Assistant
-- Existing Firestore models and services
+Implement the complete Resume Portfolio system, making the student's resume the central asset of CampusConnect.
 
-Current version:
-CampusConnect v8.3
-Completed:
-✔ Teacher Dashboard
-✔ Teacher Analytics
-✔ AI Insights
-✔ Firestore Demo Data Seeder
+This version establishes the foundation for:
 
-Now implement ONLY version v8.4.
+* Resume Reviewer (v8.5)
+* Resume Intelligence (v8.6)
+* AI Recommendation Engine (v8.7)
+* Teacher Analytics 2.0
+* Alumni Mentorship Intelligence
+* Placement Resume Snapshot
 
-=========================================================
-VERSION 8.4
-Student Resume Portfolio
-=========================================================
+The implementation should be production-ready, modular, and backward-compatible with the existing CampusConnect architecture.
 
-Goal:
+---
 
-Transform every student profile into a complete professional portfolio.
+# Design Principles
 
-The portfolio should become the foundation for future AI recommendations and mentorship matching.
+* Do NOT break existing dashboards.
+* Do NOT remove any existing ATS review functionality.
+* Build on top of the existing architecture.
+* Keep Firestore reads optimized.
+* Use Firebase Storage for PDF files only.
+* Keep all services modular.
+* Follow current project naming conventions.
+* Use Material 3.
+* Maintain dark/light theme compatibility.
+* Preserve all role-based permissions.
 
-DO NOT implement AI recommendations yet.
+---
 
-=========================================================
-FEATURES
-=========================================================
+# Phase 1 — Resume Storage
 
-1. Resume Upload
+Implement Firebase Storage integration.
 
-Students can upload a Resume PDF.
+Storage path:
 
-Store files inside Firebase Storage.
+resumes/{uid}/latest.pdf
 
-Example:
+Future-ready structure:
 
-resumes/{uid}/resume.pdf
+resumes/
+uid/
+latest.pdf
+history/
+v1.pdf
+v2.pdf
 
-Store metadata in Firestore.
+Implement:
 
-Resume metadata should include:
+* Upload Resume
+* Replace Resume
+* Download Resume
+* Delete Resume
+* Upload Progress
+* File Validation
+* PDF Only
+* Maximum 5 MB
 
-- downloadUrl
-- uploadDate
-- lastUpdated
-- version
-- ATS Score
-- parserVersion
+---
 
-=========================================================
+# Phase 2 — Resume Metadata
 
-2. Portfolio Model
+Create Firestore metadata document.
 
-Create a proper Dart model.
+Suggested path:
 
-Example fields:
+users/{uid}/resume/metadata
 
-resume
+Fields:
 
-skills
+* uploadedAt
+* updatedAt
+* storagePath
+* downloadUrl
+* fileName
+* fileSize
+* mimeType
+* version
+* latestATSScore
+* reviewCount
+* lastReviewAt
+* hasResume
+* isDemoData (optional)
 
-projects
+---
 
-certifications
+# Phase 3 — Student Resume Portfolio
 
-experience
+Create a dedicated Resume Portfolio section.
 
-education
+Portfolio should display:
 
-achievements
+Personal Information
 
-socialLinks
+Education
 
-preferences
+CGPA
 
-=========================================================
+Skills
 
-3. Skills
+Projects
 
-Allow multiple skills.
+Experience
 
-Each skill should include:
+Certifications
 
-- name
-- category
-- proficiency
+Achievements
 
-Proficiency:
-
-Beginner
-
-Intermediate
-
-Advanced
-
-=========================================================
-
-4. Projects
-
-Students can add multiple projects.
-
-Each project contains:
-
-title
-
-description
-
-technologies
-
-githubUrl
-
-demoUrl
-
-startDate
-
-endDate
-
-currentlyWorking
-
-=========================================================
-
-5. Certifications
-
-Store:
-
-title
-
-issuer
-
-issueDate
-
-credentialId
-
-credentialUrl
-
-=========================================================
-
-6. Experience
-
-Store:
-
-company
-
-role
-
-employmentType
-
-description
-
-startDate
-
-endDate
-
-currentlyWorking
-
-=========================================================
-
-7. Education
-
-Store:
-
-college
-
-department
-
-program
-
-semester
-
-cgpa
-
-graduationYear
-
-=========================================================
-
-8. Social Links
-
-Store:
+Languages
 
 GitHub
 
 LinkedIn
 
-Portfolio
+Portfolio Website
 
-LeetCode
+Preferred Roles
 
-Codeforces
+Preferred Locations
 
-HackerRank
+Career Objective
 
-=========================================================
+Resume Status
 
-9. Career Preferences
+Resume Upload Date
 
-Store:
+Latest ATS Score
 
-preferredRoles
+Latest Review
 
-preferredLocations
+Resume Download Button
 
-expectedSalary
+Replace Resume Button
 
-remotePreference
+Delete Resume Button
 
-relocationPreference
+---
 
-=========================================================
+# Phase 4 — Resume Service
 
-10. Achievements
+Create a reusable ResumeService responsible for:
 
-Allow multiple achievements.
+Upload Resume
 
-Each achievement contains:
+Download Resume
 
-title
+Delete Resume
 
-description
+Replace Resume
 
-date
+Read Metadata
 
-category
+Update Metadata
 
-=========================================================
-UI
-=========================================================
+Check Resume Exists
 
-Create clean Material 3 pages.
+Get Resume URL
 
-Do NOT redesign the app.
+Future support for version history
 
-Only add:
+Business logic must remain outside UI widgets.
 
-Student Portfolio Screen
+---
 
-Edit Portfolio Screen
+# Phase 5 — Student Dashboard Integration
 
-Projects Manager
+Replace simple ATS resume card with a Resume Portfolio summary.
 
-Certifications Manager
+Show:
 
-Experience Manager
+Resume Uploaded
 
-Resume Upload
+Latest ATS
 
-Portfolio Preview
+Resume Age
 
-Teacher Read-only Portfolio View
+Last Review
 
-Alumni Read-only Portfolio View
+Open Portfolio
 
-Reuse existing design language.
+Upload / Replace Resume
 
-=========================================================
-FIRESTORE
-=========================================================
+---
 
-Use the existing users collection.
+# Phase 6 — Teacher Dashboard
 
-Store portfolio under each student document.
+Teachers should be able to:
 
-Example:
+Open Student Portfolio
 
-users/{uid}
+View Resume Metadata
 
-portfolio
+Download Resume
 
-resume
+View Latest ATS
 
-projects
+View Resume Status
 
-experience
+No editing permissions.
 
-certifications
+---
 
-skills
+# Phase 7 — Alumni Dashboard
 
-preferences
+Alumni should be able to:
 
-links
+Open Student Portfolio
 
-achievements
+Download Resume
 
-Keep everything compatible with the current Firestore structure.
+View Resume Metadata
 
-=========================================================
-SERVICES
-=========================================================
+No editing permissions.
 
-Create:
+---
 
-PortfolioService
+# Phase 8 — Placement Integration
 
-StorageService for Resume Upload
+Update placement applications.
 
-PortfolioProvider
+Each application must store:
 
-PortfolioModel
+studentId
 
-ProjectModel
+placementId
 
-CertificationModel
+resumeVersion
 
-ExperienceModel
+resumeStoragePath
 
-AchievementModel
+atsScoreAtApplication
 
-Do not duplicate existing services.
+appliedAt
 
-=========================================================
-VALIDATION
-=========================================================
+status
 
-Validate:
+This preserves the resume used when applying even after future uploads.
 
-Required fields
+---
 
-PDF upload only
+# Phase 9 — Firestore Security
 
-Maximum resume size
+Ensure:
 
-Valid URLs
+Students
 
-Prevent duplicate skills
-
-Prevent empty projects
-
-=========================================================
-SECURITY
-=========================================================
-
-Update Firestore Rules.
-
-Only owner can edit portfolio.
+can upload only their own resumes.
 
 Teachers
 
+can only read resumes.
+
 Alumni
 
-Admin
+can only read resumes.
 
-have read-only access.
+No anonymous access.
 
-=========================================================
-CODE QUALITY
-=========================================================
+No public Storage URLs.
 
-Follow existing architecture.
+---
 
-Use Provider.
+# Phase 10 — UI
 
-Keep code modular.
+Create a clean Resume Portfolio page.
 
-Avoid duplicate code.
+Sections:
 
-Add documentation.
+Header
 
-Maintain production-quality code.
+Resume Status Card
 
-=========================================================
-OUT OF SCOPE
-=========================================================
+Quick Actions
 
-Do NOT implement:
+Personal Details
 
-AI Recommendation Engine
+Education
 
-Mentorship AI
+Projects
 
-Resume Parsing
+Skills
 
-Resume History
+Experience
 
-Resume Versioning
+Certifications
 
-Notification System
+Links
 
-Admin Dashboard
+Career Preferences
 
-Analytics Changes
+Resume Metadata
 
-Those belong to future versions.
+Theme must match CampusConnect.
 
-=========================================================
-EXPECTED OUTPUT
-=========================================================
+---
 
-Implement the complete CampusConnect v8.4 Student Resume Portfolio feature while preserving all existing functionality.
+# Phase 11 — Architecture
+
+Create (or update) modular components as needed:
+
+Models
+
+ResumeMetadata
+
+ResumePortfolio
+
+Services
+
+ResumeService
+
+StorageService
+
+Providers
+
+ResumeProvider
+
+Widgets
+
+ResumeCard
+
+ResumeMetadataCard
+
+ResumeActions
+
+ResumeUploadDialog
+
+ResumeStatusChip
+
+Views
+
+ResumePortfolioView
+
+---
+
+# Phase 12 — Validation
+
+Ensure:
+
+flutter analyze
+
+returns
+
+0 errors
+
+0 warnings
+
+Verify:
+
+✔ Upload works
+
+✔ Replace works
+
+✔ Download works
+
+✔ Delete works
+
+✔ Metadata updates
+
+✔ Teachers can read
+
+✔ Alumni can read
+
+✔ Students cannot access others' resumes
+
+✔ Existing ATS Review remains functional
+
+✔ Existing dashboards continue working
+
+✔ Existing analytics are unaffected
+
+---
+
+# Out of Scope
+
+Do NOT implement in v8.4:
+
+Resume parsing
+
+AI resume suggestions
+
+Resume version history UI
+
+Resume reviewer changes
+
+AI recommendations
+
+Teacher analytics improvements
+
+Admin dashboard
+
+These belong to later roadmap versions.
+
+---
+
+# Expected Outcome
+
+CampusConnect should now have a centralized Resume Portfolio system backed by Firebase Storage and Firestore metadata.
+
+The resume becomes the single source of truth for:
+
+* Resume Reviewer (v8.5)
+* Resume Intelligence (v8.6)
+* AI Recommendation Engine (v8.7)
+* Placement applications
+* Teacher analytics
+* Alumni mentorship
+
+The implementation must prioritize maintainability, scalability, and compatibility with future roadmap versions.

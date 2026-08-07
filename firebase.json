@@ -15,6 +15,12 @@
           "fileOutput": "android/app/google-services.json"
         }
       },
+      "linux": {
+        "default": {
+          "projectId": "campusconnect-firebase-project",
+          "appId": "1:955671967432:web:1ba8b23c58201bcfadd7fd"
+        }
+      },
       "dart": {
         "lib/firebase_options.dart": {
           "projectId": "campusconnect-firebase-project",
@@ -23,7 +29,8 @@
             "ios": "1:955671967432:ios:c3a3f6c262a2f02badd7fd",
             "macos": "1:955671967432:ios:c3a3f6c262a2f02badd7fd",
             "web": "1:955671967432:web:f7b91c86576cd40dadd7fd",
-            "windows": "1:955671967432:web:1ba8b23c58201bcfadd7fd"
+            "windows": "1:955671967432:web:1ba8b23c58201bcfadd7fd",
+            "linux": "1:955671967432:web:1ba8b23c58201bcfadd7fd"
           }
         }
       }

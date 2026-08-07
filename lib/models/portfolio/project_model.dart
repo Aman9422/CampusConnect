@@ -1,3 +1,4 @@
+import 'package:campusconnect/models/portfolio/portfolio_parse.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 /// CampusConnect v8.4 — Student portfolio project entry.
@@ -34,17 +35,19 @@ class ProjectModel {
   }
 
   factory ProjectModel.fromMap(Map<String, dynamic> map) {
+    // v8.4.7: tolerant reads — dates may arrive as Timestamp, DateTime or
+    // ISO-8601 String; numbers may arrive as double; lists may contain
+    // non-strings. Never throws; bad entries just degrade to defaults.
     return ProjectModel(
-      id: map['id'] as String? ?? '',
-      title: map['title'] as String? ?? '',
-      description: map['description'] as String? ?? '',
-      technologies:
-          (map['technologies'] as List<dynamic>?)?.cast<String>() ?? const [],
-      githubUrl: map['githubUrl'] as String?,
-      demoUrl: map['demoUrl'] as String?,
-      startDate: (map['startDate'] as Timestamp?)?.toDate(),
-      endDate: (map['endDate'] as Timestamp?)?.toDate(),
-      currentlyWorking: map['currentlyWorking'] as bool? ?? false,
+      id: asString(map['id']) ?? '',
+      title: asString(map['title']) ?? '',
+      description: asString(map['description']) ?? '',
+      technologies: parseStringList(map['technologies']),
+      githubUrl: asString(map['githubUrl']),
+      demoUrl: asString(map['demoUrl']),
+      startDate: tsToDate(map['startDate']),
+      endDate: tsToDate(map['endDate']),
+      currentlyWorking: asBool(map['currentlyWorking']) ?? false,
     );
   }
 

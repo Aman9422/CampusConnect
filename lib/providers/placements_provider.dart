@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:campusconnect/models/placement.dart';
 import 'package:campusconnect/models/placement_eligibility.dart';
 import 'package:campusconnect/models/student_profile.dart';
@@ -26,6 +28,10 @@ class PlacementsProvider with ChangeNotifier {
       NotificationsService.instance();
   String? userId; // V5.1.1: Made nullable for logout handling
   final Connectivity _connectivity = Connectivity();
+  // v8.4.2 (S3c/M5): keep the subscription so it can be cancelled on
+  // reset()/dispose() — prevents leaks + duplicate notifyListeners across
+  // logins and notify-after-reset.
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
 
   // V6.5: Student profile for eligibility checking
   StudentProfile? _userProfile;
@@ -114,6 +120,9 @@ class PlacementsProvider with ChangeNotifier {
     _userProfile = null;
     _eligibilityCache = {};
     _isDisposed = true; // V6.3: Mark as disposed to stop any pending operations
+    // v8.4.2 (S3c/M5): cancel the connectivity subscription so no listener
+    // survives logout (prevents leaks + duplicates on the next login).
+    _cancelConnectivityMonitoring();
     notifyListeners();
   }
 
@@ -155,8 +164,15 @@ class PlacementsProvider with ChangeNotifier {
   }
 
   /// V5.1: Monitor network connectivity changes
+  /// v8.4.2 (S3c/M5): the subscription is kept so it can be cancelled on
+  /// reset()/dispose(); the callback guards with [_isDisposed] so it never
+  /// notifies listeners after logout/provider disposal.
   void _startConnectivityMonitoring() {
-    _connectivity.onConnectivityChanged.listen((result) {
+    _connectivitySubscription ??= _connectivity.onConnectivityChanged.listen((
+      result,
+    ) {
+      if (_isDisposed) return; // v8.4.2 (S3c/M5): no notify after dispose
+
       // Convert List<ConnectivityResult> to bool
       final wasOnline = _isOnline;
       _isOnline = !result.contains(ConnectivityResult.none);
@@ -168,6 +184,13 @@ class PlacementsProvider with ChangeNotifier {
         notifyListeners();
       }
     });
+  }
+
+  /// v8.4.2 (S3c/M5): cancel the connectivity subscription and clear the
+  /// reference so it can be re-established on the next [init].
+  void _cancelConnectivityMonitoring() {
+    _connectivitySubscription?.cancel();
+    _connectivitySubscription = null;
   }
 
   /// V5.1: Check network connectivity
@@ -346,11 +369,19 @@ class PlacementsProvider with ChangeNotifier {
   /// V5: Instant UI feedback, backend validation
   /// V5.1: Enhanced guardrails and error handling
   /// V6.4: Added notification creation on success
+  ///
+  /// v8.4.1 (T5): Optionally snapshots the student's portfolio resume at
+  /// apply time — `resumeVersion`, `resumeStoragePath` and
+  /// `atsScoreAtApplication` are forwarded to the Cloud Function so the
+  /// application preserves the exact resume used (docs/Task.md Phase 8).
   Future<bool> applyForPlacement({
     required String placementId,
     required String resume,
     String? company,
     String? role,
+    int? resumeVersion,
+    String? resumeStoragePath,
+    int? atsScoreAtApplication,
   }) async {
     // V5.1: GUARDRAIL - Check if already applied
     if (_appliedPlacementIds.contains(placementId)) {
@@ -393,6 +424,10 @@ class PlacementsProvider with ChangeNotifier {
           .call({
             'placementId': placementId,
             'resumeUrl': resume,
+            // v8.4.1 (T5): Resume snapshot at apply time.
+            'resumeVersion': resumeVersion,
+            'resumeStoragePath': resumeStoragePath,
+            'atsScoreAtApplication': atsScoreAtApplication,
             'company': company ?? 'Unknown',
           })
           .timeout(
@@ -474,7 +509,10 @@ class PlacementsProvider with ChangeNotifier {
 
   @override
   void dispose() {
-    // Clean up resources
+    // v8.4.2 (S3c/M5): cancel the connectivity subscription to prevent leaks
+    // when the provider is disposed (e.g. app teardown).
+    _cancelConnectivityMonitoring();
+    _isDisposed = true;
     super.dispose();
   }
 }

@@ -29,45 +29,51 @@ const MAX_MESSAGE_LENGTH = 1000;
  * - Analytics event logging
  * - Stability improvements
  * 
- * @param {object} request - Contains userId and message
- * @param {object} response - Returns AI response with trial/usage metadata
+ * v8.4.2 (S6b/P3): CALLABLE (was HTTPS onRequest). The authenticated uid
+ * comes from `request.auth.uid` — a forged body `userId` can no longer spend
+ * AI quota on another user's account. Calls return the same JSON shape.
  */
-exports.askAI = onRequest(
-    {cors: true, maxInstances: 10},
-    async (request, response) => {
-      // Validate request method
-      if (request.method !== "POST") {
-        return response.status(405).json({
-          error: "Method not allowed. Use POST.",
-        });
+exports.askAI = onCall(
+    {maxInstances: 10},
+    async (request) => {
+      // v8.4.2 (S6b/P3): the authenticated uid from Firebase Auth is the
+      // only identity source — body/query `userId` is no longer trusted.
+      const userId = request.auth?.uid;
+
+      if (!userId) {
+        throw new admin.functions.https.HttpsError(
+            "unauthenticated",
+            "You must be logged in to use the AI assistant."
+        );
       }
 
       try {
         // Extract data from request
-        const {userId, message} = request.body;
+        const {message} = request.data || {};
 
         // Validate required fields
-        if (!userId || !message) {
-          return response.status(400).json({
-            error: "Missing required fields: userId and message",
-          });
+        if (!message) {
+          throw new admin.functions.https.HttpsError(
+              "invalid-argument",
+              "Missing required field: message"
+          );
         }
 
         // Validate message is not empty or too long
         const trimmedMessage = message.trim();
         if (trimmedMessage.length < MIN_MESSAGE_LENGTH) {
-          return response.status(200).json({
+          return {
             response: "Please enter a message to chat with me! 😊",
             warning: "empty_message",
-          });
+          };
         }
 
         if (trimmedMessage.length > MAX_MESSAGE_LENGTH) {
-          return response.status(200).json({
+          return {
             response: "Your message is a bit too long! " +
                      "Please keep it under 1000 characters so I can help you better. 📝",
             warning: "message_too_long",
-          });
+          };
         }
 
         // Log the interaction (for analytics/debugging)
@@ -79,26 +85,26 @@ exports.askAI = onRequest(
         // ===============================================
         const rateLimitCheck = await checkRateLimit(userId);
         if (!rateLimitCheck.allowed) {
-          return response.status(200).json({
+          return {
             response: "Whoa, slow down there! 🐢\n\n" +
                      "You're sending messages a bit too quickly. " +
                      "Take a moment to breathe, and try again in a minute. " +
                      "I'll be here waiting to help!",
             warning: "rate_limited",
             retryAfter: rateLimitCheck.retryAfter,
-          });
+          };
         }
 
         // Check for spam (repeated identical messages)
         const spamCheck = await checkForSpam(userId, trimmedMessage);
         if (!spamCheck.allowed) {
-          return response.status(200).json({
+          return {
             response: "I noticed you're sending the same message repeatedly. 🔁\n\n" +
                      "If you're having trouble, try rephrasing your question or " +
                      "asking something different. I'm here to help with all your " +
                      "questions about academics, placements, and career guidance!",
             warning: "spam_detected",
-          });
+          };
         }
 
         // ===============================================
@@ -180,7 +186,7 @@ exports.askAI = onRequest(
         });
 
         // Return successful response with VERSION 4 metadata
-        return response.status(200).json({
+        return {
           response: aiResponse,
           timestamp: new Date().toISOString(),
           // VERSION 4: Trial information (for informational display only)
@@ -195,12 +201,13 @@ exports.askAI = onRequest(
             dailyLimit: DAILY_MESSAGE_LIMIT,
             lastResetAt: usageData.lastResetAt,
           },
-        });
+        };
       } catch (error) {
         console.error("Error in askAI function:", error);
-        return response.status(500).json({
-          error: "Internal server error. Please try again later.",
-        });
+        throw new admin.functions.https.HttpsError(
+            "internal",
+            "Internal server error. Please try again later."
+        );
       }
     }
 );
@@ -597,6 +604,23 @@ exports.logPlacementApplication = onCall(
 
       try {
         const {placementId, resumeUrl, company} = request.data;
+        // v8.4.1 (T5): Resume snapshot from the student's portfolio resume —
+        // preserves the exact resume used when applying (docs/Task.md Phase 8).
+        const resumeVersion = request.data.resumeVersion || null;
+        let resumeStoragePath = request.data.resumeStoragePath || null;
+        let atsScoreAtApplication = request.data.atsScoreAtApplication || null;
+        // v8.4.2 (S3a/M2): ownership + range validation — a client must not be
+        // able to attach another user's resume path or an out-of-range score.
+        if (resumeStoragePath && !resumeStoragePath.startsWith(`resumes/${uid}/`)) {
+          resumeStoragePath = null;
+        }
+        if (typeof atsScoreAtApplication !== "number") {
+          atsScoreAtApplication = null;
+        } else if (atsScoreAtApplication < 0 || atsScoreAtApplication > 100) {
+          atsScoreAtApplication = null;
+        } else if (!Number.isInteger(atsScoreAtApplication)) {
+          atsScoreAtApplication = Math.round(atsScoreAtApplication);
+        }
 
         // Validate required fields
         if (!placementId) {
@@ -609,6 +633,28 @@ exports.logPlacementApplication = onCall(
         // V5: Idempotent application creation
         const applicationId = `${uid}_${placementId}`;
         let isNewApplication = false;
+
+        // v8.4.2 (S2a/H1): copy the resume to an immutable snapshot path so the
+        // bytes used at apply time survive future re-uploads of latest.pdf.
+        let snapshotStoragePath = resumeStoragePath;
+        let snapshotUrl = resumeUrl || "";
+        if (resumeStoragePath) {
+          try {
+            const snapshotPath = `resumes/${uid}/snapshots/app_${applicationId}.pdf`;
+            await admin.storage().bucket()
+                .file(resumeStoragePath)
+                .copy(admin.storage().bucket().file(snapshotPath));
+            const [url] = await admin.storage().bucket()
+                .file(snapshotPath)
+                .getSignedUrl({action: "read", expires: "01-01-2035"});
+            snapshotStoragePath = snapshotPath;
+            snapshotUrl = url;
+          } catch (snapshotError) {
+            // Non-fatal: keep the original path/URL if the copy fails so the
+            // application is still recorded (metadata-only fallback).
+            console.error("logPlacementApplication: resume snapshot copy failed:", snapshotError);
+          }
+        }
 
         await admin.firestore().runTransaction(async (transaction) => {
           // Check if application already exists
@@ -624,11 +670,22 @@ exports.logPlacementApplication = onCall(
             return;
           }
 
-          // Create new application in top-level collection
+          // Create new application in top-level collection.
+          // v8.4.1 (T5): resumeVersion / resumeStoragePath /
+          // atsScoreAtApplication snapshot the student's portfolio resume at
+          // apply time (docs/Task.md Phase 8).
+          // v8.4.2 (S2a/H1): store the immutable snapshot path + URL so the
+          // bytes used at apply time are preserved (fallback to the original
+          // values when the copy failed or no resume was attached).
           transaction.set(existingAppRef, {
             userId: uid,
+            // Spec Phase 8 field name.
+            studentId: uid,
             placementId,
-            resumeUrl: resumeUrl || "",
+            resumeUrl: snapshotUrl,
+            resumeStoragePath: snapshotStoragePath,
+            resumeVersion,
+            atsScoreAtApplication,
             appliedAt: admin.firestore.FieldValue.serverTimestamp(),
             status: "applied",
           });
@@ -642,10 +699,14 @@ exports.logPlacementApplication = onCall(
                   .doc(uid),
               {
                 userId: uid,
+                studentId: uid,
                 placementId,
-                resume: resumeUrl || "",
+                resume: snapshotUrl,
+                resumeStoragePath: snapshotStoragePath,
+                resumeVersion,
+                atsScoreAtApplication,
                 appliedAt: admin.firestore.FieldValue.serverTimestamp(),
-                status: "pending",
+                status: "applied",
               }
           );
 
@@ -712,61 +773,55 @@ const RESUME_MIN_LENGTH = 100; // Minimum resume characters
  * @param {object} request - Contains userId, resumeText, targetRole
  * @param {object} response - Returns review analysis and usage metadata
  */
-exports.reviewResume = onRequest(
-    {cors: true, maxInstances: 5, timeoutSeconds: 120},
-    async (request, response) => {
-      // Handle usage check (GET request)
-      if (request.method === "GET") {
-        const userId = request.query.userId;
-        const checkUsage = request.query.checkUsage;
-        
-        if (userId && checkUsage === "true") {
-          const usage = await getResumeUsage(userId);
-          return response.status(200).json({ usage });
-        }
-        
-        return response.status(400).json({
-          error: "Invalid request. Use POST to submit resume.",
-        });
+// v8.4.2 (S6b/P3): CALLABLE (was HTTPS onRequest). The authenticated uid comes
+// from `request.auth.uid` — a forged body/query `userId` can no longer spend
+// the monthly quota or attach reviews to another account. The GET usage-check
+// path is now the `{checkUsage: true}` callable flag.
+exports.reviewResume = onCall(
+    {maxInstances: 5, timeoutSeconds: 120},
+    async (request) => {
+      // v8.4.2 (S6b/P3): uid from Firebase Auth is the only identity source.
+      const userId = request.auth?.uid;
+
+      if (!userId) {
+        throw new admin.functions.https.HttpsError(
+            "unauthenticated",
+            "You must be logged in to review your resume."
+        );
       }
 
-      // Validate request method
-      if (request.method !== "POST") {
-        return response.status(405).json({
-          error: "Method not allowed. Use POST.",
-        });
+      // Usage check without submitting a review (replaces the old GET path).
+      if (request.data?.checkUsage === true) {
+        const usage = await getResumeUsage(userId);
+        return {usage};
       }
 
       try {
         // Extract data from request
-        const { userId, resumeText, targetRole, experienceLevel } = request.body;
-
-        // Validate required fields
-        if (!userId) {
-          return response.status(401).json({
-            error: "Authentication required. Please log in.",
-          });
-        }
+        const { resumeText, targetRole, experienceLevel } = request.data || {};
 
         if (!resumeText) {
-          return response.status(400).json({
-            error: "Resume text is required.",
-          });
+          throw new admin.functions.https.HttpsError(
+              "invalid-argument",
+              "Resume text is required."
+          );
         }
 
         const trimmedResume = resumeText.trim();
 
         // Validate resume length
         if (trimmedResume.length < RESUME_MIN_LENGTH) {
-          return response.status(400).json({
-            error: `Resume too short. Minimum ${RESUME_MIN_LENGTH} characters required.`,
-          });
+          throw new admin.functions.https.HttpsError(
+              "invalid-argument",
+              `Resume too short. Minimum ${RESUME_MIN_LENGTH} characters required.`
+          );
         }
 
         if (trimmedResume.length > RESUME_MAX_LENGTH) {
-          return response.status(400).json({
-            error: `Resume too long. Maximum ${RESUME_MAX_LENGTH} characters allowed.`,
-          });
+          throw new admin.functions.https.HttpsError(
+              "invalid-argument",
+              `Resume too long. Maximum ${RESUME_MAX_LENGTH} characters allowed.`
+          );
         }
 
         console.log(`Resume review request from user: ${userId}`);
@@ -777,10 +832,11 @@ exports.reviewResume = onRequest(
         const currentUsage = await getResumeUsage(userId);
         
         if (currentUsage.monthlyCount >= RESUME_MONTHLY_LIMIT) {
-          return response.status(429).json({
-            error: `Monthly review limit reached (${RESUME_MONTHLY_LIMIT} reviews/month). Resets next month.`,
-            usage: currentUsage,
-          });
+          throw new admin.functions.https.HttpsError(
+              "resource-exhausted",
+              `Monthly review limit reached (${RESUME_MONTHLY_LIMIT} reviews/month). Resets next month.`,
+              {usage: currentUsage}
+          );
         }
 
         // Increment usage count (only after quota check passes)
@@ -798,9 +854,10 @@ exports.reviewResume = onRequest(
           console.log(`Resume review from provider: ${aiResult.providerUsed}`);
         } catch (aiError) {
           console.error("AI provider error in reviewResume:", aiError);
-          return response.status(500).json({
-            error: "AI analysis failed. Please try again later.",
-          });
+          throw new admin.functions.https.HttpsError(
+              "internal",
+              "AI analysis failed. Please try again later."
+          );
         }
 
         // Log analytics event
@@ -816,16 +873,21 @@ exports.reviewResume = onRequest(
         });
 
         // Return successful response
-        return response.status(200).json({
+        return {
           review: reviewResult,
           usage: usageData,
-        });
+        };
 
       } catch (error) {
+        // Re-throw validation/quota HttpsError as-is.
+        if (error instanceof admin.functions.https.HttpsError) {
+          throw error;
+        }
         console.error("Error in reviewResume function:", error);
-        return response.status(500).json({
-          error: "Failed to analyze resume. Please try again later.",
-        });
+        throw new admin.functions.https.HttpsError(
+            "internal",
+            "Failed to analyze resume. Please try again later."
+        );
       }
     }
 );
@@ -1173,6 +1235,32 @@ exports.generateResumeAnalysis = onCall(
 
 const INACTIVITY_REMINDER_HOURS = 48;
 
+/**
+ * v8.4.3 (MB5): true when a `users/{userId}` write only changed the
+ * `portfolio` nested map (plus the `metadata.updatedAt` stamp the portfolio
+ * save writes). Portfolio saves must not spin the recommendation/engagement
+ * recompute — this is a PROFILE update trigger (Bug 3 write-amplification
+ * co-trigger, including the expensive first-time-save path).
+ */
+function isPortfolioOnlyChange(before, after) {
+  if (!before || !after) return false;
+
+  const beforePortfolio = JSON.stringify(before.portfolio ?? null);
+  const afterPortfolio = JSON.stringify(after.portfolio ?? null);
+  if (beforePortfolio === afterPortfolio) return false;
+
+  // Every top-level key other than portfolio/metadata must be byte-identical.
+  for (const key of Object.keys(after)) {
+    if (key === "portfolio" || key === "metadata") continue;
+    const beforeValue = before[key] ?? null;
+    const afterValue = after[key] ?? null;
+    if (JSON.stringify(beforeValue) !== JSON.stringify(afterValue)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 exports.onProfileUpdatedRefreshAI = onDocumentWritten(
     {
       document: "users/{userId}",
@@ -1186,6 +1274,13 @@ exports.onProfileUpdatedRefreshAI = onDocumentWritten(
 
       if (!after) return;
       if (after.role !== "student" || after.profileCompleted !== true) return;
+
+      // v8.4.3 (MB5): portfolio saves write `users/{uid}/portfolio` (and its
+      // `metadata.updatedAt`). This trigger is for PROFILE updates — a
+      // portfolio-only write must not spin the recommendation/engagement
+      // recompute (especially the expensive first-time-save path, Bug 3's
+      // write-amplification co-trigger).
+      if (isPortfolioOnlyChange(before, after)) return;
 
       const changed =
         !before ||
@@ -1222,6 +1317,25 @@ exports.onResumeReviewCreatedRefreshMatches = onDocumentCreated(
         if (!userDoc.exists) return;
         const userData = userDoc.data();
         if (userData.role !== "student") return;
+
+        // v8.4.2 (S6a/P1): mirror the latest ATS score + review stats into the
+        // portfolio resume metadata so dashboard / portfolio / read-only
+        // "Latest ATS", Resume Age and `atsScoreAtApplication` actually have
+        // data. The AI review system writes to `resumeReviews/*`; this is the
+        // bridge into `users/{uid}/portfolio.resume`.
+        const atsScore = Number.isInteger(resumeData.atsScore)
+            ? resumeData.atsScore
+            : null;
+        const portfolioResumeMerge = {
+          "portfolio.resume.reviewCount": admin.firestore.FieldValue.increment(1),
+          "portfolio.resume.lastReviewAt": admin.firestore.Timestamp.now(),
+          "portfolio.resume.updatedAt": admin.firestore.Timestamp.now(),
+        };
+        if (atsScore !== null) {
+          portfolioResumeMerge["portfolio.resume.latestATSScore"] = atsScore;
+        }
+        await admin.firestore().collection("users").doc(userId)
+            .set(portfolioResumeMerge, {merge: true});
 
         await refreshRecommendationsForStudent(userId, userData, {resumeData});
         await logUserActivity(userId, "resumeReviewed", 5, {
@@ -1288,6 +1402,152 @@ exports.onOpportunityPostedNotifyStudents = onDocumentCreated(
         }
       } catch (error) {
         console.error("onOpportunityPostedNotifyStudents error:", error);
+      }
+    }
+);
+
+// ===============================================
+// v8.4.3 (MB8): SERVER-SIDE NOTIFICATIONS
+// ===============================================
+// Cross-user notification writes (student → alumni, sender → recipient) fail
+// client-side with PERMISSION_DENIED because the notifications subcollection
+// is owner-write-only (F7). These triggers use the Admin SDK (which bypasses
+// security rules) to deliver the notifications the client never could, and
+// the client-side best-effort writes were removed so the log noise
+// disappears (Bug 5 — "no notification to alumni about mentorship request").
+
+exports.onMentorshipRequestCreated = onDocumentCreated(
+    {
+      document: "mentorship_requests/{requestId}",
+      region: "us-central1",
+      maxInstances: 5,
+    },
+    async (event) => {
+      const requestId = event.params.requestId;
+      const request = event.data.data();
+
+      if (!request || !request.alumniId) return;
+
+      try {
+        const notificationRef = admin.firestore()
+            .collection("users")
+            .doc(request.alumniId)
+            .collection("notifications")
+            .doc(`mentorship_requested_${requestId}`);
+
+        await notificationRef.set({
+          type: "mentorshipRequested",
+          title: "New Mentorship Request",
+          body: `${request.studentName || "A student"} has requested your mentorship`,
+          data: {requestId},
+          isRead: false,
+          priority: "medium",
+          createdAt: admin.firestore.Timestamp.now(),
+        });
+      } catch (error) {
+        console.error("onMentorshipRequestCreated error:", error);
+      }
+    }
+);
+
+exports.onMentorshipRequestResponseNotifyStudent = onDocumentWritten(
+    {
+      document: "mentorship_requests/{requestId}",
+      region: "us-central1",
+      maxInstances: 5,
+    },
+    async (event) => {
+      const requestId = event.params.requestId;
+      const before = event.data.before.exists ? event.data.before.data() : null;
+      const after = event.data.after.exists ? event.data.after.data() : null;
+
+      if (!before || !after) return;
+      if (before.status === after.status) return;
+      if (after.status !== "accepted" && after.status !== "rejected") return;
+      if (!after.studentId) return;
+
+      try {
+        const isAccepted = after.status === "accepted";
+        const data = {requestId};
+        if (isAccepted && after.chatId) {
+          data.chatId = after.chatId;
+        }
+
+        const notificationRef = admin.firestore()
+            .collection("users")
+            .doc(after.studentId)
+            .collection("notifications")
+            .doc(`mentorship_response_${requestId}`);
+
+        await notificationRef.set({
+          type: isAccepted ? "mentorshipAccepted" : "mentorshipRejected",
+          title: isAccepted
+              ? "Mentorship Request Accepted!"
+              : "Mentorship Request Response",
+          body: isAccepted
+              ? `${after.alumniName || "Your mentor"} has accepted your mentorship request`
+              : `${after.alumniName || "Your mentor"} has declined your mentorship request`,
+          data,
+          isRead: false,
+          priority: "medium",
+          createdAt: admin.firestore.Timestamp.now(),
+        });
+      } catch (error) {
+        console.error("onMentorshipRequestResponseNotifyStudent error:", error);
+      }
+    }
+);
+
+exports.onChatMessageCreated = onDocumentCreated(
+    {
+      document: "chats/{chatId}/messages/{messageId}",
+      region: "us-central1",
+      maxInstances: 10,
+    },
+    async (event) => {
+      const {chatId, messageId} = event.params;
+      const message = event.data.data();
+
+      if (!message || !message.senderId) return;
+
+      try {
+        // v8.4.3 (MB8): skip messages backfilled by batch operations
+        // (e.g. deleteChat) — they would spam stale "new message" pings.
+        const sentAt = message.sentAt;
+        const expirationCutoff = admin.firestore.Timestamp.fromMillis(
+            Date.now() - 30 * 24 * 60 * 60 * 1000
+        );
+        if (sentAt && sentAt.toMillis() < expirationCutoff.toMillis()) return;
+
+        const chatDoc = await admin.firestore().collection("chats").doc(chatId).get();
+        if (!chatDoc.exists) return;
+        const chat = chatDoc.data();
+
+        const participantIds = chat.participantIds || [];
+        const recipientId = participantIds.find((id) => id !== message.senderId);
+        if (!recipientId) return;
+
+        const senderName = message.senderName || "Someone";
+        const text = message.text || "";
+        const preview = text.length > 50 ? `${text.substring(0, 50)}...` : text;
+
+        const notificationRef = admin.firestore()
+            .collection("users")
+            .doc(recipientId)
+            .collection("notifications")
+            .doc(`new_message_${messageId}`);
+
+        await notificationRef.set({
+          type: "newMessage",
+          title: `New Message from ${senderName}`,
+          body: preview,
+          data: {chatId},
+          isRead: false,
+          priority: "low",
+          createdAt: admin.firestore.Timestamp.now(),
+        });
+      } catch (error) {
+        console.error("onChatMessageCreated error:", error);
       }
     }
 );

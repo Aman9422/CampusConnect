@@ -21,7 +21,9 @@ class CertificationsManagerScreen extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: isDark ? AppTheme.darkBackground : const Color(0xFFF8FAFC),
+      backgroundColor: isDark
+          ? AppTheme.darkBackground
+          : const Color(0xFFF8FAFC),
       appBar: AppBar(
         title: Text(
           'Certifications',
@@ -43,7 +45,8 @@ class CertificationsManagerScreen extends StatelessWidget {
       ),
       body: Consumer<PortfolioProvider>(
         builder: (context, portfolioProvider, child) {
-          final portfolio = portfolioProvider.portfolio ?? PortfolioModel.empty();
+          final portfolio =
+              portfolioProvider.portfolio ?? PortfolioModel.empty();
           final certifications = portfolio.certifications;
 
           if (certifications.isEmpty) {
@@ -76,7 +79,11 @@ class CertificationsManagerScreen extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.workspace_premium_outlined, size: 48, color: AppTheme.gray400),
+            Icon(
+              Icons.workspace_premium_outlined,
+              size: 48,
+              color: AppTheme.gray400,
+            ),
             const SizedBox(height: AppTheme.space16),
             Text(
               'No certifications yet',
@@ -114,7 +121,11 @@ class CertificationsManagerScreen extends StatelessWidget {
     return PortfolioSectionCard(
       title: cert.title.isEmpty ? 'Untitled Certification' : cert.title,
       trailing: PopupMenuButton<String>(
-        icon: Icon(Icons.more_vert, size: 20, color: isDark ? AppTheme.gray400 : AppTheme.gray600),
+        icon: Icon(
+          Icons.more_vert,
+          size: 20,
+          color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+        ),
         onSelected: (value) {
           if (value == 'edit') {
             _openForm(context, certification: cert);
@@ -161,7 +172,10 @@ class CertificationsManagerScreen extends StatelessWidget {
               onTap: () => _launchUrl(context, cert.credentialUrl!),
               borderRadius: BorderRadius.circular(AppTheme.radiusFull),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: AppTheme.primaryBlue.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(AppTheme.radiusFull),
@@ -169,7 +183,11 @@ class CertificationsManagerScreen extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.open_in_new, size: 14, color: AppTheme.primaryBlue),
+                    Icon(
+                      Icons.open_in_new,
+                      size: 14,
+                      color: AppTheme.primaryBlue,
+                    ),
                     const SizedBox(width: 4),
                     Text(
                       'Verify Credential',
@@ -195,9 +213,9 @@ class CertificationsManagerScreen extends StatelessWidget {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     } catch (_) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open link')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Could not open link')));
       }
     }
   }
@@ -225,7 +243,12 @@ class CertificationsManagerScreen extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: Text('Cancel', style: TextStyle(color: isDark ? AppTheme.gray400 : AppTheme.gray600)),
+            child: Text(
+              'Cancel',
+              style: TextStyle(
+                color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+              ),
+            ),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
@@ -239,14 +262,20 @@ class CertificationsManagerScreen extends StatelessWidget {
 
     final portfolio = portfolioProvider.portfolio ?? PortfolioModel.empty();
     final updated = portfolio.copyWith(
-      certifications: portfolio.certifications.where((c) => c.id != cert.id).toList(),
+      certifications: portfolio.certifications
+          .where((c) => c.id != cert.id)
+          .toList(),
     );
     final success = await portfolioProvider.savePortfolio(updated);
     if (!context.mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(success ? 'Certification deleted.' : 'Failed to delete certification.'),
+        content: Text(
+          success
+              ? 'Certification deleted.'
+              : 'Failed to delete certification.',
+        ),
         backgroundColor: success ? AppTheme.success : AppTheme.error,
       ),
     );
@@ -280,8 +309,12 @@ class _CertFormScreenState extends State<_CertFormScreen> {
     final cert = widget.certification;
     _titleController = TextEditingController(text: cert?.title ?? '');
     _issuerController = TextEditingController(text: cert?.issuer ?? '');
-    _credentialIdController = TextEditingController(text: cert?.credentialId ?? '');
-    _credentialUrlController = TextEditingController(text: cert?.credentialUrl ?? '');
+    _credentialIdController = TextEditingController(
+      text: cert?.credentialId ?? '',
+    );
+    _credentialUrlController = TextEditingController(
+      text: cert?.credentialUrl ?? '',
+    );
     _issueDate = cert?.issueDate;
   }
 
@@ -299,7 +332,9 @@ class _CertFormScreenState extends State<_CertFormScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: isDark ? AppTheme.darkBackground : const Color(0xFFF8FAFC),
+      backgroundColor: isDark
+          ? AppTheme.darkBackground
+          : const Color(0xFFF8FAFC),
       appBar: AppBar(
         title: Text(
           _isEdit ? 'Edit Certification' : 'Add Certification',
@@ -339,8 +374,10 @@ class _CertFormScreenState extends State<_CertFormScreen> {
                       label: 'Title',
                       hint: 'e.g. AWS Certified Solutions Architect',
                       isDark: isDark,
-                      validator: (value) => PortfolioValidators.required(value, 'Title'),
+                      validator: (value) =>
+                          PortfolioValidators.required(value, 'Title'),
                       textCapitalization: TextCapitalization.words,
+                      maxLength: 200,
                     ),
                     const SizedBox(height: AppTheme.space16),
                     PortfolioTextField(
@@ -349,6 +386,7 @@ class _CertFormScreenState extends State<_CertFormScreen> {
                       hint: 'e.g. Amazon Web Services',
                       isDark: isDark,
                       textCapitalization: TextCapitalization.words,
+                      maxLength: 200,
                     ),
                     const SizedBox(height: AppTheme.space16),
                     _buildIssueDateField(isDark),
@@ -365,6 +403,7 @@ class _CertFormScreenState extends State<_CertFormScreen> {
                       label: 'Credential ID',
                       hint: 'Optional',
                       isDark: isDark,
+                      maxLength: 200,
                     ),
                     const SizedBox(height: AppTheme.space16),
                     PortfolioTextField(
@@ -373,7 +412,9 @@ class _CertFormScreenState extends State<_CertFormScreen> {
                       hint: 'https://…',
                       isDark: isDark,
                       keyboardType: TextInputType.url,
-                      validator: (value) => PortfolioValidators.optionalUrl(value),
+                      validator: (value) =>
+                          PortfolioValidators.optionalUrl(value),
+                      maxLength: 500,
                     ),
                   ],
                 ),
@@ -394,17 +435,23 @@ class _CertFormScreenState extends State<_CertFormScreen> {
           labelText: 'Issue Date',
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(10),
-            borderSide: BorderSide(color: isDark ? AppTheme.gray600 : AppTheme.gray300),
+            borderSide: BorderSide(
+              color: isDark ? AppTheme.gray600 : AppTheme.gray300,
+            ),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(10),
-            borderSide: BorderSide(color: isDark ? AppTheme.gray600 : AppTheme.gray300),
+            borderSide: BorderSide(
+              color: isDark ? AppTheme.gray600 : AppTheme.gray300,
+            ),
           ),
           filled: true,
           fillColor: isDark ? AppTheme.darkBackground : AppTheme.gray50,
         ),
         child: Text(
-          _issueDate != null ? DateFormat('MMM d, yyyy').format(_issueDate!) : 'Select date',
+          _issueDate != null
+              ? DateFormat('MMM d, yyyy').format(_issueDate!)
+              : 'Select date',
           style: AppTheme.bodyMedium.copyWith(
             color: _issueDate != null
                 ? (isDark ? Colors.white : AppTheme.gray900)
@@ -449,7 +496,9 @@ class _CertFormScreenState extends State<_CertFormScreen> {
           : null,
     );
 
-    final certifications = List<CertificationModel>.from(portfolio.certifications);
+    final certifications = List<CertificationModel>.from(
+      portfolio.certifications,
+    );
     if (existing != null) {
       final index = certifications.indexWhere((c) => c.id == existing.id);
       if (index >= 0) {
@@ -467,13 +516,15 @@ class _CertFormScreenState extends State<_CertFormScreen> {
 
     setState(() => _isSaving = false);
     if (success) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Certification saved.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Certification saved.')));
       Navigator.pop(context);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to save certification. Please try again.')),
+        const SnackBar(
+          content: Text('Failed to save certification. Please try again.'),
+        ),
       );
     }
   }

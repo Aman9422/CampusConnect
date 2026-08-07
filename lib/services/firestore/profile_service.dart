@@ -40,10 +40,30 @@ class ProfileService {
   }
 
   /// Create a new profile (first login)
+  ///
+  /// v8.4.8 (MB14): `createProfile` previously did `doc(uid).set(...)` with
+  /// **no merge**, which overwrites the WHOLE user document. `initializeProfile`
+  /// checks `profileExists` first, so normally this only runs when the doc is
+  /// missing — but a race between its `exists` check and this write (role /
+  /// setup re-entry, or a doc created by another flow in between) could land
+  /// the non-merge `set` on an existing document and silently destroy the
+  /// `portfolio` map (resume, projects, skills, …). Now this method re-checks
+  /// existence itself: a fresh doc gets the full `set` (initial creation),
+  /// while an existing doc is merged so `portfolio` and any sections not in
+  /// `StudentProfile.toFirestore()` are preserved.
   Future<void> createProfile(String uid, String email) async {
     try {
       final profile = StudentProfile.empty(uid, email);
-      await _usersCollection.doc(uid).set(profile.toFirestore());
+      final docRef = _usersCollection.doc(uid);
+      final existing = await docRef.get();
+      if (existing.exists) {
+        await docRef.set(
+          profile.toFirestore(),
+          SetOptions(merge: true),
+        );
+      } else {
+        await docRef.set(profile.toFirestore());
+      }
     } catch (e) {
       debugPrint('Error creating profile: $e');
       rethrow;
@@ -119,6 +139,33 @@ class ProfileService {
     } catch (e) {
       debugPrint('Error updating user role: $e');
       rethrow;
+    }
+  }
+
+  /// v8.4.9 (MB18): Backfill the auth email into `personal.email` when the
+  /// stored document has a blank/missing value (docs that predate the
+  /// denormalized field, or an older write that authored `personal` without
+  /// the email). Uses a targeted merge on `personal.email` only, so the
+  /// `portfolio` map and every other section are untouched. Returns true when
+  /// a write was issued; false when nothing needed changing.
+  Future<bool> backfillEmail(String uid, String email) async {
+    if (email.isEmpty) return false;
+    try {
+      final doc = await _usersCollection.doc(uid).get();
+      if (!doc.exists) return false;
+      final data = doc.data() as Map<String, dynamic>?;
+      final personal = data?['personal'] as Map<String, dynamic>?;
+      if (personal?['email'] is String &&
+          (personal!['email'] as String).isNotEmpty) {
+        return false; // already populated
+      }
+      await _usersCollection.doc(uid).set({
+        'personal.email': email,
+      }, SetOptions(merge: true));
+      return true;
+    } catch (e) {
+      debugPrint('Error backfilling email: $e');
+      return false; // non-fatal — the profile still loads
     }
   }
 

@@ -1,12 +1,20 @@
 import 'dart:convert';
-import 'package:http/http.dart' as http;
-import 'package:flutter/foundation.dart';
+
 import 'package:campusconnect/models/resume_review.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:flutter/foundation.dart';
 
 /// CampusConnect v6.7 - Resume Review Service
 ///
 /// Service for AI-powered resume analysis and ATS optimization.
 /// Uses Cloud Functions for processing.
+///
+/// v8.4.2 (S6b/P3): migrated from raw HTTPS calls to the `reviewResume`
+/// callable. The authenticated uid is resolved server-side from Firebase Auth
+/// (`request.auth.uid`); the monthly-quota rejection arrives as a
+/// `resource-exhausted` HttpsError and is mapped back to
+/// [ResumeReviewQuotaException]. Usage checks use the `{checkUsage: true}`
+/// callable flag (which replaced the old GET ?checkUsage=true endpoint).
 ///
 /// RULES:
 /// - One-shot request only (no conversation memory)
@@ -15,24 +23,21 @@ import 'package:campusconnect/models/resume_review.dart';
 /// - Requires authenticated user
 
 class ResumeReviewService {
-  static const String _cloudFunctionUrl =
-      'https://us-central1-campusconnect-firebase-project.cloudfunctions.net/reviewResume';
+  final FirebaseFunctions _functions;
 
   // Character limits for cost control
   static const int maxResumeLength = 5000; // ~1000 words
   static const int minResumeLength = 100; // At least some content
 
-  final http.Client _httpClient;
+  ResumeReviewService({FirebaseFunctions? functions})
+    : _functions = functions ?? FirebaseFunctions.instance;
 
-  ResumeReviewService(this._httpClient);
-
-  factory ResumeReviewService.instance() {
-    return ResumeReviewService(http.Client());
-  }
+  factory ResumeReviewService.instance() => ResumeReviewService();
 
   /// Submit resume for AI review
   ///
-  /// [userId] - Authenticated user's ID (required)
+  /// [userId] - Authenticated user's ID (server derives the identity from
+  /// Firebase Auth; kept as a parameter for API compatibility)
   /// [resumeText] - Resume content as plain text
   /// [targetRole] - Optional target job role for tailored advice
   ///
@@ -65,53 +70,50 @@ class ResumeReviewService {
 
       debugPrint('ResumeReviewService: Sending review request...');
 
-      // Make HTTP POST request to Cloud Function
-      final response = await _httpClient
-          .post(
-            Uri.parse(_cloudFunctionUrl),
-            headers: {'Content-Type': 'application/json'},
-            body: json.encode({
-              'userId': userId,
-              'resumeText': trimmedResume,
-              'targetRole': targetRole ?? 'General / Entry Level',
-              'experienceLevel': 'Student / Fresher',
-            }),
-          )
-          .timeout(
-            const Duration(seconds: 60), // Longer timeout for AI processing
-            onTimeout: () {
-              throw ResumeReviewException(
-                'Request timed out. Please try again.',
-              );
-            },
-          );
+      // v8.4.2 (S6b/P3): callable call — uid comes from Firebase Auth context
+      // on the server; the client no longer transmits `userId`.
+      final callable = _functions.httpsCallable(
+        'reviewResume',
+        options: HttpsCallableOptions(
+          timeout: const Duration(seconds: 120),
+        ),
+      );
+      final result = await callable.call<Map<String, dynamic>>({
+        'resumeText': trimmedResume,
+        'targetRole': targetRole ?? 'General / Entry Level',
+        'experienceLevel': 'Student / Fresher',
+      });
 
-      // Handle response
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body) as Map<String, dynamic>;
-        return ResumeReviewResponse.fromJson(data);
-      } else if (response.statusCode == 429) {
-        // Rate limit / quota exceeded
-        final data = json.decode(response.body) as Map<String, dynamic>;
-        throw ResumeReviewQuotaException(
-          data['error'] as String? ?? 'Monthly review limit reached',
-          usage: data['usage'] != null
-              ? ResumeReviewUsage.fromJson(
-                  data['usage'] as Map<String, dynamic>,
-                )
-              : null,
-        );
-      } else if (response.statusCode == 400) {
-        final error = json.decode(response.body);
-        throw ResumeReviewException(error['error'] ?? 'Invalid request');
-      } else if (response.statusCode == 401) {
-        throw ResumeReviewException('Please log in to review your resume');
-      } else if (response.statusCode == 500) {
-        throw ResumeReviewException('Server error. Please try again later.');
-      } else {
-        throw ResumeReviewException(
-          'Unexpected error (${response.statusCode}). Please try again.',
-        );
+      // Deep-convert to Map<String, dynamic> — the callable SDK returns nested
+      // maps as Map<Object?, Object?> which fails direct casts.
+      final data =
+          jsonDecode(jsonEncode(result.data)) as Map<String, dynamic>;
+      return ResumeReviewResponse.fromJson(data);
+    } on FirebaseFunctionsException catch (e) {
+      debugPrint('ResumeReviewService: function error ${e.code} - ${e.message}');
+      switch (e.code) {
+        case 'unauthenticated':
+          throw ResumeReviewException('Please log in to review your resume');
+        case 'resource-exhausted':
+          throw ResumeReviewQuotaException(
+            e.message ?? 'Monthly review limit reached',
+            usage: _usageFromDetails(e.details),
+          );
+        case 'invalid-argument':
+          throw ResumeReviewException(e.message ?? 'Invalid request');
+        case 'internal':
+        case 'unavailable':
+          throw ResumeReviewException(
+            'Server error. Please try again later.',
+          );
+        case 'deadline-exceeded':
+          throw ResumeReviewException(
+            'Request timed out. Please try again.',
+          );
+        default:
+          throw ResumeReviewException(
+            e.message ?? 'Failed to review resume',
+          );
       }
     } on ResumeReviewException {
       rethrow;
@@ -127,34 +129,44 @@ class ResumeReviewService {
     }
   }
 
-  /// Check current usage without submitting a review
+  /// Check current usage without submitting a review (callable flag).
   Future<ResumeReviewUsage> checkUsage(String userId) async {
     try {
-      final response = await _httpClient
-          .get(
-            Uri.parse('$_cloudFunctionUrl?userId=$userId&checkUsage=true'),
-            headers: {'Content-Type': 'application/json'},
-          )
+      final callable = _functions.httpsCallable('reviewResume');
+      final result = await callable
+          .call<Map<String, dynamic>>({'checkUsage': true})
           .timeout(const Duration(seconds: 10));
 
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body) as Map<String, dynamic>;
-        return ResumeReviewUsage.fromJson(
-          data['usage'] as Map<String, dynamic>? ?? {},
-        );
-      }
-
-      // Return default if check fails
-      return const ResumeReviewUsage(monthlyCount: 0, monthlyLimit: 5);
+      final data =
+          jsonDecode(jsonEncode(result.data)) as Map<String, dynamic>;
+      return ResumeReviewUsage.fromJson(
+        data['usage'] as Map<String, dynamic>? ?? {},
+      );
     } catch (e) {
       debugPrint('Failed to check usage: $e');
       return const ResumeReviewUsage(monthlyCount: 0, monthlyLimit: 5);
     }
   }
 
-  void dispose() {
-    _httpClient.close();
+  /// Extract usage from a quota-exceeded callable error's details payload.
+  ResumeReviewUsage? _usageFromDetails(Object? details) {
+    if (details is! Map) return null;
+    try {
+      final encoded = jsonEncode(details);
+      final map = jsonDecode(encoded) as Map<String, dynamic>;
+      return ResumeReviewUsage.fromJson(
+        map['usage'] as Map<String, dynamic>? ?? {},
+      );
+    } catch (e) {
+      debugPrint('ResumeReviewService: could not parse quota details: $e');
+      return null;
+    }
   }
+
+  /// Dispose of resources.
+  ///
+  /// v8.4.2 (S6b/P3): no-op — the callable client owns no HTTP resources.
+  void dispose() {}
 }
 
 /// Response wrapper from Cloud Function

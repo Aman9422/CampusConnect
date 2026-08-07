@@ -29,6 +29,11 @@ class ProfileProvider extends ChangeNotifier {
   // V6.3: Flag to stop operations after logout
   bool _isDisposed = false;
 
+  // v8.4.9 (MB18): uid for which the email backfill was already attempted —
+  // prevents re-reading the Firestore doc to re-check `personal.email` on
+  // every rebuild. Cleared on reset so a re-login tries again.
+  String? _emailBackfillUid;
+
   /// Initialize provider with userId (called from HomePage after auth)
   Future<void> initWithUser(String userId, String email) async {
     // Don't re-initialize if already done for this user
@@ -45,6 +50,33 @@ class ProfileProvider extends ChangeNotifier {
     try {
       _profile = await _profileService.initializeProfile(userId, email);
       if (_isDisposed) return; // V6.3: Stop if logged out during async
+
+      // v8.4.9 (MB18): backfill the auth email into `personal.email` for docs
+      // that stored a blank value (docs predating the denormalized field or
+      // an older write that authored `personal` without email). The service
+      // only writes a targeted `personal.email` merge (portfolio untouched)
+      // when the stored value is blank; `_emailBackfillUid` makes this a
+      // once-per-user attempt so we don't re-read the doc on every rebuild.
+      if (_emailBackfillUid != userId && email.isNotEmpty) {
+        _emailBackfillUid = userId;
+        final didBackfill = await _profileService.backfillEmail(
+          userId,
+          email,
+        );
+        if (didBackfill) {
+          // Mirror into memory so the setup/edit screens show the email now
+          // (the profile's personal.copyWith is pure — no Firestore write).
+          final current = _profile;
+          if (current != null &&
+              current.personal.email.isEmpty &&
+              !_isDisposed) {
+            _profile = current.copyWith(
+              personal: current.personal.copyWith(email: email),
+            );
+          }
+        }
+      }
+
       _isInitialized = true;
       _error = null;
     } catch (e) {
@@ -139,6 +171,7 @@ class ProfileProvider extends ChangeNotifier {
     _isInitialized = false;
     _error = null;
     _isSaving = false;
+    _emailBackfillUid = null; // v8.4.9 (MB18): retry backfill on next login
     notifyListeners();
   }
 }

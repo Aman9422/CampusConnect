@@ -2,6 +2,7 @@ import 'package:campusconnect/models/portfolio/portfolio_model.dart';
 import 'package:campusconnect/models/student_profile.dart';
 import 'package:campusconnect/services/firestore/portfolio_service.dart';
 import 'package:campusconnect/services/firestore/profile_service.dart';
+import 'package:campusconnect/services/firestore/resume_service.dart'; // v8.4.2 (S4c)
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/views/portfolio/widgets/portfolio_section_card.dart';
 import 'package:flutter/material.dart';
@@ -29,6 +30,9 @@ class _PortfolioReadOnlyViewState extends State<PortfolioReadOnlyView> {
   StudentProfile? _profile;
   bool _isLoading = true;
   String? _error;
+  // v8.4.2 (S4c/N2): target student's uid — needed to resolve the resume URL
+  // via ResumeService when the stored metadata only has a storagePath.
+  String? _userId;
 
   @override
   void initState() {
@@ -52,6 +56,7 @@ class _PortfolioReadOnlyViewState extends State<PortfolioReadOnlyView> {
       });
       return;
     }
+    _userId = userId;
 
     setState(() {
       _isLoading = true;
@@ -186,6 +191,13 @@ class _PortfolioReadOnlyViewState extends State<PortfolioReadOnlyView> {
 
             // Career Preferences
             _buildPreferencesSection(portfolio, isDark),
+            const SizedBox(height: AppTheme.space16),
+
+            // Languages (v8.4.1 T3)
+            if (portfolio.languages.isNotEmpty) ...[
+              _buildLanguagesSection(portfolio, isDark),
+              const SizedBox(height: AppTheme.space16),
+            ],
 
             if (portfolio.isEmpty) ...[
               const SizedBox(height: AppTheme.space16),
@@ -292,13 +304,69 @@ class _PortfolioReadOnlyViewState extends State<PortfolioReadOnlyView> {
           ? Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // v8.4.1 (T3): Resume Status chip (docs/Task.md Phase 3).
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppTheme.success.withValues(
+                      alpha: isDark ? 0.2 : 0.1,
+                    ),
+                    borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+                    border: Border.all(
+                      color: AppTheme.success.withValues(alpha: 0.3),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.check_circle_outline,
+                        size: 16,
+                        color: AppTheme.success,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Resume Uploaded',
+                        style: AppTheme.caption.copyWith(
+                          color: AppTheme.success,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: AppTheme.space12),
                 PortfolioInfoRow(
                   icon: Icons.description_outlined,
                   label: 'File',
                   value: resume!.fileName ?? 'resume.pdf',
                 ),
+                // v8.4.1 (T3): Latest ATS + resume age.
+                if (resume.latestATSScore != null)
+                  PortfolioInfoRow(
+                    icon: Icons.grade_outlined,
+                    label: 'Latest ATS Score',
+                    value: '${resume.latestATSScore}/100',
+                  ),
+                PortfolioInfoRow(
+                  icon: Icons.hourglass_bottom_outlined,
+                  label: 'Resume Age',
+                  value: resume.uploadedAt != null
+                      ? '${resume.resumeAgeInDays} day${resume.resumeAgeInDays == 1 ? '' : 's'}'
+                      : '—',
+                ),
                 PortfolioInfoRow(
                   icon: Icons.calendar_today_outlined,
+                  label: 'Uploaded',
+                  value: resume.uploadedAt != null
+                      ? DateFormat('MMM d, yyyy').format(resume.uploadedAt!)
+                      : '—',
+                ),
+                PortfolioInfoRow(
+                  icon: Icons.update_outlined,
                   label: 'Last Updated',
                   value: resume.lastUpdated != null
                       ? DateFormat('MMM d, yyyy').format(resume.lastUpdated!)
@@ -309,33 +377,104 @@ class _PortfolioReadOnlyViewState extends State<PortfolioReadOnlyView> {
                   label: 'Version',
                   value: 'v${resume.version}',
                 ),
-                if (resume.atsScore != null) ...[
-                  const SizedBox(height: AppTheme.space4),
+                PortfolioInfoRow(
+                  icon: Icons.rate_review_outlined,
+                  label: 'Reviews',
+                  value: '${resume.reviewCount}',
+                ),
+                PortfolioInfoRow(
+                  icon: Icons.event_note_outlined,
+                  label: 'Last Review',
+                  value: resume.lastReviewAt != null
+                      ? DateFormat('MMM d, yyyy').format(resume.lastReviewAt!)
+                      : '—',
+                ),
+                // v8.4.1 (T3): Storage metadata rows.
+                if (resume.fileSize != null)
                   PortfolioInfoRow(
-                    icon: Icons.grade_outlined,
-                    label: 'ATS Score',
-                    value: '${resume.atsScore}/100',
+                    icon: Icons.data_usage_outlined,
+                    label: 'Size',
+                    value: _formatFileSize(resume.fileSize!),
                   ),
-                ],
+                if (resume.mimeType?.isNotEmpty == true)
+                  PortfolioInfoRow(
+                    icon: Icons.file_present_outlined,
+                    label: 'Type',
+                    value: resume.mimeType!,
+                  ),
+                if (resume.storagePath?.isNotEmpty == true)
+                  PortfolioInfoRow(
+                    icon: Icons.folder_outlined,
+                    label: 'Storage Path',
+                    value: resume.storagePath!,
+                  ),
                 const SizedBox(height: AppTheme.space12),
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton.icon(
-                    onPressed: () =>
-                        _launchUrl(context, resume.downloadUrl!),
+                    onPressed: _openResume,
                     icon: const Icon(Icons.visibility_outlined, size: 18),
                     label: const Text('View Resume'),
                   ),
                 ),
               ],
             )
-          : Text(
-              'No resume uploaded yet.',
-              style: AppTheme.bodySmall.copyWith(
-                color: isDark ? AppTheme.gray400 : AppTheme.gray600,
-              ),
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // v8.4.1 (T3): "Not uploaded" status chip.
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppTheme.warning.withValues(
+                      alpha: isDark ? 0.2 : 0.1,
+                    ),
+                    borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+                    border: Border.all(
+                      color: AppTheme.warning.withValues(alpha: 0.3),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.pending_outlined,
+                        size: 16,
+                        color: AppTheme.warning,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'No Resume Uploaded',
+                        style: AppTheme.caption.copyWith(
+                          color: AppTheme.warning,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: AppTheme.space12),
+                Text(
+                  'No resume uploaded yet.',
+                  style: AppTheme.bodySmall.copyWith(
+                    color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+                  ),
+                ),
+              ],
             ),
     );
+  }
+
+  /// v8.4.1 (T3): Human-readable file size (e.g. "1.2 MB").
+  String _formatFileSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    final kb = bytes / 1024;
+    if (kb < 1024) return '${kb.toStringAsFixed(1)} KB';
+    final mb = kb / 1024;
+    return '${mb.toStringAsFixed(2)} MB';
   }
 
   Widget _buildSkillsSection(PortfolioModel portfolio, bool isDark) {
@@ -539,6 +678,13 @@ class _PortfolioReadOnlyViewState extends State<PortfolioReadOnlyView> {
               label: 'Expected Salary',
               value: prefs.expectedSalary!,
             ),
+          // v8.4.1 (T3): Career objective (docs/Task.md Phase 3).
+          if (prefs.careerObjective?.isNotEmpty == true)
+            PortfolioInfoRow(
+              icon: Icons.flag_outlined,
+              label: 'Career Objective',
+              value: prefs.careerObjective!,
+            ),
           PortfolioInfoRow(
             icon: Icons.wifi_tethering_outlined,
             label: 'Remote',
@@ -550,6 +696,38 @@ class _PortfolioReadOnlyViewState extends State<PortfolioReadOnlyView> {
             value: prefs.relocationPreference,
           ),
         ],
+      ),
+    );
+  }
+
+  /// v8.4.1 (T3): Languages section (docs/Task.md Phase 3).
+  Widget _buildLanguagesSection(PortfolioModel portfolio, bool isDark) {
+    return PortfolioSectionCard(
+      title: 'Languages',
+      child: Wrap(
+        spacing: AppTheme.space8,
+        runSpacing: AppTheme.space8,
+        children: portfolio.languages.map((language) {
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: AppTheme.secondaryIndigo.withValues(
+                alpha: isDark ? 0.2 : 0.1,
+              ),
+              borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+              border: Border.all(
+                color: AppTheme.secondaryIndigo.withValues(alpha: 0.25),
+              ),
+            ),
+            child: Text(
+              language,
+              style: AppTheme.bodySmall.copyWith(
+                fontWeight: FontWeight.w500,
+                color: isDark ? Colors.white : AppTheme.gray900,
+              ),
+            ),
+          );
+        }).toList(),
       ),
     );
   }
@@ -686,6 +864,41 @@ class _PortfolioReadOnlyViewState extends State<PortfolioReadOnlyView> {
       'hackerrank': 'HackerRank',
     };
     return labels[key] ?? key;
+  }
+
+  /// v8.4.2 (S4c/N2): Opens the resume via [ResumeService.getResumeUrl] so a
+  /// storagePath-only legacy resume (no cached `downloadUrl`) resolves through
+  /// Storage instead of crashing on a null-assert. Uses the State's own
+  /// [context] so the `mounted` guards satisfy the analyzer.
+  Future<void> _openResume() async {
+    final uid = _userId;
+    if (uid == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open resume')),
+        );
+      }
+      return;
+    }
+    try {
+      final url = await ResumeService.instance().getResumeUrl(uid);
+      if (url == null || url.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Resume URL could not be resolved')),
+          );
+        }
+        return;
+      }
+      if (!mounted) return;
+      await _launchUrl(context, url);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open resume')),
+        );
+      }
+    }
   }
 
   Future<void> _launchUrl(BuildContext context, String url) async {

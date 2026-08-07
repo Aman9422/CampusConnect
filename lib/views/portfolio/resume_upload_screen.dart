@@ -13,7 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 /// CampusConnect v8.4 — Resume Upload screen.
 ///
 /// Picks a PDF (≤ 5 MB), uploads it to Firebase Storage at
-/// `resumes/{uid}/resume.pdf`, then persists metadata under
+/// `resumes/{uid}/latest.pdf`, then persists metadata under
 /// `users/{uid}/portfolio.resume`. Also supports deleting the stored resume.
 class ResumeUploadScreen extends StatefulWidget {
   const ResumeUploadScreen({super.key});
@@ -146,8 +146,54 @@ class _ResumeUploadScreenState extends State<ResumeUploadScreen> {
             isDark: isDark,
           ),
           const SizedBox(height: AppTheme.space8),
+          // v8.4.1 (T3): Full storage metadata (docs/Task.md Phase 2).
+          if (resume.fileSize != null) ...[
+            _PortfolioResumeRow(
+              icon: Icons.data_usage_outlined,
+              label: 'Size',
+              value: _formatFileSize(resume.fileSize!),
+              isDark: isDark,
+            ),
+            const SizedBox(height: AppTheme.space8),
+          ],
+          if (resume.mimeType?.isNotEmpty == true) ...[
+            _PortfolioResumeRow(
+              icon: Icons.file_present_outlined,
+              label: 'Type',
+              value: resume.mimeType!,
+              isDark: isDark,
+            ),
+            const SizedBox(height: AppTheme.space8),
+          ],
+          if (resume.storagePath?.isNotEmpty == true) ...[
+            _PortfolioResumeRow(
+              icon: Icons.folder_outlined,
+              label: 'Storage Path',
+              value: resume.storagePath!,
+              isDark: isDark,
+            ),
+            const SizedBox(height: AppTheme.space8),
+          ],
+          if (resume.latestATSScore != null) ...[
+            _PortfolioResumeRow(
+              icon: Icons.grade_outlined,
+              label: 'Latest ATS',
+              value: '${resume.latestATSScore}/100',
+              isDark: isDark,
+            ),
+            const SizedBox(height: AppTheme.space8),
+          ],
           _PortfolioResumeRow(
             icon: Icons.calendar_today_outlined,
+            label: 'Uploaded',
+            value: resume.uploadedAt != null
+                ? DateFormat('MMM d, yyyy').format(resume.uploadedAt!)
+                : '—',
+            isDark: isDark,
+          ),
+          const SizedBox(height: AppTheme.space8),
+          _PortfolioResumeRow(
+            icon: Icons.update_outlined,
             label: 'Last Updated',
             value: resume.lastUpdated != null
                 ? DateFormat('MMM d, yyyy').format(resume.lastUpdated!)
@@ -161,9 +207,27 @@ class _ResumeUploadScreenState extends State<ResumeUploadScreen> {
             value: 'v${resume.version}',
             isDark: isDark,
           ),
+          if (resume.reviewCount > 0) ...[
+            const SizedBox(height: AppTheme.space8),
+            _PortfolioResumeRow(
+              icon: Icons.rate_review_outlined,
+              label: 'Reviews',
+              value: '${resume.reviewCount}',
+              isDark: isDark,
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  /// v8.4.1 (T3): Human-readable file size (e.g. "1.2 MB").
+  String _formatFileSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    final kb = bytes / 1024;
+    if (kb < 1024) return '${kb.toStringAsFixed(1)} KB';
+    final mb = kb / 1024;
+    return '${mb.toStringAsFixed(2)} MB';
   }
 
   Widget _buildEmptyState(bool isDark, bool isUploading, String? userId) {

@@ -21,6 +21,63 @@ class PortfolioService {
 
   CollectionReference get _usersCollection => _firestore.collection('users');
 
+  /// Extract the portfolio section map from a user document.
+  ///
+  /// v8.4.9 (MB17): the app writes the canonical NESTED shape
+  /// (`portfolio.skills`, `portfolio.projects`, …), but Firebase-console JSON
+  /// edits and legacy writers store FLATTENED root-level keys whose NAMES
+  /// contain dots (`portfolio.resume`, `portfolio.projects`,
+  /// `portfolio.resume.downloadUrl`, …). The reader previously looked only at
+  /// `data['portfolio']`, so a flattened doc returned empty even though the
+  /// console clearly held all the data — the confirmed mechanism behind
+  /// Symptom 1. This helper handles both shapes:
+  ///   1. Nested `portfolio` map → returned as-is.
+  ///   2. Otherwise, any root-level key starting with `portfolio.` is
+  ///      un-flattened through `_unflattenPaths` into a (possibly nested)
+  ///      portfolio map. Keys with a LONGER path than one segment are
+  ///      re-nested under their section (e.g. `portfolio.resume.downloadUrl`
+  ///      becomes `portfolios['resume']['downloadUrl']`).
+  ///   3. No nested map and no dotted keys → null (caller returns empty).
+  Map<String, dynamic>? _extractPortfolioMap(Map<String, dynamic>? data) {
+    if (data == null) return null;
+
+    final nested = data['portfolio'];
+    if (nested is Map<String, dynamic>) {
+      return nested;
+    }
+
+    final flatPortfolioKeys = data.keys
+        .where((key) => key.startsWith('portfolio.') && key.length > 10)
+        .toList();
+    if (flatPortfolioKeys.isEmpty) {
+      return null;
+    }
+
+    final flat = <String, dynamic>{};
+    for (final key in flatPortfolioKeys) {
+      flat[key.substring('portfolio.'.length)] = data[key];
+    }
+    return _unflattenPaths(flat);
+  }
+
+  /// Converts dot-path keys into a nested map, e.g.:
+  ///   `resume.downloadUrl` → `{ 'resume': { 'downloadUrl': value } }`
+  ///   `projects` (list)     → `{ 'projects': [...] }`
+  Map<String, dynamic> _unflattenPaths(Map<String, dynamic> flat) {
+    final result = <String, dynamic>{};
+    for (final entry in flat.entries) {
+      final path = entry.key.split('.');
+      var cursor = result;
+      for (var i = 0; i < path.length - 1; i++) {
+        final segment = path[i];
+        cursor = cursor.putIfAbsent(segment, () => <String, dynamic>{})
+            as Map<String, dynamic>;
+      }
+      cursor[path.last] = entry.value;
+    }
+    return result;
+  }
+
   /// Fetch the portfolio for a specific user by UID.
   /// Returns an empty portfolio when the document or portfolio key is missing.
   ///
@@ -28,13 +85,40 @@ class PortfolioService {
   /// callers can distinguish "no portfolio yet" from "failed to load". The
   /// previous behaviour swallowed every error and returned an empty portfolio,
   /// which made the read-only view show "no portfolio" on permission errors.
+  ///
+  /// v8.4.8 (MB13): when a user document EXISTS but has no `portfolio` key, a
+  /// diagnostic is printed with the uid and the keys actually present on the
+  /// doc. This distinguishes the two "console has data, app shows empty"
+  /// scenarios in one debug run:
+  ///   - UID mismatch (candidate A): the console data lives under a DIFFERENT
+  ///     uid than the one the app is logged in as — the doc for THIS uid has
+  ///     no `portfolio` key.
+  ///   - Wiped doc (candidates B/C): the doc for THIS uid exists but its
+  ///     `portfolio` was overwritten/never written (e.g. `createProfile`'s
+  ///     non-merge `set()`).
+  /// The `portfolio` value is also read with a type check instead of a cast
+  /// so a malformed (non-map) `portfolio` field degrades to empty + logs
+  /// rather than throwing a TypeError.
+  ///
+  /// v8.4.9 (MB17): a doc with FLATTENED root-level `portfolio.*` keys (see
+  /// [_extractPortfolioMap]) now parses to the real portfolio instead of
+  /// empty — this was the true root cause of "console has data, app shows
+  /// empty" confirmed on-device by the MB13 diagnostic.
   Future<PortfolioModel> getPortfolio(String uid) async {
     final doc = await _usersCollection.doc(uid).get();
     if (!doc.exists) return PortfolioModel.empty();
 
     final data = doc.data() as Map<String, dynamic>?;
-    final portfolioData = data?['portfolio'] as Map<String, dynamic>?;
-    if (portfolioData == null) return PortfolioModel.empty();
+    final portfolioData = _extractPortfolioMap(data);
+    if (portfolioData == null) {
+      final rawPortfolio = data?['portfolio'];
+      debugPrint(
+        'PortfolioService.getPortfolio: doc USERS/$uid EXISTS but '
+        'portfolio key is ${rawPortfolio == null ? 'MISSING' : 'not a map'}. '
+        'Doc keys present: ${data?.keys ?? const []}',
+      );
+      return PortfolioModel.empty();
+    }
 
     return PortfolioModel.fromMap(portfolioData);
   }
@@ -104,11 +188,16 @@ class PortfolioService {
   }
 
   /// Stream portfolio changes in real time (owner is the only writer).
+  ///
+  /// v8.4.9 (MB17): uses the same tolerant [_extractPortfolioMap] as
+  /// [getPortfolio] so a doc whose portfolio is stored as flattened
+  /// root-level `portfolio.*` keys (Firebase-console edits / legacy writers)
+  /// stream the REAL portfolio instead of an empty one.
   Stream<PortfolioModel> portfolioStream(String uid) {
     return _usersCollection.doc(uid).snapshots().map((doc) {
       if (!doc.exists) return PortfolioModel.empty();
       final data = doc.data() as Map<String, dynamic>?;
-      final portfolioData = data?['portfolio'] as Map<String, dynamic>?;
+      final portfolioData = _extractPortfolioMap(data);
       if (portfolioData == null) return PortfolioModel.empty();
       return PortfolioModel.fromMap(portfolioData);
     });

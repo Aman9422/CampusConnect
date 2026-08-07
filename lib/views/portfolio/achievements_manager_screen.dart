@@ -313,6 +313,7 @@ class _AchievementFormScreenState extends State<_AchievementFormScreen> {
                       isDark: isDark,
                       validator: (value) => PortfolioValidators.required(value, 'Title'),
                       textCapitalization: TextCapitalization.sentences,
+                      maxLength: 200,
                     ),
                     const SizedBox(height: AppTheme.space16),
                     PortfolioTextField(
@@ -322,6 +323,7 @@ class _AchievementFormScreenState extends State<_AchievementFormScreen> {
                       isDark: isDark,
                       maxLines: 4,
                       textCapitalization: TextCapitalization.sentences,
+                      maxLength: 1000,
                     ),
                   ],
                 ),

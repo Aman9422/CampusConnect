@@ -1,3 +1,4 @@
+import 'package:campusconnect/models/portfolio/portfolio_parse.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 /// CampusConnect v8.4 — Student portfolio experience entry.
@@ -30,15 +31,17 @@ class ExperienceModel {
   }
 
   factory ExperienceModel.fromMap(Map<String, dynamic> map) {
+    // v8.4.7: tolerant reads — dates may arrive as Timestamp, DateTime or
+    // ISO-8601 String; never throws; bad fields degrade to defaults.
     return ExperienceModel(
-      id: map['id'] as String? ?? '',
-      company: map['company'] as String? ?? '',
-      role: map['role'] as String? ?? '',
-      employmentType: map['employmentType'] as String? ?? 'Internship',
-      description: map['description'] as String? ?? '',
-      startDate: (map['startDate'] as Timestamp?)?.toDate(),
-      endDate: (map['endDate'] as Timestamp?)?.toDate(),
-      currentlyWorking: map['currentlyWorking'] as bool? ?? false,
+      id: asString(map['id']) ?? '',
+      company: asString(map['company']) ?? '',
+      role: asString(map['role']) ?? '',
+      employmentType: asString(map['employmentType']) ?? 'Internship',
+      description: asString(map['description']) ?? '',
+      startDate: tsToDate(map['startDate']),
+      endDate: tsToDate(map['endDate']),
+      currentlyWorking: asBool(map['currentlyWorking']) ?? false,
     );
   }
 

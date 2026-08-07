@@ -3,7 +3,9 @@ import 'package:campusconnect/models/placement.dart';
 import 'package:campusconnect/models/placement_eligibility.dart';
 import 'package:campusconnect/providers/layout_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
+import 'package:campusconnect/providers/portfolio_provider.dart'; // v8.4.1
 import 'package:campusconnect/providers/role_provider.dart';
+import 'package:campusconnect/services/firestore/resume_service.dart'; // v8.4.2 (S4b)
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/utilities/error_messages.dart';
 import 'package:campusconnect/views/widgets/eligibility_badge.dart';
@@ -668,12 +670,70 @@ class _ApplyDialogWidget extends StatefulWidget {
 class _ApplyDialogWidgetState extends State<_ApplyDialogWidget> {
   late final TextEditingController _resumeController;
   bool _isLoading = false;
+  bool _isResolvingResume = false; // v8.4.2 (S4b/M4)
   String? _errorMessage;
+
+  /// v8.4.1 (T5): Resume snapshot from the student's uploaded portfolio resume
+  /// (docs/Task.md Phase 8). Null when no resume is uploaded.
+  String? _resumeUrl;
+  int? _resumeVersion;
+  String? _resumeStoragePath;
+  int? _atsScoreAtApplication;
+
+  bool _seededResume = false;
 
   @override
   void initState() {
     super.initState();
     _resumeController = TextEditingController();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_seededResume) return; // Seed once.
+    _seededResume = true;
+    _loadResumeSnapshot();
+  }
+
+  /// v8.4.2 (S4b/M4): never silently drop the resume snapshot. Awaits the
+  /// portfolio init when the dialog opens before it completes, and resolves
+  /// storagePath-only (legacy) resumes via [ResumeService.getResumeUrl].
+  Future<void> _loadResumeSnapshot() async {
+    final portfolioProvider = context.read<PortfolioProvider>();
+
+    // Await init when the dialog opens before the provider has loaded.
+    if (!portfolioProvider.isInitialized || portfolioProvider.portfolio == null) {
+      final uid = portfolioProvider.currentUserId;
+      if (uid == null) return; // No signed-in uid — text-paste fallback.
+      if (mounted) setState(() => _isResolvingResume = true);
+      await portfolioProvider.initWithUser(uid);
+      if (!mounted) return;
+      setState(() => _isResolvingResume = false);
+    }
+
+    final portfolio = portfolioProvider.portfolio;
+    final resume = portfolio?.resume;
+    if (resume?.hasResume != true) return;
+
+    String? url = resume!.downloadUrl;
+    if (url == null || url.isEmpty) {
+      // Legacy resume with only `storagePath` — resolve via Storage.
+      final uid = portfolioProvider.currentUserId;
+      if (uid != null) {
+        if (mounted) setState(() => _isResolvingResume = true);
+        url = await ResumeService.instance().getResumeUrl(uid);
+        if (!mounted) return;
+        setState(() => _isResolvingResume = false);
+      }
+    }
+
+    setState(() {
+      _resumeUrl = url ?? '';
+      _resumeVersion = resume.version;
+      _resumeStoragePath = resume.storagePath;
+      _atsScoreAtApplication = resume.latestATSScore;
+    });
   }
 
   @override
@@ -684,22 +744,93 @@ class _ApplyDialogWidgetState extends State<_ApplyDialogWidget> {
 
   @override
   Widget build(BuildContext context) {
+    final hasUploadedResume = _resumeUrl?.isNotEmpty == true;
+
     return AlertDialog(
       title: const Text('Apply for Placement'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(
-              controller: _resumeController,
-              maxLines: 4,
-              decoration: InputDecoration(
-                hintText: 'Paste your resume or brief background...',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
+            // v8.4.2 (S4b/M4): Show feedback while the resume snapshot is
+            // being resolved (portfolio init or Storage URL fallback).
+            if (_isResolvingResume) ...[
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Text('Loading your resume…'),
+                    ),
+                  ],
                 ),
               ),
-            ),
+            ],
+            // v8.4.1 (T5): Prefer the uploaded resume; the text field is the
+            // fallback used only when no resume has been uploaded.
+            if (hasUploadedResume)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(AppTheme.space12),
+                decoration: BoxDecoration(
+                  color: AppTheme.success.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: AppTheme.success.withValues(alpha: 0.3),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.check_circle_outline,
+                          size: 16,
+                          color: AppTheme.success,
+                        ),
+                        const SizedBox(width: AppTheme.space8),
+                        Expanded(
+                          child: Text(
+                            'Your uploaded resume will be attached',
+                            style: AppTheme.bodySmall.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.success,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (_resumeVersion != null) ...[
+                      const SizedBox(height: AppTheme.space4),
+                      Text(
+                        'Resume v$_resumeVersion · '
+                        'ATS ${_atsScoreAtApplication ?? '—'}/100',
+                        style: AppTheme.caption.copyWith(
+                          color: AppTheme.gray600,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              )
+            else
+              TextField(
+                controller: _resumeController,
+                maxLines: 4,
+                decoration: InputDecoration(
+                  hintText: 'Paste your resume or brief background...',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
             if (_errorMessage != null) ...[
               const SizedBox(height: 12),
               Text(
@@ -730,7 +861,10 @@ class _ApplyDialogWidgetState extends State<_ApplyDialogWidget> {
   }
 
   Future<void> _submitApplication() async {
-    final resume = _resumeController.text.trim();
+    // v8.4.1 (T5): Use the uploaded resume URL when available; fall back to
+    // the manually-entered text only when no resume is uploaded.
+    final hasUploadedResume = _resumeUrl?.isNotEmpty == true;
+    final resume = hasUploadedResume ? _resumeUrl! : _resumeController.text.trim();
     if (resume.isEmpty) {
       setState(() {
         _errorMessage = 'Please provide your resume or background information.';
@@ -751,6 +885,12 @@ class _ApplyDialogWidgetState extends State<_ApplyDialogWidget> {
         resume: resume,
         company: widget.company,
         role: widget.role,
+        // v8.4.1 (T5): Resume snapshot at apply time.
+        resumeVersion: hasUploadedResume ? _resumeVersion : null,
+        resumeStoragePath: hasUploadedResume ? _resumeStoragePath : null,
+        atsScoreAtApplication: hasUploadedResume
+            ? _atsScoreAtApplication
+            : null,
       );
 
       if (mounted && success) {

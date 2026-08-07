@@ -25,6 +25,7 @@ import 'package:campusconnect/views/widgets/chat_badge.dart';
 import 'package:campusconnect/views/widgets/eligibility_badge.dart';
 import 'package:campusconnect/views/widgets/notification_badge.dart';
 import 'package:campusconnect/widgets/home_widgets.dart';
+import 'package:campusconnect/widgets/resume_summary_card.dart'; // v8.4.1
 // v7.3: Extracted feature views (Phase 1 NotesView decomposition)
 import 'package:campusconnect/views/notes/notes_list_view.dart';
 import 'package:campusconnect/views/placements/placements_list_view.dart';
@@ -184,9 +185,10 @@ class _StudentDashboardTab extends StatelessWidget {
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: () async {
-          await Future.delayed(const Duration(milliseconds: 500));
-        },
+        // v8.4.3 (MB1): pull-to-refresh now reloads the portfolio instead of
+        // the previous no-op delay — fixes stale resume/summary state after
+        // an upload edit (Bugs 1/3).
+        onRefresh: () => context.read<PortfolioProvider>().refresh(),
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.all(16),
@@ -210,6 +212,20 @@ class _StudentDashboardTab extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 20),
+
+              // v8.4.1 (T4): Resume portfolio summary card
+              // v8.4.8 (MB15): pass provider.error into the card so a failed
+              // load surfaces a banner on the dashboard instead of silently
+              // masquerading as a fresh (empty) portfolio — Symptom 1's UI.
+              Consumer<PortfolioProvider>(
+                builder: (context, portfolioProvider, child) {
+                  return ResumeSummaryCard(
+                    resume: portfolioProvider.portfolio?.resume,
+                    error: portfolioProvider.error,
+                  );
+                },
+              ),
+              const SizedBox(height: 24),
 
               // Featured Event Card
               const FeaturedCard(),

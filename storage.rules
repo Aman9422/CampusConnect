@@ -2,15 +2,19 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
     // v8.4: Resume PDF storage
-    // Layout: resumes/{uid}/resume.pdf
+    // Layout: resumes/{uid}/latest.pdf
+    // (the {fileName} wildcard also covers future history/ paths)
     match /resumes/{userId}/{fileName} {
       // Owner can upload/overwrite/delete their own resume.
       // H2: Enforce PDF-only + 5 MB limit server-side so malicious/buggy
       // clients cannot write arbitrary content types or oversized files.
+      // C1: `request.resource` is null on delete — the null branch permits
+      // owner deletes; the `<=` boundary matches the client validator (L3).
       allow write: if request.auth != null &&
         request.auth.uid == userId &&
-        request.resource.contentType.matches('application/pdf') &&
-        request.resource.size < 5 * 1024 * 1024;
+        (request.resource == null ||
+         (request.resource.contentType.matches('application/pdf') &&
+          request.resource.size <= 5 * 1024 * 1024));
 
       // Owner + teachers + alumni can read resumes (teachers/alumni
       // view student portfolios read-only).

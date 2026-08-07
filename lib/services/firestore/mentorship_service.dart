@@ -1,8 +1,6 @@
 import 'package:campusconnect/models/mentorship_request.dart';
 import 'package:campusconnect/models/student_profile.dart';
-import 'package:campusconnect/models/app_notification.dart'; // v7.3
 import 'package:campusconnect/services/firestore/chat_service.dart'; // v7.3
-import 'package:campusconnect/services/firestore/notifications_service.dart'; // v7.3
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
@@ -57,20 +55,11 @@ class MentorshipService {
 
       await docRef.set(request.toFirestore());
 
-      // v7.3: Notify alumni of new mentorship request
-      try {
-        final notificationService = NotificationsService.instance();
-        await notificationService.createNotification(
-          alumniId,
-          AppNotification.mentorshipRequested(
-            requestId: docRef.id,
-            studentName: studentProfile.personal.effectiveDisplayName,
-          ),
-        );
-      } catch (e) {
-        debugPrint('Error creating mentorship request notification: $e');
-        // Don't fail the request if notification fails
-      }
+      // v8.4.3 (MB8): the alumni notification is now delivered by the
+      // server-side `onMentorshipRequestCreated` trigger (Admin SDK bypasses
+      // the owner-write-only notifications rule). The previous client-side
+      // write here always failed with PERMISSION_DENIED (Bug 5) — removed so
+      // the log noise disappears and no duplicate is created.
 
       return docRef.id;
     } catch (e) {
@@ -177,35 +166,12 @@ class MentorshipService {
 
       await _mentorshipRequestsCollection.doc(requestId).update(updateData);
 
-      // v7.3: Notify student of response
-      try {
-        final request = await getRequestById(requestId);
-        if (request != null) {
-          final notificationService = NotificationsService.instance();
-
-          if (accepted && chatId != null) {
-            await notificationService.createNotification(
-              request.studentId,
-              AppNotification.mentorshipAccepted(
-                requestId: requestId,
-                alumniName: request.alumniName,
-                chatId: chatId,
-              ),
-            );
-          } else if (!accepted) {
-            await notificationService.createNotification(
-              request.studentId,
-              AppNotification.mentorshipRejected(
-                requestId: requestId,
-                alumniName: request.alumniName,
-              ),
-            );
-          }
-        }
-      } catch (e) {
-        debugPrint('Error creating response notification: $e');
-        // Don't fail the response if notification fails
-      }
+      // v8.4.3 (MB8): the student notification on accept/reject is now
+      // delivered by the server-side `onMentorshipRequestResponseNotifyStudent`
+      // trigger (Admin SDK bypasses the owner-write-only notifications rule).
+      // The previous client-side write always failed with PERMISSION_DENIED
+      // (Bug 5) — removed so the log noise disappears and no duplicate is
+      // created.
 
       return chatId; // Return chatId for navigation
     } catch (e) {

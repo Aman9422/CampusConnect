@@ -86,9 +86,14 @@ service cloud.firestore {
       // (placement status changes, announcements, etc.) are written by the
       // Cloud Functions Admin SDK, which bypasses security rules entirely —
       // so tightening this does not break system notifications.
+      // v8.4.2 (S5a/L4): allow owner deletes — the UI exposes swipe-to-delete
+      // (NotificationsProvider.deleteNotification) and "Clear read
+      // notifications" (clearReadNotifications), both of which previously
+      // threw permission-denied.
       match /notifications/{notificationId} {
         allow read, update: if isOwner(userId);
         allow create: if isOwner(userId);
+        allow delete: if isOwner(userId);
       }
       
       // v6.5: AI Insights (read-only, Cloud Functions write)

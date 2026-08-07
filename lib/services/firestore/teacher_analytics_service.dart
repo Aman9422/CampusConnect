@@ -25,7 +25,9 @@ class TeacherAnalyticsService {
   /// Get resume review aggregate statistics.
   Future<Map<String, dynamic>> getResumeReviewStats() async {
     try {
-      final reviewsQuery = await _firestore.collectionGroup('resumeReviews').get();
+      final reviewsQuery = await _firestore
+          .collectionGroup('resumeReviews')
+          .get();
 
       if (reviewsQuery.docs.isEmpty) {
         return _emptyReviewStats();
@@ -75,7 +77,6 @@ class TeacherAnalyticsService {
       for (final userDoc in usersQuery.docs) {
         try {
           final latestReview = await _getLatestReview(userDoc.id);
-          if (latestReview == null) continue;
 
           int reviewCount = 0;
           try {
@@ -100,8 +101,17 @@ class TeacherAnalyticsService {
             }
           }
 
-          final latestScore = _extractScore(latestReview.data);
-          if (latestScore < 0) continue;
+          // Every student enters the leaderboard, WITH or WITHOUT resume
+          // reviews. A student who has never submitted a review is still a
+          // student — including them keeps `studentData` consistent with the
+          // pipeline / department / engagement counts (previously the device
+          // log showed "0 students" while pipeline/dept/engagement found 1),
+          // and lets at-risk detection flag them via the "No resume reviews"
+          // signal. A missing or malformed atsScore degrades to 0.
+          final rawScore = latestReview == null
+              ? 0
+              : _extractScore(latestReview.data);
+          final latestScore = rawScore < 0 ? 0 : rawScore;
 
           // Get department from user profile
           final department = _getStudentDepartment(userDoc.data());
@@ -112,7 +122,7 @@ class TeacherAnalyticsService {
             'department': department,
             'latestScore': latestScore,
             'reviewCount': reviewCount,
-            'lastReviewedAt': latestReview.createdAt,
+            'lastReviewedAt': latestReview?.createdAt,
           });
         } catch (e) {
           debugPrint(
@@ -122,8 +132,9 @@ class TeacherAnalyticsService {
       }
 
       studentData.sort((a, b) {
-        final scoreCompare =
-            (b['latestScore'] as int).compareTo(a['latestScore'] as int);
+        final scoreCompare = (b['latestScore'] as int).compareTo(
+          a['latestScore'] as int,
+        );
         if (scoreCompare != 0) return scoreCompare;
         final dateA = a['lastReviewedAt'] as DateTime?;
         final dateB = b['lastReviewedAt'] as DateTime?;
@@ -183,12 +194,11 @@ class TeacherAnalyticsService {
                 if (score < 50) atRisk++;
               }
               // Collect missing keywords from latest review
-              final missing = (latestReview.data['missingKeywords']
-                      as List<dynamic>? ??
-                  [])
-                  .whereType<String>()
-                  .map((s) => s.trim().toLowerCase())
-                  .where((s) => s.isNotEmpty);
+              final missing =
+                  (latestReview.data['missingKeywords'] as List<dynamic>? ?? [])
+                      .whereType<String>()
+                      .map((s) => s.trim().toLowerCase())
+                      .where((s) => s.isNotEmpty);
               for (final skill in missing) {
                 deptSkills[skill] = (deptSkills[skill] ?? 0) + 1;
               }
@@ -223,8 +233,10 @@ class TeacherAnalyticsService {
       }
 
       // Sort by studentCount descending as a proxy for placement readiness
-      deptAnalytics.sort((a, b) =>
-          (b['studentCount'] as int).compareTo(a['studentCount'] as int));
+      deptAnalytics.sort(
+        (a, b) =>
+            (b['studentCount'] as int).compareTo(a['studentCount'] as int),
+      );
 
       return deptAnalytics;
     } catch (e) {
@@ -263,14 +275,18 @@ class TeacherAnalyticsService {
       // Critical: we count unique userIds, NOT application documents
       int distinctAppliedStudents = 0;
       try {
-        final appsQuery = await _firestore.collectionGroup('applications').get();
+        final appsQuery = await _firestore
+            .collectionGroup('applications')
+            .get();
         final uniqueStudentIds = appsQuery.docs
             .map((doc) => doc.data()['userId'] as String?)
             .where((id) => id != null)
             .toSet();
         distinctAppliedStudents = uniqueStudentIds.length;
       } catch (e) {
-        debugPrint('TeacherAnalyticsService: collectionGroup apps query error: $e');
+        debugPrint(
+          'TeacherAnalyticsService: collectionGroup apps query error: $e',
+        );
       }
 
       return PlacementPipelineData(
@@ -279,7 +295,9 @@ class TeacherAnalyticsService {
         // Shortlisted, Interview, Placed — not trackable without schema change
       );
     } catch (e) {
-      debugPrint('TeacherAnalyticsService.getApplicationPipelineCounts error: $e');
+      debugPrint(
+        'TeacherAnalyticsService.getApplicationPipelineCounts error: $e',
+      );
       return const PlacementPipelineData(
         eligibleStudents: 0,
         appliedStudents: 0,
@@ -313,7 +331,8 @@ class TeacherAnalyticsService {
           if (engagementDoc.exists) {
             final data = engagementDoc.data() ?? {};
             totalEngagement += (data['engagementScore'] as num? ?? 0).round();
-            totalProfileStrength += (data['profileStrength'] as num? ?? 0).round();
+            totalProfileStrength += (data['profileStrength'] as num? ?? 0)
+                .round();
             count++;
           }
         } catch (_) {}
@@ -331,7 +350,9 @@ class TeacherAnalyticsService {
 
       return {
         'avgEngagement': count > 0 ? (totalEngagement / count).round() : 0,
-        'avgProfileStrength': count > 0 ? (totalProfileStrength / count).round() : 0,
+        'avgProfileStrength': count > 0
+            ? (totalProfileStrength / count).round()
+            : 0,
         'activeAlumni': activeAlumni,
         'studentCount': count,
       };
@@ -376,7 +397,8 @@ class TeacherAnalyticsService {
         }
       }
 
-      final predictedPlacementRate = (highPotential * 0.9 + mediumPotential * 0.5) /
+      final predictedPlacementRate =
+          (highPotential * 0.9 + mediumPotential * 0.5) /
           max(1, students.length);
 
       return {
@@ -429,11 +451,7 @@ class TeacherAnalyticsService {
             : count >= 7
             ? 'medium'
             : 'low';
-        return {
-          'skill': entry.key,
-          'count': count,
-          'severity': severity,
-        };
+        return {'skill': entry.key, 'count': count, 'severity': severity};
       }).toList();
     } catch (e) {
       debugPrint('TeacherAnalyticsService.getSkillGapAnalysis error: $e');
@@ -446,10 +464,15 @@ class TeacherAnalyticsService {
     int pastMonths = 6,
   }) async {
     try {
-      final startDate = DateTime.now().subtract(Duration(days: pastMonths * 30));
+      final startDate = DateTime.now().subtract(
+        Duration(days: pastMonths * 30),
+      );
       final snapshot = await _firestore
           .collectionGroup('resumeReviews')
-          .where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(startDate))
+          .where(
+            'createdAt',
+            isGreaterThanOrEqualTo: Timestamp.fromDate(startDate),
+          )
           .get();
 
       final monthly = <String, List<int>>{};
@@ -465,19 +488,18 @@ class TeacherAnalyticsService {
         monthly.putIfAbsent(monthKey, () => <int>[]).add(score);
       }
 
-      final trends = monthly.entries.map((entry) {
-        final scores = entry.value;
-        final avgScore = scores.reduce((a, b) => a + b) / scores.length;
-        return {
-          'month': entry.key,
-          'avgScore': avgScore.round(),
-          'reviewCount': scores.length,
-        };
-      }).toList()
-        ..sort(
-          (a, b) =>
-              (a['month'] as String).compareTo(b['month'] as String),
-        );
+      final trends =
+          monthly.entries.map((entry) {
+            final scores = entry.value;
+            final avgScore = scores.reduce((a, b) => a + b) / scores.length;
+            return {
+              'month': entry.key,
+              'avgScore': avgScore.round(),
+              'reviewCount': scores.length,
+            };
+          }).toList()..sort(
+            (a, b) => (a['month'] as String).compareTo(b['month'] as String),
+          );
 
       return trends;
     } catch (e) {
@@ -489,7 +511,9 @@ class TeacherAnalyticsService {
   }
 
   /// Backward-compatible alias used by existing UI.
-  Future<List<Map<String, dynamic>>> getReviewTrends({int pastDays = 30}) async {
+  Future<List<Map<String, dynamic>>> getReviewTrends({
+    int pastDays = 30,
+  }) async {
     final months = max(1, (pastDays / 30).ceil());
     return getPerformanceTrendInsights(pastMonths: months);
   }
@@ -498,23 +522,40 @@ class TeacherAnalyticsService {
     return {
       'totalReviews': 0,
       'avgScore': 0.0,
-      'scoreDistribution': {
-        'excellent': 0,
-        'good': 0,
-        'fair': 0,
-        'poor': 0,
-      },
+      'scoreDistribution': {'excellent': 0, 'good': 0, 'fair': 0, 'poor': 0},
     };
   }
 
   int _extractScore(Map<String, dynamic> data) {
-    return data['atsScore'] as int? ?? -1;
+    final atsScore = data['atsScore'];
+    if (atsScore is int && atsScore >= 0 && atsScore <= 100) {
+      return atsScore;
+    }
+    // Tolerant of numbers / non-int literals.
+    if (atsScore is num) {
+      return atsScore.toInt().clamp(0, 100);
+    }
+    // Legacy/external writers may use a string or the snake_case field name.
+    final scoreString = data['ats_score'];
+    if (scoreString is String) {
+      final parsed = int.tryParse(scoreString);
+      if (parsed != null) return parsed.clamp(0, 100);
+    }
+    return -1;
   }
 
   DateTime? _extractDate(Map<String, dynamic> data) {
-    final createdAt = data['createdAt'] as Timestamp?;
-    final reviewedAt = data['reviewedAt'] as Timestamp?;
-    return createdAt?.toDate() ?? reviewedAt?.toDate();
+    // Current Timestamp fields first.
+    final createdAt = data['createdAt'];
+    if (createdAt is Timestamp) return createdAt.toDate();
+    final reviewedAt = data['reviewedAt'];
+    if (reviewedAt is Timestamp) return reviewedAt.toDate();
+
+    // Legacy writers may store ISO-8601 strings instead of Timestamps.
+    if (createdAt is String) return DateTime.tryParse(createdAt);
+    if (reviewedAt is String) return DateTime.tryParse(reviewedAt);
+
+    return null;
   }
 
   Future<_LatestReview?> _getLatestReview(String userId) async {
@@ -582,13 +623,15 @@ class TeacherAnalyticsService {
   /// v8.2: Extract department from user profile data.
   String _getStudentDepartment(Map<String, dynamic> userData) {
     // Try root-level department first
-    if (userData['department'] is String && (userData['department'] as String).isNotEmpty) {
+    if (userData['department'] is String &&
+        (userData['department'] as String).isNotEmpty) {
       return userData['department'] as String;
     }
     // Try personal.department
     if (userData['personal'] != null) {
       final personal = userData['personal'] as Map<String, dynamic>;
-      if (personal['department'] is String && (personal['department'] as String).isNotEmpty) {
+      if (personal['department'] is String &&
+          (personal['department'] as String).isNotEmpty) {
         return personal['department'] as String;
       }
     }

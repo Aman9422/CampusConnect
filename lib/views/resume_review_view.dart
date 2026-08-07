@@ -1,10 +1,12 @@
 import 'package:campusconnect/constants/routes.dart'; // v6.8
 import 'package:campusconnect/models/resume_review.dart';
+import 'package:campusconnect/providers/portfolio_provider.dart';
 import 'package:campusconnect/providers/resume_review_provider.dart';
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/widgets/offline_banner.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 /// CampusConnect v6.7 - Resume Review View
 ///
@@ -277,6 +279,15 @@ class _ResumeReviewViewState extends State<ResumeReviewView> {
           _buildHeaderCard(isDark),
           const SizedBox(height: 20),
 
+          // v8.4.3 (MB6): surface the uploaded portfolio resume so the resume
+          // review screen is connected to the PDF the student actually
+          // maintains. PDF auto-fill requires a text-extraction parser, so
+          // this is the UX bridge (Bug 4): file name / version / ATS chip +
+          // View/Download action. The text field below remains for users who
+          // prefer to paste.
+          _buildUploadedResumeCard(context, isDark),
+          const SizedBox(height: 20),
+
           // Target role input (optional)
           _buildSectionLabel('Target Role (Optional)', isDark),
           const SizedBox(height: 8),
@@ -482,6 +493,146 @@ class _ResumeReviewViewState extends State<ResumeReviewView> {
         ],
       ),
     );
+  }
+
+  /// v8.4.3 (MB6): "Using your uploaded resume" card — connects the resume
+  /// review screen to the PDF stored in the student portfolio (Bug 4). Shows
+  /// the file name, version and latest ATS score, with an Open/Download
+  /// action. Hidden entirely when no resume has been uploaded.
+  Widget _buildUploadedResumeCard(BuildContext context, bool isDark) {
+    final resume = context.watch<PortfolioProvider>().portfolio?.resume;
+    if (resume == null || !resume.hasResume) {
+      return const SizedBox.shrink();
+    }
+
+    final fileName = resume.fileName?.isNotEmpty == true
+        ? resume.fileName!
+        : 'resume.pdf';
+    final ats = resume.latestATSScore;
+    final url = resume.downloadUrl?.isNotEmpty == true
+        ? resume.downloadUrl!
+        : null;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? AppTheme.darkSurface : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? Colors.white12 : AppTheme.gray200,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppTheme.success.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  Icons.upload_file_outlined,
+                  color: AppTheme.success,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Using your uploaded resume',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white : AppTheme.gray900,
+                  ),
+                ),
+              ),
+              if (ats != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryBlue.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Text(
+                    'ATS $ats/100',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.primaryBlue,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            fileName,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: isDark ? AppTheme.gray300 : AppTheme.gray700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'v${resume.version} · PDF · Uploaded ${resume.resumeAgeInDays} day${resume.resumeAgeInDays == 1 ? '' : 's'} ago',
+            style: TextStyle(
+              fontSize: 12,
+              color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (url != null)
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => _openResumeUrl(context, url),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.success,
+                  side: BorderSide(color: AppTheme.success),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                ),
+                icon: const Icon(Icons.open_in_new, size: 18),
+                label: const Text('Open Uploaded Resume'),
+              ),
+            ),
+          const SizedBox(height: 12),
+          Text(
+            'Review uses pasted text below. PDF text extraction (auto-fill from '
+            'your uploaded resume) is planned — paste the resume text for now.',
+            style: TextStyle(
+              fontSize: 12,
+              fontStyle: FontStyle.italic,
+              color: isDark ? AppTheme.gray400 : AppTheme.gray500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openResumeUrl(BuildContext context, String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open resume file')),
+        );
+      }
+    }
   }
 
   /// Build info section with what AI does/doesn't do

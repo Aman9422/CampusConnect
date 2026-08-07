@@ -1,3 +1,4 @@
+import 'package:campusconnect/models/portfolio/portfolio_parse.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 /// CampusConnect v8.4 — Student portfolio certification entry.
@@ -23,13 +24,15 @@ class CertificationModel {
   }
 
   factory CertificationModel.fromMap(Map<String, dynamic> map) {
+    // v8.4.7: tolerant reads — dates may arrive as Timestamp, DateTime or
+    // ISO-8601 String; never throws; bad fields degrade to defaults.
     return CertificationModel(
-      id: map['id'] as String? ?? '',
-      title: map['title'] as String? ?? '',
-      issuer: map['issuer'] as String? ?? '',
-      issueDate: (map['issueDate'] as Timestamp?)?.toDate(),
-      credentialId: map['credentialId'] as String?,
-      credentialUrl: map['credentialUrl'] as String?,
+      id: asString(map['id']) ?? '',
+      title: asString(map['title']) ?? '',
+      issuer: asString(map['issuer']) ?? '',
+      issueDate: tsToDate(map['issueDate']),
+      credentialId: asString(map['credentialId']),
+      credentialUrl: asString(map['credentialUrl']),
     );
   }
 

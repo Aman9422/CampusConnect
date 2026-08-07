@@ -1,3 +1,5 @@
+import 'package:campusconnect/models/portfolio/portfolio_parse.dart';
+
 /// CampusConnect v8.4 — Structured portfolio skill.
 ///
 /// Unlike the flat root-level `skills: List<String>` used by alumni directory,
@@ -16,10 +18,11 @@ class SkillModel {
   });
 
   factory SkillModel.fromMap(Map<String, dynamic> map) {
+    // v8.4.7: tolerant reads — never throws; bad fields degrade to defaults.
     return SkillModel(
-      name: map['name'] as String? ?? '',
-      category: map['category'] as String? ?? 'General',
-      proficiency: map['proficiency'] as String? ?? 'Beginner',
+      name: asString(map['name']) ?? '',
+      category: asString(map['category']) ?? 'General',
+      proficiency: asString(map['proficiency']) ?? 'Beginner',
     );
   }
 

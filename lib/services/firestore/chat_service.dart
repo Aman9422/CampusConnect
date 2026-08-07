@@ -1,6 +1,4 @@
 import 'package:campusconnect/models/chat.dart';
-import 'package:campusconnect/models/app_notification.dart'; // v7.3
-import 'package:campusconnect/services/firestore/notifications_service.dart'; // v7.3
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
@@ -175,29 +173,11 @@ class ChatService {
 
       await batch.commit();
 
-      // v7.3: Notify recipient of new message
-      try {
-        final chat = Chat.fromFirestore(chatDoc);
-        final recipientId = chat.getOtherParticipantId(senderId);
-        if (recipientId != null) {
-          final notificationService = NotificationsService.instance();
-          final messagePreview = text.length > 50
-              ? '${text.substring(0, 50)}...'
-              : text;
-
-          await notificationService.createNotification(
-            recipientId,
-            AppNotification.newMessage(
-              chatId: chatId,
-              senderName: senderName,
-              messagePreview: messagePreview,
-            ),
-          );
-        }
-      } catch (e) {
-        debugPrint('Error creating message notification: $e');
-        // Don't fail message sending if notification fails
-      }
+      // v8.4.3 (MB8): the recipient's "new message" notification is now
+      // delivered by the server-side `onChatMessageCreated` trigger (Admin
+      // SDK bypasses the owner-write-only notifications rule). The previous
+      // client-side write always failed with PERMISSION_DENIED (Bug 5) —
+      // removed so the log noise disappears and no duplicate is created.
 
       debugPrint('Message sent in chat: $chatId');
     } catch (e) {

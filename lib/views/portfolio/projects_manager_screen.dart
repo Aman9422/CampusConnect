@@ -50,19 +50,20 @@ class ProjectsManagerScreen extends StatelessWidget {
             return _buildEmptyState(context, isDark);
           }
 
-          return RefreshIndicator(
-            onRefresh: () => portfolioProvider.refresh(),
-            child: ListView.separated(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.all(AppTheme.space16),
-              itemCount: projects.length,
-              separatorBuilder: (context, index) =>
-                  const SizedBox(height: AppTheme.space12),
-              itemBuilder: (context, index) {
-                final project = projects[index];
-                return _buildProjectCard(context, project, portfolioProvider, isDark);
-              },
-            ),
+          // v8.4.3 (MB4): pull-to-refresh removed from the manager list —
+          // refreshing replaced the in-memory portfolio while the project
+          // form was open, which made the form's save loop forever (Bug 2).
+          // The provider's live stream keeps this list converged already.
+          return ListView.separated(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(AppTheme.space16),
+            itemCount: projects.length,
+            separatorBuilder: (context, index) =>
+                const SizedBox(height: AppTheme.space12),
+            itemBuilder: (context, index) {
+              final project = projects[index];
+              return _buildProjectCard(context, project, portfolioProvider, isDark);
+            },
           );
         },
       ),
@@ -429,6 +430,7 @@ class _ProjectFormScreenState extends State<_ProjectFormScreen> {
                       isDark: isDark,
                       validator: (value) => PortfolioValidators.required(value, 'Title'),
                       textCapitalization: TextCapitalization.words,
+                      maxLength: 200,
                     ),
                     const SizedBox(height: AppTheme.space16),
                     PortfolioTextField(
@@ -438,6 +440,7 @@ class _ProjectFormScreenState extends State<_ProjectFormScreen> {
                       isDark: isDark,
                       maxLines: 4,
                       textCapitalization: TextCapitalization.sentences,
+                      maxLength: 1000,
                     ),
                   ],
                 ),
@@ -458,6 +461,7 @@ class _ProjectFormScreenState extends State<_ProjectFormScreen> {
                       isDark: isDark,
                       keyboardType: TextInputType.url,
                       validator: (value) => PortfolioValidators.optionalUrl(value),
+                      maxLength: 500,
                     ),
                     const SizedBox(height: AppTheme.space16),
                     PortfolioTextField(
@@ -467,6 +471,7 @@ class _ProjectFormScreenState extends State<_ProjectFormScreen> {
                       isDark: isDark,
                       keyboardType: TextInputType.url,
                       validator: (value) => PortfolioValidators.optionalUrl(value),
+                      maxLength: 500,
                     ),
                   ],
                 ),
@@ -503,6 +508,7 @@ class _ProjectFormScreenState extends State<_ProjectFormScreen> {
               Expanded(
                 child: TextFormField(
                   controller: _techController,
+                  maxLength: 100,
                   decoration: InputDecoration(
                     hintText: 'e.g. Flutter, Firebase, Dart',
                     hintStyle: AppTheme.bodyMedium.copyWith(
@@ -669,6 +675,12 @@ class _ProjectFormScreenState extends State<_ProjectFormScreen> {
 
     setState(() => _isSaving = true);
     final portfolioProvider = context.read<PortfolioProvider>();
+
+    // v8.4.3 (MB4): read the LATEST provider state at save time — the
+    // provider converges via its live stream, so building from a stale
+    // snapshot taken when the form opened could drop a sibling edit.
+    // `finally` clears `_isSaving` unconditionally so a hung write can
+    // never leave the button in a permanent spinner loop (Bug 2).
     final portfolio = portfolioProvider.portfolio ?? PortfolioModel.empty();
     final existing = widget.project;
 
@@ -677,8 +689,12 @@ class _ProjectFormScreenState extends State<_ProjectFormScreen> {
       title: _titleController.text.trim(),
       description: _descriptionController.text.trim(),
       technologies: List.from(_techChips),
-      githubUrl: _githubController.text.trim().isNotEmpty ? _githubController.text.trim() : null,
-      demoUrl: _demoController.text.trim().isNotEmpty ? _demoController.text.trim() : null,
+      githubUrl: _githubController.text.trim().isNotEmpty
+          ? _githubController.text.trim()
+          : null,
+      demoUrl: _demoController.text.trim().isNotEmpty
+          ? _demoController.text.trim()
+          : null,
       startDate: _startDate,
       endDate: _currentlyWorking ? null : _endDate,
       currentlyWorking: _currentlyWorking,
@@ -697,10 +713,17 @@ class _ProjectFormScreenState extends State<_ProjectFormScreen> {
     }
 
     final updated = portfolio.copyWith(projects: projects);
-    final success = await portfolioProvider.savePortfolio(updated);
+
+    late bool success;
+    try {
+      success = await portfolioProvider.savePortfolio(updated);
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
+    }
     if (!mounted) return;
 
-    setState(() => _isSaving = false);
     if (success) {
       _showSnack(_isEdit ? 'Project updated.' : 'Project added.');
       Navigator.pop(context);

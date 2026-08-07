@@ -185,16 +185,32 @@ class _MentorshipRequestsViewState extends State<MentorshipRequestsView> {
         ? request.studentEmail
         : (request.alumniCompany ?? request.alumniJobRole);
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
+    // v8.4.3 (MB9): cards are now tappable — the detail view was previously
+    // unreachable from the list (plain Container, no InkWell), which made the
+    // alumni "View Student Portfolio" button dead in the tab (Bug 6). Tapping
+    // the card opens the full detail view.
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Material(
         color: isDark ? AppTheme.darkSurface : Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDark ? AppTheme.gray700.withValues(alpha: 0.3) : AppTheme.gray200,
-        ),
-      ),
-      child: Padding(
+        child: InkWell(
+          onTap: () => Navigator.pushNamed(
+            context,
+            mentorshipRequestDetailRoute,
+            arguments: request.id,
+          ),
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isDark
+                    ? AppTheme.gray700.withValues(alpha: 0.3)
+                    : AppTheme.gray200,
+              ),
+            ),
+            child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -304,6 +320,31 @@ class _MentorshipRequestsViewState extends State<MentorshipRequestsView> {
               ),
             ),
 
+            // v8.4.3 (MB9): quick "View Portfolio" shortcut for alumni on the
+            // list card — the detail screen's button is now reachable by
+            // tapping the card, and this gives a one-tap path for a quick look.
+            if (isAlumni)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () => Navigator.pushNamed(
+                      context,
+                      portfolioReadOnlyRoute,
+                      arguments: request.studentId,
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.primaryBlue,
+                      side: BorderSide(color: AppTheme.primaryBlue),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                    ),
+                    icon: const Icon(Icons.workspace_premium_outlined, size: 18),
+                    label: const Text('View Student Portfolio'),
+                  ),
+                ),
+              ),
+
             // Action buttons for pending requests (Alumni only)
             if (_shouldShowActionButtons(request))
               Padding(
@@ -359,10 +400,13 @@ class _MentorshipRequestsViewState extends State<MentorshipRequestsView> {
                   ),
                 ),
               ),
-          ],
+            ],
+          ),
         ),
       ),
-    );
+    ),
+  ),
+);
   }
 
   bool _shouldShowActionButtons(MentorshipRequest request) {

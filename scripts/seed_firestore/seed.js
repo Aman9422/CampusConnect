@@ -189,7 +189,16 @@ async function batchWrite(refs) {
   for (let i = 0; i < refs.length; i += 490) {
     const batch = db.batch();
     const chunk = refs.slice(i, i + 490);
-    for (const item of chunk) batch.set(item.ref, { ...item.data, ...DEMO_FLAGS }, { merge: false });
+    for (const item of chunk) {
+      // v8.4.2 (S5c/L6): seedPortfolios marks refs `merge: true` so the
+      // `portfolio` sub-map merges into the existing student doc instead of
+      // overwriting role/personal/academic/career/skills fields.
+      if (item.merge === true) {
+        batch.set(item.ref, { ...item.data, ...DEMO_FLAGS }, { merge: true });
+      } else {
+        batch.set(item.ref, { ...item.data, ...DEMO_FLAGS }, { merge: false });
+      }
+    }
     await batch.commit();
     console.log(`   Batch ${Math.floor(i/490)+1}/${Math.ceil(refs.length/490)} — ${chunk.length} writes`);
   }
@@ -599,6 +608,210 @@ async function seedRecommendationsMeta() {
   await batchWrite(refs);
 }
 
+const SKILL_CATEGORY_MAP = {
+  'Java': 'Programming Language', 'Python': 'Programming Language', 'JavaScript': 'Programming Language',
+  'C': 'Programming Language', 'C++': 'Programming Language', 'SQL': 'Database', 'R': 'Programming Language',
+  'Machine Learning': 'AI & ML', 'Deep Learning': 'AI & ML', 'NLP': 'AI & ML', 'Computer Vision': 'AI & ML',
+  'TensorFlow': 'AI & ML', 'PyTorch': 'AI & ML', 'Scikit-learn': 'AI & ML', 'Pandas': 'AI & ML', 'NumPy': 'AI & ML',
+  'Data Science': 'AI & ML', 'Statistics': 'AI & ML', 'Linear Algebra': 'Other', 'Data Visualization': 'AI & ML',
+  'React': 'Framework', 'Node.js': 'Framework', 'Spring Boot': 'Framework', 'Hibernate': 'Framework',
+  'Flutter': 'Framework', 'AWS': 'Cloud & DevOps', 'Cloud Computing': 'Cloud & DevOps',
+};
+
+const PROJECT_TEMPLATES = [
+  (tech) => ({ title: `${tech} Faculty Management System`, description: `A full-stack ${tech} web application with role-based dashboards, analytics and automated notifications.`, tech: [tech] }),
+  (tech) => ({ title: `Smart ${tech} Chatbot`, description: `An AI-powered chatbot trained on ${tech} domain data to answer queries in real time.`, tech: [tech] }),
+  (tech) => ({ title: `${tech} Placement Tracker`, description: `A ${tech}-based tracker for student placements with resume ATS insights and company shortlists.`, tech: [tech] }),
+  (tech) => ({ title: `${tech} Campus Connect Clone`, description: `A ${tech} social platform for students, alumni and teachers with mentorship matching.`, tech: [tech] }),
+  (tech) => ({ title: `${tech} IoT Dashboard`, description: `A ${tech} IoT monitoring dashboard with live sensor charts and alerting.`, tech: [tech] }),
+];
+
+const CERT_TEMPLATES = [
+  { title: 'Google AI Essentials', issuer: 'Google' },
+  { title: 'AWS Cloud Practitioner', issuer: 'Amazon Web Services' },
+  { title: 'IBM Data Science Professional', issuer: 'IBM' },
+  { title: 'Meta Front-End Developer', issuer: 'Meta' },
+  { title: 'Microsoft Azure Fundamentals', issuer: 'Microsoft' },
+  { title: 'NPTEL Java Programming', issuer: 'NPTEL' },
+];
+
+const ACHIEVEMENT_TEMPLATES = [
+  { title: 'Smart India Hackathon Finalist', category: 'Technical' },
+  { title: 'State Level Hackathon Winner', category: 'Technical' },
+  { title: 'Coding Competition Top 10', category: 'Technical' },
+  { title: 'College Cultural Fest Coordinator', category: 'Cultural' },
+  { title: 'Inter-College Cricket Champion', category: 'Sports' },
+  { title: 'Academic Excellence Award', category: 'Academic' },
+];
+
+function skillCategory(name) {
+  return SKILL_CATEGORY_MAP[name] || 'Other';
+}
+
+/**
+ * v8.4.2 (S5c/L6): Seed portfolio + resume metadata for demo students.
+ *
+ * Demo students previously had empty portfolios so the Teacher portfolio
+ * drill-down and the Resume Summary card on the student dashboard always
+ * showed empty states. This phase writes a full `portfolio` nested map
+ * (skills/projects/certifications/experience/achievements/links/
+ * preferences/languages/careerObjective) plus resume metadata
+ * (latestATSScore/reviewCount/lastReviewAt/uploadedAt/...) mirroring
+ * PortfolioModel.toMap(). All tagged isDemoData: true.
+ *
+ * Note: resume metadata stores a storagePath (resumes/{uid}/latest.pdf) with
+ * no downloadUrl on purpose — the app's ResumeService.getResumeUrl resolves
+ * Storage and fails gracefully with a SnackBar for demo-only files (S4c
+ * fallback path, same as legacy storagePath-only resumes).
+ */
+async function seedPortfolios() {
+  logStart('Portfolios');
+  const refs = [];
+  for (let i = 0; i < STUDENT_NAMES.length; i++) {
+    const dept = assignDepartment(i);
+    const prof = STUDENT_PROFILES[i];
+    const uid = `demo_student_${String(i + 1).padStart(2, '0')}`;
+    const baseSkills = pickN(SKILLS_BY_DEPT[dept], rand(4, 7));
+    const extraCount = prof.type === 'high' ? 2 : 1;
+    const fullSkills = [...new Set([...baseSkills, ...pickN(ALL_SKILLS, extraCount)])];
+    const reviewCount = rand(3, 5);
+
+    const skills = fullSkills.map((name) => ({
+      name,
+      category: skillCategory(name),
+      proficiency: pick(['Beginner', 'Intermediate', 'Advanced']),
+    }));
+
+    const projects = [];
+    const built = new Set();
+    for (let p = 0; p < rand(1, 3); p++) {
+      const anchor = pick(['AI', 'Java', 'Python', 'Flutter', 'Cloud', 'Data']);
+      let template = PROJECT_TEMPLATES[rand(0, PROJECT_TEMPLATES.length - 1)];
+      let title = template(anchor).title;
+      let guard = 0;
+      while (built.has(title) && guard < 10) {
+        anchor = pick(['AI', 'Java', 'Python', 'Flutter', 'Cloud', 'Data']);
+        template = PROJECT_TEMPLATES[rand(0, PROJECT_TEMPLATES.length - 1)];
+        title = template(anchor).title;
+        guard++;
+      }
+      built.add(title);
+      const projectTech = pickN(fullSkills, rand(2, 4));
+      projects.push({
+        id: `demo_project_${String(i + 1).padStart(2, '0')}_${p + 1}`,
+        title,
+        description: template(anchor).description,
+        technologies: projectTech,
+        githubUrl: `https://github.com/${uid}`,
+        demoUrl: (Math.random() < 0.5) ? `https://${uid}.dev` : null,
+        startDate: admin.firestore.Timestamp.fromDate(dateSub(rand(120, 400))),
+        endDate: (Math.random() < 0.5)
+            ? admin.firestore.Timestamp.fromDate(dateSub(rand(10, 60)))
+            : null,
+        currentlyWorking: Math.random() < 0.4,
+      });
+    }
+
+    const certifications = [];
+    const usedCerts = new Set();
+    for (let c = 0; c < rand(1, 2); c++) {
+      const cert = CERT_TEMPLATES[rand(0, CERT_TEMPLATES.length - 1)];
+      const key = cert.title;
+      if (usedCerts.has(key)) continue;
+      usedCerts.add(key);
+      certifications.push({
+        id: `demo_cert_${String(i + 1).padStart(2, '0')}_${c + 1}`,
+        title: cert.title,
+        issuer: cert.issuer,
+        issueDate: admin.firestore.Timestamp.fromDate(dateSub(rand(20, 180))),
+        credentialId: `CERT-${rand(10000, 99999)}`,
+        credentialUrl: `https://coursera.org/verify/${rand(100000, 999999)}`,
+      });
+    }
+
+    const experience = [];
+    if (prof.type !== 'inactive') {
+      const currentCompany = pick(PLACEMENT_DATA.filter((p) => p.active)).company;
+      experience.push({
+        id: `demo_exp_${String(i + 1).padStart(2, '0')}_1`,
+        company: currentCompany,
+        role: pick(['Software Developer Intern', 'Data Analyst Intern', 'ML Intern', 'Backend Dev Intern']),
+        employmentType: 'Internship',
+        description: `Worked on ${pick(fullSkills)} based features, deployed ${pick(['REST APIs', 'dashboards', 'ML models', 'database schemas'])} and collaborated in agile sprints.`,
+        startDate: admin.firestore.Timestamp.fromDate(dateSub(rand(60, 180))),
+        endDate: (Math.random() < 0.6)
+            ? admin.firestore.Timestamp.fromDate(dateSub(rand(5, 50)))
+            : null,
+        currentlyWorking: Math.random() < 0.7,
+      });
+    }
+
+    const achievements = [];
+    for (let a = 0; a < rand(1, 2); a++) {
+      const ach = ACHIEVEMENT_TEMPLATES[rand(0, ACHIEVEMENT_TEMPLATES.length - 1)];
+      achievements.push({
+        id: `demo_ach_${String(i + 1).padStart(2, '0')}_${a + 1}`,
+        title: ach.title,
+        description: `Recognized for outstanding performance in ${pick(fullSkills)} during ${pick(['second', 'third', 'final'])} year.`,
+        date: admin.firestore.Timestamp.fromDate(dateSub(rand(30, 200))),
+        category: ach.category,
+      });
+    }
+
+    // Career preferences derived from the seeded student profile (career.*).
+    const preferredRoles = pickN(['SDE', 'Data Scientist', 'ML Engineer', 'Backend Dev', 'Frontend Dev', 'Data Analyst'], rand(1, 3));
+    const languages = ['English', 'Hindi', ...(Math.random() < 0.3 ? ['French', 'Spanish'] : [])];
+
+    refs.push({
+      ref: db.collection('users').doc(uid),
+      merge: true, // v8.4.2 (S5c/L6): merge into existing student doc.
+      data: {
+        portfolio: {
+          resume: {
+            downloadUrl: null,
+            storagePath: `resumes/${uid}/latest.pdf`,
+            fileName: 'Resume.pdf',
+            fileSize: rand(150000, 400000),
+            mimeType: 'application/pdf',
+            uploadedAt: admin.firestore.Timestamp.fromDate(dateSub(rand(60, 180))),
+            updatedAt: admin.firestore.Timestamp.fromDate(dateSub(rand(0, 30))),
+            version: 1,
+            latestATSScore: Math.max(0, Math.min(100, prof.atsBase + rand(-8, 8))),
+            reviewCount,
+            lastReviewAt: admin.firestore.Timestamp.fromDate(dateSub(rand(10, 25))),
+            isDemoData: true,
+            parserVersion: 'v8.4.1-demo',
+          },
+          skills,
+          projects,
+          certifications,
+          experience,
+          achievements,
+          links: {
+            github: `https://github.com/${uid}`,
+            linkedin: `https://linkedin.com/in/${STUDENT_NAMES[i].toLowerCase().replace(/\s+/g, '.')}`,
+            portfolio: (Math.random() < 0.5) ? `https://${uid}.dev` : null,
+            leetcode: `https://leetcode.com/${uid}`,
+            codeforces: `https://codeforces.com/profile/${uid}`,
+            hackerrank: `https://hackerrank.com/${uid}`,
+          },
+          preferences: {
+            preferredRoles,
+            preferredLocations: pickN(['Bengaluru', 'Hyderabad', 'Pune', 'Chennai', 'Mumbai', 'Remote'], rand(1, 3)),
+            expectedSalary: pick(['₹6-8 LPA', '₹8-12 LPA', '₹12-18 LPA', '₹18-25 LPA']),
+            careerObjective: `Aspiring ${pick(preferredRoles)} with a strong foundation in ${pick(fullSkills)}. Seeking a challenging role to apply technical skills and grow into a ${pick(['tech lead', 'architect', 'domain expert'])} within 5 years.`,
+            remotePreference: pick(['Yes', 'No', 'Hybrid']),
+            relocationPreference: pick(['Yes', 'No', 'Open']),
+          },
+          languages,
+          isDemoData: true,
+        },
+      },
+    });
+  }
+  await batchWrite(refs);
+}
+
 async function main() {
   console.log('🚀 CampusConnect v8.3 — Demo Data Seeder');
   console.log('='.repeat(60));
@@ -607,6 +820,11 @@ async function main() {
   try {
     await db.listCollections();
     await seedStudents();
+    // v8.4.7: seedPortfolios must run AFTER seedStudents. seedStudents uses
+    // merge:false (full-doc overwrite), which would wipe the `portfolio`
+    // field seeded before it. Previously the order was reversed and demo
+    // students ended up with no portfolio at all.
+    await seedPortfolios();
     await seedAlumni();
     await seedTeachers();
     await seedResumeReviews();

@@ -1,3 +1,4 @@
+import 'package:campusconnect/models/portfolio/portfolio_parse.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 /// CampusConnect v8.4 — Student portfolio achievement entry.
@@ -24,12 +25,14 @@ class AchievementModel {
   }
 
   factory AchievementModel.fromMap(Map<String, dynamic> map) {
+    // v8.4.7: tolerant reads — dates may arrive as Timestamp, DateTime or
+    // ISO-8601 String; never throws; bad fields degrade to defaults.
     return AchievementModel(
-      id: map['id'] as String? ?? '',
-      title: map['title'] as String? ?? '',
-      description: map['description'] as String? ?? '',
-      date: (map['date'] as Timestamp?)?.toDate(),
-      category: map['category'] as String? ?? 'Academic',
+      id: asString(map['id']) ?? '',
+      title: asString(map['title']) ?? '',
+      description: asString(map['description']) ?? '',
+      date: tsToDate(map['date']),
+      category: asString(map['category']) ?? 'Academic',
     );
   }
 

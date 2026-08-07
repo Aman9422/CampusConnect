@@ -1,6 +1,5 @@
-import 'dart:convert';
 import 'package:campusconnect/models/ai_interaction.dart';
-import 'package:http/http.dart' as http;
+import 'package:cloud_functions/cloud_functions.dart';
 
 /// VERSION 4: AI Response Model
 /// Contains AI response plus trial and usage metadata
@@ -83,21 +82,24 @@ class UsageInfo {
   bool get isNearLimit => dailyCount >= (dailyLimit * 0.8);
 }
 
+/// AIService - AI chat via the `askAI` Cloud Function (callable).
+///
+/// v8.4.2 (S6b/P3): migrated from a raw HTTPS POST to
+/// `FirebaseFunctions#httpsCallable('askAI')`. The authenticated uid is
+/// resolved server-side from Firebase Auth (`request.auth.uid`), so a forged
+/// `userId` can no longer spend AI quota on another user's account.
 class AIService {
-  static const String _cloudFunctionUrl =
-      'https://us-central1-campusconnect-firebase-project.cloudfunctions.net/askAI';
+  final FirebaseFunctions _functions;
 
-  final http.Client _httpClient;
+  AIService({FirebaseFunctions? functions})
+    : _functions = functions ?? FirebaseFunctions.instance;
 
-  AIService(this._httpClient);
-
-  factory AIService.instance() {
-    return AIService(http.Client());
-  }
+  factory AIService.instance() => AIService();
 
   /// Send a message to the AI assistant and get a response (VERSION 4)
   ///
-  /// [userId] - The authenticated user's ID
+  /// [userId] - The authenticated user's ID (server derives the identity from
+  /// Firebase Auth; kept as a parameter for API compatibility)
   /// [message] - The user's message to the AI
   ///
   /// Returns AIResponse with message, trial info, and usage metadata
@@ -121,13 +123,11 @@ class AIService {
         throw Exception('Message too long. Maximum 1000 characters.');
       }
 
-      // Make HTTP POST request to Cloud Function
-      final response = await _httpClient
-          .post(
-            Uri.parse(_cloudFunctionUrl),
-            headers: {'Content-Type': 'application/json'},
-            body: json.encode({'userId': userId, 'message': trimmedMessage}),
-          )
+      // v8.4.2 (S6b/P3): callable call — uid comes from Firebase Auth context
+      // on the server; the client no longer transmits `userId`.
+      final callable = _functions.httpsCallable('askAI');
+      final result = await callable
+          .call<Map<String, dynamic>>({'message': trimmedMessage})
           .timeout(
             const Duration(seconds: 30),
             onTimeout: () {
@@ -135,22 +135,9 @@ class AIService {
             },
           );
 
-      // Handle response
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body) as Map<String, dynamic>;
-
-        // VERSION 4: Parse enhanced response with trial and usage info
-        return AIResponse.fromJson(data);
-      } else if (response.statusCode == 400) {
-        final error = json.decode(response.body);
-        throw Exception(error['error'] ?? 'Invalid request');
-      } else if (response.statusCode == 500) {
-        throw Exception('Server error. Please try again later.');
-      } else {
-        throw Exception(
-          'Unexpected error (${response.statusCode}). Please try again.',
-        );
-      }
+      return AIResponse.fromJson(result.data);
+    } on FirebaseFunctionsException catch (e) {
+      throw Exception(_mapFunctionError(e));
     } catch (e) {
       if (e is Exception) {
         rethrow;
@@ -232,8 +219,28 @@ class AIService {
     return needles.any(source.contains);
   }
 
-  /// Dispose of resources
-  void dispose() {
-    _httpClient.close();
+  /// Map a callable error code to a user-friendly message.
+  String _mapFunctionError(FirebaseFunctionsException e) {
+    switch (e.code) {
+      case 'unauthenticated':
+        return 'Please log in to use the AI assistant.';
+      case 'invalid-argument':
+        return e.message ?? 'Invalid request. Please try again.';
+      case 'resource-exhausted':
+        return e.message ??
+            'You have reached the AI message limit. Please try again later.';
+      case 'deadline-exceeded':
+        return 'The AI assistant took too long to respond. Please try again.';
+      case 'internal':
+      case 'unavailable':
+        return 'The AI assistant is temporarily unavailable. Please try again later.';
+      default:
+        return e.message ?? 'Failed to connect to AI service.';
+    }
   }
+
+  /// Dispose of resources.
+  ///
+  /// v8.4.2 (S6b/P3): no-op — the callable client owns no HTTP resources.
+  void dispose() {}
 }

@@ -1,3 +1,5 @@
+import 'package:campusconnect/models/portfolio/portfolio_parse.dart';
+
 /// CampusConnect v8.4 — Social links for the student portfolio.
 ///
 /// Stored under `users/{uid}/portfolio.links`. Existing root-level URL fields
@@ -23,13 +25,14 @@ class SocialLinks {
   factory SocialLinks.empty() => const SocialLinks();
 
   factory SocialLinks.fromMap(Map<String, dynamic> map) {
+    // v8.4.7: tolerant reads — never throws; bad fields degrade to null.
     return SocialLinks(
-      github: map['github'] as String?,
-      linkedin: map['linkedin'] as String?,
-      portfolio: map['portfolio'] as String?,
-      leetcode: map['leetcode'] as String?,
-      codeforces: map['codeforces'] as String?,
-      hackerrank: map['hackerrank'] as String?,
+      github: asString(map['github']),
+      linkedin: asString(map['linkedin']),
+      portfolio: asString(map['portfolio']),
+      leetcode: asString(map['leetcode']),
+      codeforces: asString(map['codeforces']),
+      hackerrank: asString(map['hackerrank']),
     );
   }
 
@@ -44,6 +47,9 @@ class SocialLinks {
     };
   }
 
+  /// NOTE (N5, v8.4.2): `copyWith` uses `x ?? this.x`, so it CANNOT clear a
+  /// link back to null — passing `github: null` keeps the existing value.
+  /// To remove a link, construct a fresh object.
   SocialLinks copyWith({
     String? github,
     String? linkedin,

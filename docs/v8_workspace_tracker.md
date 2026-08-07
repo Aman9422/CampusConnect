@@ -1,7 +1,7 @@
-# CampusConnect v8.4 — Workspace Tracker
+# CampusConnect — Workspace Tracker
 
-## Status: COMPLETED
-## Version: CampusConnect v8.4 — Student Resume Portfolio
+## Status: COMPLETED + DEPLOYED
+## Version: CampusConnect v8.4.9 — Flattened-Shape Portfolio Read Fix + Email Backfill (2026-08-07)
 
 ---
 
@@ -9,591 +9,231 @@
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| 0 | Workspace Audit | ✅ |
-| 1 | Placement Pipeline Refinement | ✅ |
-| 2 | Quick Statistics Refinement | ✅ |
-| 3 | Department Analytics | ✅ |
-| 4 | AI Insights Visual Upgrade (FL Chart) | ✅ |
-| 5 | At-Risk Student Intelligence | ✅ |
-| 6 | Student Growth Analytics | ✅ |
-| 7 | AI Generated Teacher Summary | ✅ |
-| 8 | Workspace Documentation | ✅ |
+| 0–8 | v8.2 Teacher Intelligence & Analytics workspace | ✅ |
 | 9 | **v8.2.1 — Data Pipeline Fix** | ✅ |
 | 10 | **v8.2.2 — Layout Fix & Data Pipeline Investigation** | ✅ |
 | 11 | **v8.3 — Codebase Architecture Documentation** | ✅ |
 | 12 | **v8.3 — Firestore Demo Data Seeder** | ✅ |
 | 13 | **v8.4 — Student Resume Portfolio** | ✅ |
 | 14 | **v8.4.6 — Final Audit Fixes (F1–F12)** | ✅ |
+| 15 | **v8.4.1 — Resume Portfolio & Firebase Storage Foundation** | ✅ |
+| 16 | **v8.4.2 — Issues Hardening (S1–S7)** | ✅ **DEPLOYED** (2026-08-07) |
+| 17 | **v8.4.3 — Manual-Test Bug Fixes (MB1–MB10) + notification triggers deployed** | ✅ **DEPLOYED** (2026-08-07) |
+| 18 | **v8.4.4 — On-Device Re-Verification Fix (MB2R)** | ✅ |
+| 19 | **v8.4.8 — Portfolio Read Failure & Refresh-Wipe Fix (MB11–MB16)** | ✅ |
+| 20 | **v8.4.9 — Flattened-Shape Portfolio Read Fix + Email Backfill (MB17–MB19)** | ✅ |
 
 **Overall Progress: 100%**
 
 ---
 
-## v8.3 — Codebase Architecture Documentation
+## v8.4.1 — Resume Portfolio & Firebase Storage Foundation
 
-### Summary
-
-Performed a **complete deep-read investigation** of the entire CampusConnect codebase — all models, all Firestore services, all providers, the main entry point, the Firestore security rules, the indexes, and the Cloud Functions. The full report was saved as **`project_info__8.md`** in the project root.
-
-### Key Findings
-
-| Finding | Detail |
-|---------|--------|
-| **Database is Empty** | The Firestore database connected to the dev environment has **zero data**. All dashboard metrics show zero because all queries return empty results. The code compiles with 0 errors/0 warnings but has nothing to read. |
-| **Complete Schema Documented** | Traced every field in every document type — 12 complete document schemas with exact field names, types, and optionality |
-| **13 Data Categories Quantified** | Seed script needs exactly: 30 students, 10 alumni, 5 teachers, 120-150 resume reviews, 30 engagement summaries, 20 placements, 80-120 applications, 40 mentorship requests, 15 opportunities, 22 chats, ~200 notifications, 150+ activities, 6 recommendations per student, ~75 AI interactions, 6 public profiles |
-
-### Architecture Decisions
-
-- **Node.js + firebase-admin SDK** chosen for the seed script (bypasses security rules for paths with `write: if false`)
-- **UID-based demo prefix**: `demo_student_01` through `demo_student_30` to avoid real UID conflicts
-- **`isDemoData: true` flag** on every document for safe cleanup
-- **Dual application paths**: writes to both `placements/{pid}/applications/{uid}` (newer) and `applications/{appId}` (legacy) for backward compatibility
-- **Direct document writes** for recommendations/engagement rather than simulating service calls
-- **Progressive ATS scores** (3-5 per student) enabling Student Growth charts to show meaningful trends
-
-### Deliverables
-
-| File | Purpose |
-|------|---------|
-| `project_info__8.md` | 45+ page codebase architecture analysis with 12 complete document schemas |
-| `project_info__9.md` | Investigation summary for the seed script task |
-
----
-
-## v8.3 — Firestore Demo Data Seeder
+> Source: `docs/Task.md` · Executed via `docs/todo.md` (T0–T7) · Gap baseline: `project_info__12.md`
 
 ### Objective
 
-Create a comprehensive **demo dataset** for CampusConnect so every dashboard (Student, Alumni, Teacher) can be fully tested with realistic, interconnected data. This data is **temporary development/demo data only** and is flagged for safe cleanup.
+Implement the Resume Portfolio system per `docs/Task.md`, making the student's resume the central asset of CampusConnect and the single source of truth for the roadmap (Resume Reviewer v8.5, Resume Intelligence v8.6, AI Recommendations v8.7, Teacher Analytics 2.0, Alumni Mentorship, Placement Snapshot). Non-breaking: existing dashboards, ATS review, role permissions, and Material 3 theming all preserved.
 
-### Files Created
+### Architecture Decision (T0)
 
-| File | Purpose |
-|------|---------|
-| `scripts/seed_firestore/seed.js` | Main seed script — 14 sequential phases, batched writes (chunks of 490) |
-| `scripts/seed_firestore/cleanup.js` | Cleanup script — 7 phases, recursive subcollection deletion, safe via `isDemoData` flag |
-| `scripts/seed_firestore/README.md` | Setup instructions, data catalogue, validation targets, troubleshooting guide |
-| `scripts/seed_firestore/package.json` | npm scripts (`seed`, `cleanup`), dependency on `firebase-admin` |
-| `project_info__8.md` | Complete codebase schema analysis serving as the blueprint |
+**Kept the existing nested-map design** (`users/{uid}/portfolio.resume`) instead of the spec's dedicated `users/{uid}/resume/metadata` document. Rationale: backward compatibility with dashboards, read-only views, and F5 per-section saves; avoids the M2 whole-doc-read privacy caveat of a new subcollection. The deviation is documented in `docs/Task.md`. Everything else aligns with the spec:
 
-### Seed Data Catalogue
+- Storage file renamed to `resumes/{uid}/latest.pdf` (Phase 1)
+- All spec metadata fields added to `ResumeMetadata` (Phase 2)
+- Dedicated `ResumeService` orchestration layer (Phase 4)
+- Placement resume snapshot at apply time (Phase 8)
 
-| Phase | Dataset | Count | Details |
-|-------|---------|-------|---------|
-| 1 | **Students** | 30 | 5 departments (CSE, AIML, IT, AIDS, ETC), differentiated profiles |
-| 1 | **Alumni** | 10 | Google, Microsoft, Amazon, Flipkart, Walmart, TCS, Infosys, Oracle, Uber, Adobe |
-| 1 | **Teachers** | 5 | One per department with designation and experience |
-| 2 | **Resume Reviews** | 120-150 | 3-5 per student with progressive ATS scores, keywords, section advice |
-| 3 | **Engagement Summaries** | 30 | One per student with engagementScore, profileStrength, streak, badges |
-| 4 | **Placements** | 20 | Mix of active (12), closed (4), upcoming (4) — real companies, varied packages |
-| 5 | **Applications** | 80-120 | Dual path writes (placement subcollection + global collection) |
-| 6 | **Mentorship Requests** | 40 | 10 pending, 12 accepted, 10 completed, 8 rejected |
-| 7 | **Opportunities** | 15 | Internships, Full-time, Referrals, Hackathons — posted by alumni |
-| 8 | **Chats + Messages** | 22 chats | 3-10 messages each for accepted/completed mentorships |
-| 9 | **Notifications** | ~200 | Students (3-8 each), Alumni (2-5 each), Teachers (2-4 each) — varied types |
-| 10 | **Activities** | 150+ | Login, resume reviewed, profile updated, placement applied, etc. |
-| 11 | **Recommendations** | 6/student | 2 mentor recommendations + 2 job recommendations + 1 skill + 1 chat |
-| 12 | **AI Interactions** | ~75 | Every other student gets 2-5 chat interactions with varied intents |
-| 13 | **Public Profiles** | 6 | Shareable alumni profile projections |
-| 14 | **Recommendations Meta** | 30 | `recommendations_meta/summary` per student |
+### What Shipped
 
-### Student Performance Profiles
+| Task | Deliverable | Spec Phase |
+|------|-------------|------------|
+| **T1** | `ResumeMetadata` extended: `storagePath`, `fileSize`, `mimeType`, `uploadedAt`/`updatedAt`, `latestATSScore`, `reviewCount`, `lastReviewAt`, `isDemoData`; storage file is now `resumes/{uid}/latest.pdf`; original picked `fileName` preserved; tolerant `fromMap` with legacy-key fallbacks (`uploadDate`/`lastUpdated`/`atsScore`); `ResumeUploadResult` now carries path/size/mime + original name | 1 + 2 |
+| **T2** | New `lib/services/firestore/resume_service.dart` — upload/delete orchestration (storage + per-section metadata diff via `PortfolioService`), `downloadResume`/`getResumeUrl`/`checkResumeExists`/`readMetadata`, version-history path helper; `StorageService` gained `downloadUrlFromPath`/`downloadBytes`; `PortfolioProvider` upload/delete now delegate to it (F5/H4 + F6 guards preserved) | 4 |
+| **T3** | `CareerPreferences.careerObjective` + `PortfolioModel.languages` (+ edit UI); Resume Status chip, Resume Metadata rows (storage path, size, MIME, version, review count, last review), Latest ATS + Resume Age in student portfolio and read-only views | 3 + 10 |
+| **T4** | New `ResumeSummaryCard` (`lib/widgets/resume_summary_card.dart`) on `_StudentDashboardTab` — Resume Uploaded status chip, Latest ATS, Resume Age, Last Review, Open Portfolio, Upload/Replace | 5 |
+| **T5** | Placement resume snapshot: `logPlacementApplication` Cloud Function, `Application` model (`studentId` alias + snapshot fields), `applyForPlacementDirect`, `PlacementsProvider.applyForPlacement` persist `resumeVersion`/`resumeStoragePath`/`atsScoreAtApplication` read from the student's portfolio resume at apply time; apply dialog uses the uploaded resume, text fallback only when none exists | 8 |
 
-Students are intentionally differentiated for realistic Teacher Dashboard analytics:
+**Security (Phase 9):** unchanged and satisfied — students write only their own `resumes/{uid}/latest.pdf`; teachers/alumni read via Firestore role lookup; denials for anonymous and everything else.
 
-| Type | Count | Characteristics | ATS Range | CGPA Range | Engagement |
-|------|-------|-----------------|-----------|------------|------------|
-| **High Performers** | 3 | Top skills, high engagement, many applications | 82-95 | 8.0-9.5 | 85-98 |
-| **Average Performers** | 15 | Moderate skills and engagement, varied years | 50-75 | 6.5-8.2 | 40-75 |
-| **At-Risk Students** | 5 | Low ATS, few skills, low engagement | 25-48 | 5.0-6.5 | 10-35 |
-| **Inactive Students** | 3 | Near-zero engagement, no applications | 10-35 | 5.5-7.0 | 0-15 |
-| **Highly Engaged** | 4 | High streaks, many badges, many activities | 60-82 | 7.0-8.5 | 88-100 |
+### Files
 
-### Department Performance Distribution
+**Created:** `lib/services/firestore/resume_service.dart`, `lib/widgets/resume_summary_card.dart`
 
-| Department | Average ATS Range | Purpose |
-|------------|------------------|---------|
-| **CSE** | 65-78 | Highest performing — many high-scoring students |
-| **AIML** | 60-72 | Mid-high — strong ML-related skills |
-| **IT** | 55-68 | Mid-range — solid but not top |
-| **AIDS** | 48-60 | Mid-low — more at-risk students |
-| **ETC** | 40-55 | Lowest — more struggling students |
+**Modified:** `lib/models/portfolio/resume_metadata.dart`, `lib/models/portfolio/portfolio_model.dart`, `lib/models/portfolio/career_preferences.dart`, `lib/services/storage/storage_service.dart`, `lib/providers/portfolio_provider.dart`, `lib/views/portfolio/student_portfolio_screen.dart`, `lib/views/portfolio/portfolio_read_only_view.dart`, `lib/views/portfolio/edit_portfolio_screen.dart`, `lib/views/dashboards/student_dashboard_view.dart`, `functions/index.js`, `lib/models/application.dart`, `lib/services/firestore/placements_service.dart`, `lib/providers/placements_provider.dart`, `lib/views/placements/placements_list_view.dart`, `pubspec.yaml`
 
-This differential enables the AI Insights to generate meaningful department comparison narratives (e.g., "CSE is the strongest department with an average ATS of 72, while ETC needs improvement at 48").
+**Version (T6):** `8.4.0+84` → `8.4.1+85`
 
-### Safety & Idempotency
+### Validation (T7)
 
-| Feature | Implementation |
-|---------|---------------|
-| **Demo flag** | Every document gets `isDemoData: true` and `environment: "demo"` |
-| **Cleanup** | Recursive deletion of only flagged documents, subcollections before parents |
-| **Safe scope** | Production documents without the flag are NEVER touched |
-| **Idempotent** | Safe to re-run — uses `{merge: false}` on known UIDs, creates new IDs for subcollections |
-| **Batched writes** | Chunks of 490 (under Firestore's 500-write batch limit) |
-| **Admin SDK** | Uses `firebase-admin` service account which bypasses security rules |
+- `flutter analyze` → **0 errors / 0 warnings** on every subtask (T1–T5); the 69 pre-existing info-level lints are unchanged from baseline
+- Acceptance matrix per `docs/Task.md` Phase 12: upload / replace / download / delete, metadata updates, teacher + alumni read, no cross-student access, existing ATS review functional, dashboards + analytics unaffected
 
-### Usability
+---
 
-```bash
-cd scripts/seed_firestore
-npm install          # Install firebase-admin
-npm run seed         # Seed all demo data (2-5 min)
-npm run cleanup      # Remove all demo data safely
+## v8.4.9 — Flattened-Shape Portfolio Read Fix + Email Backfill
+
+> Source: `docs/logs.md` device diagnostics (2026-08-07) · Executed via `docs/todo.md` (MB17–MB19).
+
+### Root Cause (proven on-device)
+
+The user's device log fired the MB13 diagnostic:
+
+```
+PortfolioService.getPortfolio: doc USERS/SWJLWtNNV7RMnhmcUquXTmW2mfH3 EXISTS but portfolio key is MISSING.
+Doc keys present: (isPublicProfile, career, metadata, ..., portfolio.certifications, metadata.updatedAt)
 ```
 
-### Validation Targets
+The document had **no nested `portfolio` map** — every section was stored as **root-level keys with dots in their names** (`portfolio.resume`, `portfolio.projects`, `portfolio.certifications`, …) — the shape Firebase-console JSON edits / legacy writers produce. The reader looked up `data['portfolio']`, so it returned empty while the console clearly held all the data. That was the **exact mechanism behind Symptom 1** ("console has data, app shows empty") from the v8.4.8 pass: UID mismatch, wiped doc, and parsing were all ruled out — the reader simply looked in the wrong shape.
 
-After seeding, each dashboard should show:
+### The mistake (what went wrong, honestly)
 
-| Dashboard | Metrics |
-|-----------|---------|
-| **Teacher** | Total Students: 30, Department Comparison: 5 depts, Resume Analytics: 120-150 reviews, Skill Gap: 20+ keywords, Placement Funnel: 30 eligible / 20-25 applied, At-Risk: 5 flagged, AI Summary: non-empty narrative |
-| **Student** | Recommendations: 6 per student, Badges: based on streaks, Engagement: 30-98 range, AI Chat: 2-5 interactions, Resume History: 3-5 reviews |
-| **Alumni** | Mentorship Queue: 10 pending / 12 accepted / 10 completed, Opportunities: 15 posted, Impact Metrics: active counts |
+Two compounding mistakes landed here, and both are now fixed:
 
----
+1. **The read path assumed only the canonical nested shape.** Since v8.4, the writer (`PortfolioService.savePortfolio`) always writes the nested map via `portfolio.<section>` dotted paths, so nothing verified what happens when a document stores the portfolio *flattened* as root-level `portfolio.*` dots (Firebase-console JSON edits / legacy importers). The reader silently returned `PortfolioModel.empty()` for that shape, which is exactly why the app showed "No Resume" + 10% strength while the console had every section. This was not new to this bug — it had been latent since day one of the portfolio feature; nothing surfaced it because all app-authored writes self-consistently used the nested shape.
+2. **The v8.4.8 pass drew the wrong conclusion instead of reading the raw document.** After the user's console dump looked complete, the pass concluded "data is fine — probably a stale debug build" (MB16). That was incorrect: the console dump was showing the *flattened* keys, and the app's reader looked for a nested `portfolio` map that didn't exist. The lesson: when "console has data but the app sees empty", the first check must be the **actual storage shape** the reader expects vs. what the document really contains — not caching, not parsing, not the build. The MB13 diagnostic from v8.4.8 is what finally proved it (`portfolio key is MISSING … keys present: …, portfolio.certifications, …`), and MB17 fixed the reader to accept both shapes.
 
-## v8.3.1 — First-Login Data Load Retry
+### What Shipped
 
-### Issue
+| Subtask | Fix |
+|---------|-----|
+| **MB17** | `PortfolioService._extractPortfolioMap` + `_unflattenPaths` — BOTH `getPortfolio` and `portfolioStream` now read the nested `portfolio` map when present, OR rebuild the portfolio from root-level `portfolio.*` dotted keys (deep leaf-flattened keys like `portfolio.resume.downloadUrl` re-nested under their section), else null → empty. The MB13 diagnostic only fires when neither shape carries a portfolio. |
+| **MB18** | `personal.email` blank was a data bug, not a feature — the setup screen renders email read-only from that stored field. New `ProfileService.backfillEmail` does a targeted `personal.email` merge (portfolio + everything else untouched) when blank; `ProfileProvider.initWithUser` calls it once per user (`_emailBackfillUid`, cleared on `reset()`), non-fatal, and mirrors the email into memory immediately. |
 
-On **first login** (fresh app launch with no cached Firebase connection), the teacher dashboard and AI Insights tab showed **zero data** despite the Firestore database being populated. After stopping and relaunching the app, the same data appeared correctly.
+### Files
 
-### Root Cause
+**Modified:** `lib/services/firestore/portfolio_service.dart`, `lib/services/firestore/profile_service.dart`, `lib/providers/profile_provider.dart`, `docs/todo.md`, `docs/issues.md`
 
-The Firebase Firestore SDK's gRPC/WebSocket connection is not fully established on the first `get()` call during the initial app launch. On fresh login:
+### Validation (MB19)
 
-1. `AuthGuard` builds, streaming auth state
-2. `ProfileProvider` and `RoleProvider` initialize — including the `_TeacherDashboardTab.initState()` `addPostFrameCallback`
-3. `TeacherAnalyticsProvider.loadAnalytics()` fires 8 parallel Firestore queries **before the Firestore connection is warm**
-4. The queries execute but the connection is a cold start — the SDK may return empty snapshots or the responses arrive out of order
-5. On second launch: Firebase SDK reuses cached auth state, the Firestore connection is already warm, queries work immediately
-
-### Fix Applied
-
-| Fix | File | Change |
-|-----|------|--------|
-| 1 | `teacher_dashboard_view.dart` | Added retry mechanism in `_TeacherDashboardTab` — if initial load yields zero students, retry up to 3 times with 2-second delay between attempts |
-
-### Implementation Detail
-
-The retry logic in `_TeacherDashboardTabState`:
-- Tracks `_loadRetryCount` (max 3 retries)
-- After each load, checks if data is empty (zero students) and not currently loading
-- If empty, schedules a retry via `Future.delayed(_retryDelay, ...)` — 2 seconds between attempts
-- All `mounted` guards prevent stale state access
-- On pull-to-refresh, the retry counter is NOT reset — the manual refresh is the user's signal to reload
-
-### Validation
-
-- `flutter analyze` → **0 errors, 0 warnings** (4 info-level `use_build_context_synchronously` lint hints only — all guarded by `mounted` checks)
-- No UI changes — retry is transparent to the user
-- No analytics logic changes
+- `flutter analyze` → **No issues found** on all 3 changed files
+- `flutter test` → **all 65 tests passed**
+- Data self-heals to the canonical nested shape on the next app-side portfolio save (the tolerant reader prefers the nested map thereafter)
 
 ---
 
-## v8.2.1 — Data Pipeline Fix
+## v8.4.8 — Portfolio Read Failure & Refresh-Wipe Fix
 
-### Issues Found
+> Source: `project_info__16.md` / `project_info__17.md` (2026-08-07 investigation) · Executed via `docs/todo.md` (MB11–MB16).
 
-| # | Severity | File | Root Cause |
-|---|----------|------|------------|
-| 1 | **HIGH** | `teacher_analytics_service.dart` | `getEngagementAggregates()` queried `users/{uid}/engagement/summary` but the actual Firestore path is `users/{uid}/engagement_summary/summary`. This caused **Avg Engagement** and **Avg Profile Strength** to always return 0. |
-| 2 | **MEDIUM** | `teacher_dashboard_sections.dart` | "Placed Students" card was counting active placement *drives* (job postings), not actual placed students. When someone saw "Placed Students = 4" but "Total Students = 0" it was contradictory because the metrics came from different queries (placements collection vs students collection). |
-| 3 | **LOW** | `teacher_dashboard_sections.dart` | `avgScore` had a fallback `reviews.averageScore` that was unnecessary — the `TeacherAnalyticsProvider` already provides `averageScore` from the full `collectionGroup` query across all student reviews. |
-| 4 | **LOW** | `teacher_ai_insights_tab.dart` | "Mentorships" tile was displaying `activeAlumni` count (labels mismatched). |
-| 5 | **LOW** | `teacher_dashboard_sections.dart` | Department Overview "Overall Placement" label implied actual student placement rate, but it was drives-per-student. |
+### What Shipped
 
-### Fixes Applied
+| Subtask | Fix |
+|---------|-----|
+| **MB11** | `PortfolioProvider.refresh()` applied the v8.4.4 stale-guards (skip during in-flight local write; never let an empty read wipe a non-empty portfolio; never let a read drop the resume while memory has one). A single empty `getPortfolio()` could previously wipe the just-uploaded resume from memory AND poison the SharedPreferences cache — the exact refresh-wipe mechanism. Cache is only re-written when fresh data actually replaces memory. |
+| **MB12** | `initWithUser` one-shot-get catch now sets `_error = 'Failed to load portfolio'` when falling back to empty, and the later `_error = null` was removed so the v8.4.7 banner actually fires on failed startup reads. |
+| **MB13** | `PortfolioService.getPortfolio` prints a diagnostic (uid + doc key list) when the doc exists without a `portfolio` key — this diagnostic is what proved the v8.4.9 root cause on-device. Also hardened the read against a non-map `portfolio` value. |
+| **MB14** | `createProfile` re-checks doc existence itself and uses `SetOptions(merge: true)` on an existing doc, so the race with `initializeProfile`'s `exists` check can never overwrite the whole document (including `portfolio`). |
+| **MB15** | `ResumeSummaryCard` takes an `error` param and renders a red banner; the dashboard passes `portfolioProvider.error` through, so a failed load can't silently look like a fresh empty portfolio. |
+| **MB16** | Validation: `flutter analyze` clean on all 5 changed files; `flutter test` 65/65 passed. User-side console verification confirmed portfolio data under the logged-in uid (candidates A/B/C ruled out). |
 
-| Fix | File | Change |
-|-----|------|--------|
-| 1 | `teacher_analytics_service.dart` | Changed `.collection('engagement')` → `.collection('engagement_summary')` to match actual Firestore path used by `EngagementService` |
-| 2 | `teacher_dashboard_sections.dart` | Renamed "Placed Students" → "Active Drives" to truthfully reflect that the metric counts active placement opportunities |
-| 3 | `teacher_dashboard_sections.dart` | Removed unused `reviews` Provider watch and fallback; now uses `analytics.averageScore` directly |
-| 4 | `teacher_ai_insights_tab.dart` | Renamed "Mentorships" → "Alumni" in CampusHealth tile to match the actual data shown |
-| 5 | `teacher_dashboard_sections.dart` | Renamed "Overall Placement" → "Active/Student" in Department Overview header |
+### Files
 
-### Schema Limitations Discovered
-
-The system tracks **placement opportunities** (job postings in the `placements` collection) but does **not** track which individual students were hired. Therefore:
-- "Placed Students" cannot be computed from existing data
-- Shortlisted/Interview/Placed pipeline stages are unavailable
-- Per-department placement rates are unavailable
-- The pipeline shows "N/A" for these stages intentionally
-
-### Validation
-
-- `flutter analyze` → **0 errors, 0 warnings** (3 info-level style suggestions only)
-- All v8.2 files compile cleanly
-- No Firestore rules, indexes, or schema changes required
-- No Cloud Function changes required
+**Modified:** `lib/providers/portfolio_provider.dart`, `lib/services/firestore/portfolio_service.dart`, `lib/services/firestore/profile_service.dart`, `lib/widgets/resume_summary_card.dart`, `lib/views/dashboards/student_dashboard_view.dart`, `docs/todo.md`, `docs/issues.md`
 
 ---
 
-## v8.2.2 — Layout Fix & Data Pipeline Investigation
+## v8.4.2 — Issues Hardening
 
-### Issues Found
+> Source: v8.4.1 Final Audit (`docs/confirmation.md` §2) + Explore audit `project_info__13.md` · Executed via `docs/todo.md` (S1–S7) · Issue status mirrored in `docs/issues.md`.
+> Status: **DEPLOYED 2026-08-07** — S1a–S7 complete, S1c/P2 ✅ (Storage provisioned in Console by the project owner), full deploy batch released. Only the post-deploy manual pass remains.
 
-| # | Severity | Issue | Root Cause |
-|---|----------|-------|------------|
-| 1 | **HIGH** | Vertical purple/blue bar rendered down the center of AI Insights tab, overlapping charts and content | Nested Scaffold — both `_TeacherDashboardTab` and `AIInsightsTab` had their own `Scaffold` + `AppBar` inside `MainNavigationView`'s outer Scaffold, causing double-Scaffold layout corruption |
-| 2 | **MEDIUM** | All dashboard metrics showing zero | Empty Firebase database — no student users, resume reviews, placements, engagement summaries, or mentorship requests exist in the connected dev environment |
+### Scope
 
-### Fixes Applied
+Every audit item from `docs/issues.md` (C1/H1/H2 + N1, M1–M5, L1–L7, N2–N6, P1, P3) was verified against source (`project_info__13.md`) and fixed in this cycle. The S4b (M4) and S4c (N2) UI call sites and the S6b (P3) client callables (`AIService`, `ResumeReviewService`) were updated in the same batch.
 
-| Fix | File | Change |
-|-----|------|--------|
-| 1 | `teacher_dashboard_view.dart` | Removed inner Scaffold + AppBar → `Column` + `Expanded` layout with `Container`-based custom header |
-| 2 | `teacher_ai_insights_tab.dart` | Same fix — removed inner Scaffold + AppBar → `Column` + `Expanded` layout with `Container`-based custom header |
+### What Shipped
 
-### Investigation Findings
+| Subtask | Fix |
+|---------|-----|
+| **S1a** | `storage.rules` `allow write` now has the `request.resource == null` branch (owner deletes) and `<=` size boundary (closes C1 + L3) |
+| **S1b** | Stale `resume.pdf` comments → `resumes/{uid}/latest.pdf` in `storage.rules` header + `resume_upload_screen.dart` (L2) |
+| **S2a** | `logPlacementApplication` copies `latest.pdf` → `resumes/{uid}/snapshots/app_{applicationId}.pdf` and stores the snapshot path + signed URL in both write paths (H1) |
+| **S2b** | `firestore.indexes.json` gained `applications` (userId/appliedAt) + 2× `placements` indexes (H2 + N1) |
+| **S2c** | Linux platform block in `firebase.json` + `lib/firebase_options.dart` Linux options (L7) |
+| **S3a** | Server-side `resumeStoragePath` ownership check + `atsScoreAtApplication` int 0–100 coercion (M2) |
+| **S3b** | Application `status: "applied"` unified on both write paths in `logPlacementApplication` (M1) |
+| **S3c** | Connectivity `StreamSubscription` kept + cancelled in `reset()`/`dispose()`, `_isDisposed`-guarded callback (M5) |
+| **S4a** | F10 `end.isBefore(start)` guard in Experience manager `_formatDuration` (M3) |
+| **S4b** | Apply dialog awaits `PortfolioProvider` init, resolves storagePath-only resumes via `ResumeService.getResumeUrl`, shows loading (M4) |
+| **S4c** | `resume.downloadUrl!` null-assert crash fixed at both call sites via `ResumeService.getResumeUrl` with SnackBar fallbacks (N2) |
+| **S5a** | `firestore.rules` notifications subcollection gained `allow delete: if isOwner(userId);` (L4; N3 verified) |
+| **S5b** | `PortfolioTextField` `maxLength` param + caps across all six portfolio edit screens (L5) |
+| **S5c** | `seedPortfolios()` phase-15 in `scripts/seed_firestore/seed.js` — full portfolio + resume metadata, `merge: true`, `isDemoData: true` (L6) |
+| **S5d** | Dead code removed from `placements_service.dart`: `applyForPlacement`, `applyForPlacementDirect`, `getUserApplicationsWithDetails`, `getUserApplications`, `hasUserApplied` (L1 + N4) |
+| **S5e** | T2 bullet restored in `docs/todo.md` (N6); `copyWith` null-clear limitation documented as `NOTE (N5, v8.4.2)` on `CareerPreferences`/`SocialLinks`/`ResumeMetadata` |
+| **S6a** | `onResumeReviewCreatedRefreshMatches` now merges `latestATSScore`/`reviewCount`/`lastReviewAt` (+`updatedAt`) into `users/{uid}/portfolio.resume` (P1) |
+| **S6b** | `askAI` + `reviewResume` migrated from `onRequest` → `onCall`; identity from `request.auth.uid`; quota → `resource-exhausted`; `AIService`/`ResumeReviewService` clients migrated to `httpsCallable` (P3) |
+| **S7** | Validation below |
 
-Completed an end-to-end audit of all 8 analytics queries and 10 AI Insights sections:
+### Files
 
-- **Root cause of zero values**: Empty Firebase database — no data exists in the connected dev environment
-- **No code bugs found**: All queries correctly return default empty values when the database is empty
-- **All empty states verified**: Every chart/section shows appropriate fallback text ("No review data yet", "No placement data", etc.)
-- **Consistency confirmed**: Dashboard and AI Insights share the same `TeacherAnalyticsProvider` instance — no contradictory values
-- **Full trace documented** in `project_info__5.1 v8.2.2 — Teacher Dashboard & AI Insights Data Pipeline Investigation.md`
+**Created:** `test/application_test.dart`, `test/resume_metadata_test.dart`
 
-### Validation
+**Modified:** `storage.rules`, `firestore.rules`, `firestore.indexes.json`, `firebase.json`, `lib/firebase_options.dart`, `functions/index.js`, `lib/services/firestore/placements_service.dart`, `lib/providers/placements_provider.dart`, `lib/views/placements/placements_list_view.dart`, `lib/views/portfolio/experience_manager_screen.dart`, `lib/views/portfolio/student_portfolio_screen.dart`, `lib/views/portfolio/portfolio_read_only_view.dart`, `lib/views/portfolio/resume_upload_screen.dart`, `lib/views/portfolio/edit_portfolio_screen.dart`, `lib/views/portfolio/widgets/portfolio_text_field.dart`, `lib/views/portfolio/career_preferences.dart`, `lib/models/portfolio/social_links.dart`, `lib/models/portfolio/resume_metadata.dart`, `lib/models/application.dart`, `lib/services/ai/ai_service.dart`, `lib/services/ai/resume_review_service.dart`, `scripts/seed_firestore/seed.js`, `docs/todo.md`, `docs/issues.md`
 
-- `dart analyze` on all 6 dashboard/analytics files → **0 errors, 0 warnings** (5 info-level style suggestions only)
-- No analytics logic changed — only layout scaffolding removed
+### Validation (S7)
 
----
+- `flutter analyze` → **0 errors / 0 warnings** (69 pre-existing info lints unchanged from baseline)
+- `flutter test` → **58/58** (45 existing + 13 new: `test/application_test.dart` — Application M1/S3b status + T5 snapshot contract; `test/resume_metadata_test.dart` — T1 field names, legacy-key fallbacks, storagePath-only `hasResume`, N5 copyWith null-clear limitation)
+- JS syntax: `node --check` passes for `functions/index.js` and `scripts/seed_firestore/seed.js`
+- Manual pass (post-deploy) still open — see `docs/todo.md` S7
 
-## Edge Cases & Boundary Handling
+### Deploy batch
 
-The following edge cases were identified during implementation and addressed:
-
-### Data-level edge cases
-- **Zero data**: Every chart/section gracefully handles total == 0 with fallback UI
-- **Single trend point**: LineChart still renders — single dot shown with `isCurved: true`
-- **Single department**: AI Summary handles 1 department correctly (no "strongest vs weakest" comparison)
-- **Missing student names**: Falls back to "Unknown Student" via `??` chains throughout
-- **Null department data**: Grouped under "Unknown" department
-- **Very long strings**: Department names and skill names are truncated for chart labels
-- **Mentorship division by zero**: `completed / total` only evaluated when `total > 0`
-
-### State management edge cases
-- **Disposed provider**: All access guarded by `_isDisposed` checks before `notifyListeners()`
-- **Loading vs empty**: Skeleton loader shown only when `isLoading && !hasData`
-- **Provider list mutation (CRITICAL FIX)**: AI Summary now copies `departmentAnalytics` list before sorting, preventing in-place mutation of provider state
-- **Teacher vs student data (CRITICAL FIX)**: At-Risk detection no longer uses `placements.appliedPlacementIds` or `mentorship.acceptedMentorshipsCount` — these are teacher-level, not per-student. Instead uses only per-student signals from `studentData`
-
-### FL Chart edge cases
-- **Zero-value bars**: Rendered as barely-visible stubs (0.5 height, 8% opacity grey) rather than disappearing, so the chart structure remains clear
-- **Single-section pie**: Works correctly — one wedge fills the whole chart
-- **All-same-score trend line**: LineChart renders a flat line correctly; `clamp()` ensures Y bounds don't collapse
-
-### Pipeline edge cases
-- **No applications**: "N/A" shown for Shortlisted/Interview/Placed stages with subtitle "Not tracked"
-- **Empty applications collection**: Informational message shown
-- **Zero students**: Entire pipeline hidden with "No placement data yet"
+✅ **EXECUTED 2026-08-07** — `firebase deploy --only "functions,firestore:rules,firestore:indexes,storage" --non-interactive` succeeded after the owner enabled Storage in the Console. All 11 functions updated (askAI, reviewResume, logPlacementApplication, onResumeReviewCreatedRefreshMatches, etc.), storage.rules + firestore.rules released, indexes deployed. Note: the run used `--non-interactive` so the 6 pre-existing remote-only indexes + 2 field overrides were preserved (not deleted).
 
 ---
 
-## Files Changed
+## Previous Versions (condensed)
 
-### Created (v8.3)
-| File | Purpose |
-|------|---------|
-| `scripts/seed_firestore/seed.js` | 14-phase seed script — 30 students, 10 alumni, 5 teachers, 120-150 resume reviews, 30 engagement summaries, 20 placements, 80-120 applications, 40 mentorship requests, 15 opportunities, 22 chats, ~200 notifications, 150+ activities, 6 recommendations/student, ~75 AI interactions, 6 public profiles |
-| `scripts/seed_firestore/cleanup.js` | 7-phase cleanup script — recursive subcollection deletion with `isDemoData: true` safety flag |
-| `scripts/seed_firestore/README.md` | Setup instructions, data catalogue, validation targets, troubleshooting guide |
-| `scripts/seed_firestore/package.json` | npm scripts (`seed`, `cleanup`), `firebase-admin` dependency |
-| `project_info__8.md` | Complete codebase architecture & Firestore schema analysis — 12 document schemas, 13 collection groups, 20+ subcollections, security rules analysis, indexes audit |
+### v8.4.6 — Final Audit Fixes (F1–F12)
+Final audit close-out (`docs/confirmation.md` §9): **F1** role immutability guard (closes student self-elevation), **F2** chat route registration, **F3** notifications `type/createdAt` ASC composite index (system notifications no longer dropped), **F4** mentorship completion UI reachable, **F5** per-section dotted-path portfolio saves (no sibling clobber), **F6** provider uid/disposed lifecycle guards, **F7** notifications create rule → owner-only, **F8** dead code removal, **F9** `getPortfolio` rethrows real errors, **F10** inverted-date guards, **F11** typed params + version bump. Deployed `firestore:rules,firestore:indexes,storage`. Validation: analyze 0 errors; **45/45 tests**; zero unhandled exceptions across 3 logged launches.
 
-### Modified (v8.2.2)
-| File | Change |
-|------|--------|
-| `lib/views/dashboards/teacher_dashboard_view.dart` | Removed inner Scaffold → Column+Expanded+Container app bar |
-| `lib/views/dashboards/widgets/teacher_ai_insights_tab.dart` | Removed inner Scaffold → Column+Expanded+Container app bar |
+### v8.4.5 — Student Resume Portfolio Bugfix (C1/H1–H5/M1–M13/L1–L7)
+Fixed v8.4 audit issues: **C1** platform-split upload (web bytes / non-web filePath), **C2** real `educationFilled` completion score, **C3/H2** storage rules — teacher/alumni read via role lookup, PDF-only + 5 MB server-side, **H1** single-seed forms, **H3** `optionalUrl` allowHttp fix, **H4** per-section diff saves, **H5** 16 new tests, **M5/M13** profile gating + dynamic version label, **M10** tolerant `fromMap`. Validation: analyze 0 errors; **41/41 tests**. Deployment note: `firebase deploy --only storage` blocked — Firebase Storage not yet provisioned on `campusconnect-firebase-project`.
 
-### Modified (v8.2.1 — Bugfix)
-| File | Change |
-|------|--------|
-| `lib/services/firestore/teacher_analytics_service.dart` | Fixed `engagement` → `engagement_summary` subcollection path |
-| `lib/views/dashboards/widgets/teacher_dashboard_sections.dart` | Renamed "Placed Students" → "Active Drives"; removed unused `reviews` watch; renamed "Overall Placement" → "Active/Student" |
-| `lib/views/dashboards/widgets/teacher_ai_insights_tab.dart` | Renamed "Mentorships" → "Alumni" in CampusHealth |
+### v8.4 — Student Resume Portfolio
+Full portfolio subsystem: models (portfolio, skills, projects, certifications, experience, achievements, career preferences, social links, resume metadata), `PortfolioService` (merge-set CRUD under `users/{uid}/portfolio`), `StorageService` (`resumes/{uid}/resume.pdf`, 5 MB + PDF validation), `PortfolioProvider`, validators, 10 portfolio views, 8 routes, `storage.rules`, alumni/teacher read-only Firestore rules. Foundation for v8.4.5 / v8.4.6 / v8.4.1.
 
-### Created (v8.2 — Teacher Intelligence)
-| File | Purpose |
-|------|---------|
-| `project_info__5_Teacher Dashboard v8.2 Audit.md` | Phase 0 — comprehensive codebase audit |
+### v8.3.1 — First-Login Data Load Retry
+Teacher dashboard showed zero data on first login (Firestore gRPC connection not warm). Fix: retry load up to 3× with 2 s delay when zero students returned; `mounted`-guarded.
 
----
+### v8.3 — Codebase Architecture Documentation + Firestore Demo Data Seeder
+- `project_info__8.md`: complete schema analysis — 12 document schemas, security rules audit, index audit, analytics data-flow trace.
+- 14-phase seed script (`scripts/seed_firestore/seed.js` + `cleanup.js` + README): 30 students (5 departments, differentiated profiles), 10 alumni, 5 teachers, 120–150 progressive ATS reviews, 30 engagement summaries, 20 placements, 80–120 applications (dual-path), 40 mentorship requests, 15 opportunities, 22 chats, ~200 notifications, 150+ activities, 6 recommendations/student, ~75 AI interactions, 6 public profiles. `isDemoData: true` safe cleanup, Admin SDK (bypasses rules), batched writes in chunks of 490.
 
-## Architecture Decisions
+### v8.2.2 — Layout Fix & Data Pipeline Investigation
+Removed nested Scaffold + AppBar in `_TeacherDashboardTab` and `AIInsightsTab` (fixed vertical purple/blue bar corrupting the AI Insights tab). Investigated zero-metric reports: root cause = **empty Firebase database**, no code bugs; every chart/section shows a proper empty state.
 
-### Seed Script: Node.js + Admin SDK
-The seed script uses `firebase-admin` SDK (service account) which bypasses Firestore security rules. This is required because several document paths (e.g., `users/{uid}/engagement_summary/summary`, `users/{uid}/recommendations/`) have `write: if false` in security rules — client SDK seed scripts would fail on these paths.
+### v8.2.1 — Data Pipeline Fix
+Fixed `getEngagementAggregates()` path `engagement` → `engagement_summary` (avg engagement / profile strength were always 0). Renamed misleading metrics: "Placed Students" → "Active Drives", "Overall Placement" → "Active/Student", "Mentorships" → "Alumni". Schema does not track per-student placement outcome, so Shortlisted/Interview/Placed stages show "N/A".
 
-### UID Convention: `demo_` Prefix
-All demo users use UIDs like `demo_student_01`, `demo_alumni_03`, `demo_teacher_05` — avoiding any collision with real auth UIDs. The seed script does NOT create Firebase Auth accounts; it only writes Firestore documents.
+### v8.2 — Teacher Intelligence & Analytics
+8 workspace phases: placement pipeline refinement (real data, no hardcoded multipliers), quick statistics, department analytics, FL Chart visual upgrade (pie/bar/line), at-risk detection, student growth analytics, AI-generated teacher summary (dynamic narratives), workspace docs. Edge-case hardening: provider lists copied before sorting; at-risk uses per-student signals only (not teacher-level counts); zero-value chart stubs; single-department and single-trend-point rendering.
 
-### Dual Application Paths
-Applications are written to **both** `placements/{placementId}/applications/{uid}` (newer primary path) and `applications/{applicationId}` (legacy global collection). This ensures backward compatibility with both old and new code paths.
-
-### Progressive ATS Scores for Student Growth
-Each student gets 3-5 resume reviews with intentionally progressive ATS scores, enabling the Student Growth section (LineChart) to show meaningful trends — some improving, some declining, some flat, some high-scoring consistently.
-
-### Department Performance Distribution
-Departments are intentionally skewed: CSE highest average ATS, ETC lowest. This differential enables the AI Insights to generate meaningful comparison narratives. Without this skew, all departments would appear identical and the AI Summary would lack insight.
-
-### Batched Writes with 490-document Chunks
-Firestore's batch write limit is 500 operations. The seed script uses chunks of 490 to stay safely under this limit. Each chunk is committed individually with progress logging.
-
-### Retention of "N/A" for pipeline stages
-Shortlisted, Interview, and Placed stages display "N/A" because the current Firestore schema does not track application-level stage progression. Future schema changes (e.g. adding a `stage` field to the `applications` subcollection) would enable real counts here.
-
-### Engagement aggregates use correct Firestore path
-`TeacherAnalyticsService.getEngagementAggregates()` now queries `users/{uid}/engagement_summary/summary` which matches the actual Firestore path used by `EngagementService` (per `EngagementService._summaryRef()`). The previous path `users/{uid}/engagement/summary` was incorrect and caused avg engagement / profile strength to always return 0.
-
-### "Active Drives" instead of "Placed Students"
-The system has no mechanism to track which individual students were hired. Renamed the metric to "Active Drives" which honestly reflects the count of active placement opportunities. A future enhancement could add a per-student placement status field to enable real "Placed Students" tracking.
-
-### Department sorting by studentCount (not placement rate)
-The spec says *"Sort departments by placement rate"*, but placement rate per department requires knowing how many students per department were placed. That data is not currently tracked. Sorting by `studentCount` is a pragmatic proxy.
+### v8.1 — Teacher Dashboard Modernization
+Predecessor analytics pass; superseded by v8.2.
 
 ---
 
-## Performance Improvements
+## Cross-Cutting Notes
 
-| Area | Improvement |
-|------|-------------|
-| **Parallel loading** | `TeacherAnalyticsProvider.loadAnalytics()` uses `Future.wait` to run all 8 queries concurrently instead of sequentially |
-| **Data reuse** | Department analytics reuses the same user query from `getStudentResumeData()` patterns rather than adding a new top-level collection query |
-| **Limit queries** | `getStudentResumeData()` caps at 30 students; `getSkillGapAnalysis()` limits to 400 reviews |
-| **Count queries** | `getApplicationPipelineCounts()` uses Firestore `count()` aggregation for student total instead of loading full documents |
-| **No streams** | All analytics are one-time fetches, not real-time streams — avoids unnecessary Firestore reads |
-| **Batch writes (seed)** | Seed script commits in chunks of 490 to stay under Firestore batch limits while maximizing throughput |
+### Architecture Decisions (still relevant)
+- **Nested portfolio map** (`users/{uid}/portfolio`) over a dedicated subcollection — preserves dashboards, per-section diffs (F5), backward compatibility. Caveat (M2): alumni read = whole student document read; documented inline in `firestore.rules`.
+- **Storage naming**: `resumes/{uid}/latest.pdf` since v8.4.1; the wildcard rule `resumes/{uid}/{fileName}` already covers future `history/v1.pdf` paths.
+- **ATS score wired (v8.4.2 S6a)**: `onResumeReviewCreatedRefreshMatches` now merges `latestATSScore`/`reviewCount`/`lastReviewAt` (+`updatedAt`) into `users/{uid}/portfolio.resume` — dashboard/portfolio/read-only "Latest ATS", Resume Age and `atsScoreAtApplication` are powered.
+- **Dual application paths**: `placements/{pid}/applications/{uid}` + legacy `applications/{appId}` for backward compatibility.
+- **Seed data**: `demo_` UID prefix, `isDemoData: true` flag, Admin SDK, batched writes.
 
----
+### Performance
+Parallel analytics loads (`Future.wait`), capped queries (30 students / 400 reviews), `count()` aggregations, one-time fetches (no streams), batched seed writes.
 
-## Known Limitations
-
-1. **Per-student placement tracking**: The system tracks which students applied to which placements (`applications` subcollection), but does not track shortlisting, interview, or final placement status per student. This limits pipeline accuracy. The seed script cannot create "Placed Students" data for this reason.
-
-2. **Engagement aggregates are per-document reads**: `getEngagementAggregates()` iterates over every student and reads their `engagement_summary/summary` doc. For institutions with 500+ students this could be slow. Consider a cloud function that maintains a materialized aggregate.
-
-3. **No real-time updates**: Analytics are snapshot-based, loaded on dashboard init and pull-to-refresh. New data won't appear until the user manually refreshes.
-
-4. **At-Risk detection limited to ATS/reviews**: Currently uses only ATS scores and review counts from `studentData`. Cannot detect mentorship gaps, application inactivity, or engagement drops per-student without additional subcollection queries.
-
-5. **Seed script requires manual service account key**: The `serviceAccountKey.json` must be manually downloaded from Firebase Console and placed in `scripts/seed_firestore/`. It is NOT committed to version control.
-
-6. **Seed script does not create Auth accounts**: Only writes Firestore documents. The demo UIDs are not linked to real Firebase Auth accounts, so login with demo credentials is not possible. The data is visible only when a real authenticated user (with Teacher role) views the dashboard.
-
----
-
-## v8.4 — Student Resume Portfolio
-
-### Objective
-
-Transform every student profile into a complete professional portfolio (resume, skills, projects, certifications, experience, education, achievements, social links, career preferences) stored under `users/{uid}/portfolio`. This becomes the foundation for future AI recommendations and mentorship matching — no AI logic added (out of scope).
-
-### Files Created
-
-| File | Purpose |
-|------|---------|
-| `lib/models/portfolio/portfolio_model.dart` | Portfolio aggregate model (resume, skills, projects, certifications, experience, achievements, links, preferences) |
-| `lib/models/portfolio/skill_model.dart` | Skill with name, category, proficiency |
-| `lib/models/portfolio/project_model.dart` | Project with title, description, technologies, URLs, dates, currentlyWorking |
-| `lib/models/portfolio/certification_model.dart` | Certification (title, issuer, issueDate, credentialId/Url) |
-| `lib/models/portfolio/experience_model.dart` | Experience (company, role, employmentType, dates) |
-| `lib/models/portfolio/achievement_model.dart` | Achievement (title, description, date, category) |
-| `lib/models/portfolio/career_preferences.dart` | Preferred roles/locations, expected salary, remote/relocation |
-| `lib/models/portfolio/social_links.dart` | GitHub, LinkedIn, Portfolio, LeetCode, Codeforces, HackerRank |
-| `lib/models/portfolio/resume_metadata.dart` | downloadUrl, uploadDate, lastUpdated, version, atsScore, parserVersion |
-| `lib/services/firestore/portfolio_service.dart` | CRUD under `users/{uid}/portfolio` via merge-set (backward compatible) |
-| `lib/services/storage/storage_service.dart` | Resume PDF upload/delete at `resumes/{uid}/resume.pdf`, 5 MB validation |
-| `lib/providers/portfolio_provider.dart` | Init/save/upload/delete/refresh/reset with `_isDisposed` guard |
-| `lib/utilities/portfolio_validators.dart` | Required fields, URLs, duplicate skills, empty projects, max size |
-| `lib/views/portfolio/widgets/portfolio_section_card.dart` | Shared section card + `PortfolioInfoRow` |
-| `lib/views/portfolio/widgets/portfolio_text_field.dart` | Shared form field matching app design language |
-| `lib/views/portfolio/student_portfolio_screen.dart` | Portfolio preview with strength bar |
-| `lib/views/portfolio/edit_portfolio_screen.dart` | Edit hub (skills, links, preferences, manager tiles) |
-| `lib/views/portfolio/projects_manager_screen.dart` | Projects list + form + delete |
-| `lib/views/portfolio/certifications_manager_screen.dart` | Certifications list + form + delete |
-| `lib/views/portfolio/experience_manager_screen.dart` | Experience list + form + delete |
-| `lib/views/portfolio/achievements_manager_screen.dart` | Achievements list + form + delete |
-| `lib/views/portfolio/resume_upload_screen.dart` | PDF picker, upload/replace/remove, guidelines |
-| `lib/views/portfolio/portfolio_read_only_view.dart` | Teacher/alumni read-only view (direct service reads) |
-| `storage.rules` | New Firebase Storage rules for `resumes/{uid}/*` |
-
-### Files Modified
-
-| File | Change |
-|------|--------|
-| `lib/constants/routes.dart` | 8 portfolio routes |
-| `lib/main.dart` | PortfolioProvider registration, 8 routes, per-user init, logout reset |
-| `lib/views/dashboards/student_dashboard_view.dart` | "My Portfolio" shortcut in Today section + logout reset |
-| `lib/views/profile/profile_view.dart` | "My Portfolio" menu card + logout reset |
-| `lib/views/mentorship/mentorship_request_detail_view.dart` | "View Student Portfolio" for alumni |
-| `lib/views/teacher/student_analytics_view.dart` | View-portfolio icon on leaderboard rows |
-| `firestore.rules` | Alumni read-only access to student portfolios |
-| `firebase.json` | Registered `storage.rules` |
-
-### Security
-
-- **Firestore**: owners can always read/write their own doc (portfolio is a nested field); teachers can read any user; alumni get read-only access to student docs (`role == 'student'`) — never write
-- **Storage**: `resumes/{uid}/{fileName}` — owner write; owner/teacher/alumni read; deny-all for everything else
-- No schema changes — portfolio stored as nested map under existing `users` collection via merge-set
-
-### Validation
-
-- `flutter analyze` → **0 errors**; remaining issues are pre-existing info-level style lints used across the app (`withOpacity`, deprecated `value:` on form fields)
-
-### Out of Scope
-
-AI Recommendation Engine, Mentorship AI, Resume Parsing, Resume History, Resume Versioning, Notification System, Admin Dashboard, Analytics Changes.
-
----
-
-## v8.4.5 — Student Resume Portfolio Bugfix
-
-### Objective
-
-Resolve every issue raised in the v8.4 audit (`docs/issues.md`) — resume upload broken on non-web platforms, inflated completion score, broken teacher resume access, weak storage rules, form re-seeding, URL validator bug, whole-map save clobbering, dead code, and the accompanying quality gaps. All fixes are code-level; no architecture changes.
-
-### Files Changed (Modified)
-
-| File | Change |
-|------|--------|
-| `lib/views/portfolio/resume_upload_screen.dart` | **C1** platform-split upload (`filePath` non-web / `bytes` web), `file.size` validation, `withData: kIsWeb`; **M6** typed `ResumeMetadata`; **L7** single busy flag |
-| `lib/models/portfolio/portfolio_model.dart` | **C2** `profileCompletion(educationFilled:)` parameter; **L1** `isEmpty` includes preferences; **M10** tolerant `fromMap` |
-| `lib/models/portfolio/career_preferences.dart` | **M4/L1** `isEmpty` considers role/location/salary + non-default remote/relocation |
-| `lib/views/portfolio/student_portfolio_screen.dart` | **C2** pass real `educationFilled`; **M6/L2** typed project tile with duration + links; **M9** inverted date guard; **M4** preferences visibility |
-| `lib/views/portfolio/portfolio_read_only_view.dart` | **C2** pass real `educationFilled`; **M9** inverted date guard; **M4** preferences visibility |
-| `lib/services/firestore/portfolio_service.dart` | **H4** per-section diff saves (`previous` param); **M8** removed dead methods |
-| `lib/providers/portfolio_provider.dart` | **H4** passes `previous`; **L4** re-init on different uid; **L5** `_isDisposed` guard in `refresh` |
-| `lib/utilities/portfolio_validators.dart` | **H3** `optionalUrl` allowHttp fix; **M8** removed dead validators |
-| `lib/services/storage/storage_service.dart` | **M8** slimmed `ResumeUploadResult` (dropped unused `version`/`toMetadataMap`) |
-| `lib/views/portfolio/edit_portfolio_screen.dart` | **H1** `_isSeeded` single-seed; **M1** edit-on-tap skill dialog |
-| `lib/views/profile/profile_view.dart` | **M5** My Portfolio gated to students; **M13** dynamic app version label |
-| `lib/views/dashboards/teacher_dashboard_view.dart` | **M12** logout resets `PortfolioProvider` |
-| `storage.rules` | **C3** teacher/alumni read via Firestore role lookup + `exists()`; **H2** PDF-only + 5 MB server-side |
-| `firestore.rules` | **M3** `userRole()` `exists()` guard; **M2** privacy note for alumni whole-doc read |
-
-### Files Created
-
-| File | Purpose |
-|------|---------|
-| `test/portfolio_model_test.dart` | **H5** completion (C2), isEmpty (L1), copyWith, round-trip, tolerant fromMap (M10) |
-| `test/portfolio_validators_test.dart` | **H5** required + optionalUrl H3 (allowHttp on/off, malformed) |
-| `project_info__9_bugfix_of_v8.4.md` | Implementation report for the bugfix pass |
-
-### Validation
-
-- `flutter analyze` → **0 errors, 0 warnings** — only pre-existing info-level lints (69, unchanged from baseline)
-- `flutter test` → **41/41 pass** (auth 25 + portfolio model/validators 16 new)
-- `firebase deploy --only firestore:rules` → **deployed** (rules compiled + released)
-
-### Deployment Note (Firebase Storage)
-
-`firebase deploy --only storage` is **blocked**: Firebase Storage is not yet provisioned on `campusconnect-firebase-project`. The fixed `storage.rules` (C3/H2) is ready; enable Storage in the Firebase Console (Get Started) and run `firebase deploy --only storage` to make teacher resume reads and server-side PDF/5 MB enforcement live.
-
----
-
-## v8.4.6 — Final Audit Fixes (F1–F12)
-
-### Objective
-
-Close out every remaining finding from the final audit (`docs/confirmation.md` §9): role self-elevation, an unregistered chat route, a missing composite index that silently dropped system notifications, unreachable mentorship completion UI, whole-map portfolio saves clobbering sibling edits, provider lifecycle guards, dead code, misleading empty portfolio states, inverted date display, and code hygiene. Tracked in `docs/todo.md`.
-
-### Files Changed
-
-| Fix | File | Change |
-|-----|------|--------|
-| **F1** 🔴 | `firestore.rules` | `canWriteRole()` guard on the owner write rule — `role` immutable once persisted (closes student→teacher/alumni self-elevation that granted PII/resume/analytics read access) |
-| **F2** 🔴 | `lib/main.dart` | `onGenerateRoute` now handles `chatDetailRoute` (same as `chatRoute`) — activity-feed chat taps open `ChatView` instead of crashing |
-| **F3** 🔴 | `firestore.indexes.json` | Added `notifications` `type ASC / createdAt ASC` composite index — `maybeCreateNotification` range query (`type == … AND createdAt >= …`) requires ASC; previously only DESC existed, silently dropping all system notifications |
-| **F4** 🟠 | `lib/views/mentorship/mentorship_request_detail_view.dart` | Completion block moved outside the `status == pending` branch — "Mark as Completed" (accepted) and completion info (completed) were dead code; now reachable |
-| **F5** 🟠 | `lib/services/firestore/portfolio_service.dart`, `lib/providers/portfolio_provider.dart` | `savePortfolio` now writes per-section dotted-path diffs (`portfolio.skills`, `portfolio.projects`, …) via new `previous` param; provider passes `previous` — sibling/remote edits no longer clobbered |
-| **F6** 🟠 | `lib/providers/portfolio_provider.dart` | L4: uid-based `_lastUid` guard in `initWithUser`; L5: `_isDisposed` guards in `refresh`/`uploadResume`/`deleteResume` — no `notifyListeners` after logout |
-| **F7** 🟡 | `firestore.rules` | Notifications create rule tightened from `isAuthenticated()` → `isOwner(userId)`; system notifications are Admin SDK writes (bypass rules) so nothing breaks |
-| **F8** 🟡 | `lib/services/firestore/portfolio_service.dart`, `lib/services/storage/storage_service.dart` | Removed dead `updateResumeMetadata`/`deletePortfolio`; slimmed `ResumeUploadResult` (dropped unused `version`/`toMetadataMap` + unused import) |
-| **F9** 🟡 | `lib/services/firestore/portfolio_service.dart` | `getPortfolio` rethrows real errors — read-only view shows "Failed to load portfolio." instead of a misleading empty state on permission/network failures |
-| **F10** 🔵 | `lib/views/portfolio/projects_manager_screen.dart`, `lib/views/portfolio/experience_manager_screen.dart` | `_formatDuration` guards `end.isBefore(start)` (matches the read-only view's M9 defense) |
-| **F11** 🔵 | `lib/views/portfolio/student_portfolio_screen.dart`, `pubspec.yaml` | `_buildCompletionHeader`/`_buildEducationSection` take `StudentProfile?` instead of `dynamic`; version bumped `5.1.2+3` → `8.4.0+84` |
-
-### Deployment
-
-`firebase deploy --only firestore:rules,firestore:indexes,storage` → **Deploy complete**:
-- `firestore.rules` **compiled successfully** and **released** (F1 + F7 live)
-- `firestore.indexes.json` **deployed** (F3 live — system notifications no longer dropped)
-- 8 pre-existing project indexes not declared locally were left untouched (no `--force`)
-
-### Log Verification
-
-`docs/logs.md` reviewed across 3 launches:
-- Zero unhandled Flutter exceptions
-- Multi-role logins/outs clean under the tightened rules (student/teacher/alumni)
-- Chat flows work (`Started listening to messages …`, `Chat marked as read`)
-- Remaining log noise is emulator/Google-Play-Services chatter only (`Skipped frames`, `GoogleApiManager`, `App Check placeholder`, `WatchStream Target id not found`)
-
-### Validation
-
-- `flutter analyze` → **0 errors** — only pre-existing info-level lints (flat from recent baseline)
-- `flutter test` → **45/45 pass**
-- (2 verify-email navigation tests flaked on first run with an off-screen-tap warning and passed on immediate re-run — pre-existing test robustness issue, unrelated to these changes)
-
----
-
-## Version Changelog
-
-| Version | Date | Description |
-|---------|------|-------------|
-| v8.4.6 | Current | Final audit fixes (F1–F12): role immutability, chat route, notifications index, mentorship completion, per-section saves, provider guards, dead code, error/empty UX, date guards, typed params |
-| v8.4.5 | Previous | Student Resume Portfolio bugfix (C1/H1–H5/M1–M13/L1–L7) |
-| v8.4 | Previous | Student Resume Portfolio |
-| v8.3.1 | Previous | First-login data load retry — Firestore warm-up fix |
-| v8.3 | Previous | Codebase architecture documentation + Firestore demo data seeder |
-| v8.2.2 | Previous | Layout fix + Data Pipeline Investigation |
-| v8.2.1 | Previous | Data pipeline fix — corrected engagement path, fixed misleading metric labels |
-| v8.2 | Previous | Teacher Intelligence & Analytics Refinement |
-| v8.1 | Previous | Teacher Dashboard Modernization |
-
-### v8.3 Changes — Codebase Architecture Documentation
-- **Complete Architecture Analysis**: Documented all 12 document schemas with exact field names, types, and optionality across `users`, `placements`, `mentorship_requests`, `opportunities`, `chats`, `notes`, `applications`, `public_profiles`, and all subcollections
-- **Security Rules Audit**: Catalogued all 6 security rule blocks with access patterns and implications for seed script design
-- **Index Audit**: Identified 5 existing composite indexes and 4 missing indexes that may cause runtime failures
-- **Data Flow Documentation**: Traced the complete analytics pipeline from Firestore queries through `TeacherAnalyticsService` → `TeacherAnalyticsProvider` → dashboard widgets
-- **Seed Script Blueprint**: Quantified all 13 data categories required for full dashboard population
-- Full report saved as `project_info__8.md` (4+ pages)
-
-### v8.3 Changes — Firestore Demo Data Seeder
-- **14-Phase Seed Script**: Creates 30 students (5 departments, differentiated profiles), 10 alumni (real companies), 5 teachers, 120-150 progressive resume reviews, 30 engagement summaries with badges, 20 placements (active/closed), 80-120 applications (dual paths), 40 mentorship requests (all statuses), 15 opportunities (4 types), 22 chats with messages, ~200 notifications, 150+ activities, 6 recommendations per student, ~75 AI interactions, 6 public profiles
-- **Cleanup Script**: 7-phase recursive deletion with `isDemoData: true` safety flag — only flagged documents are touched, production data is NEVER affected
-- **Safety Features**: Every document flagged with `isDemoData: true` + `environment: 'demo'`; batched writes in chunks of 490; Admin SDK bypasses security rules; idempotent by design
-- **Documentation**: Full README with setup instructions, data catalogue, performance profile descriptions, validation targets, troubleshooting guide
-- **Usage**: `npm run seed` to populate, `npm run cleanup` to remove
-
-### v8.2.2 Changes
-- **LAYOUT FIX**: Removed nested Scaffold wrappers in `_TeacherDashboardTab` and `AIInsightsTab`. Both tabs had their own `Scaffold` with `AppBar` inside `MainNavigationView`'s outer Scaffold, causing double-Scaffold layout corruption — a vertical purple/blue bar rendered down the center overlapping charts and content across the AI Insights tab. Replaced both inner Scaffolds with `Column` + `Expanded` layout and custom `Container`-based app bars. Fixes files: `lib/views/dashboards/teacher_dashboard_view.dart` and `lib/views/dashboards/widgets/teacher_ai_insights_tab.dart`.
-- **DATA PIPELINE INVESTIGATION**: Completed end-to-end audit of all 8 analytics queries and 10 AI Insights sections. Root cause of zero values identified: **empty Firebase database** (no student users, resume reviews, placements, engagement summaries, or mentorship requests). Confirmed no code bugs — all queries correctly return default empty values. Full trace documented in `project_info__5_Teacher Dashboard v8.2 Audit.md` and `project_info__5.1.md`.
-- **ANALYSIS CONFIRMATION**: `dart analyze` on all 6 dashboard/analytics files yields **0 errors, 0 warnings** — only 5 info-level style suggestions.
-- **EMPTY STATE VERIFICATION**: Every chart/section shows appropriate empty-state fallback text (e.g., "No review data yet", "No placement data", "No skill data available yet") — no misleading zero values displayed.
-- **CONSISTENCY CONFIRMATION**: Dashboard and AI Insights tabs share the same `TeacherAnalyticsProvider` instance — no contradictory values exist.
-
-### v8.2.1 Changes
-- **BUGFIX**: Fixed engagement subcollection path from `engagement` → `engagement_summary` to match actual Firestore schema
-- **HONESTY**: Renamed "Placed Students" → "Active Drives" to reflect the actual metric (active job postings, not placed students)
-- **CLEANUP**: Removed unused `ResumeReviewProvider` watch from `QuickStatistics`; removed dead fallback logic
-- **LABEL FIX**: Fixed "Mentorships" tile in AI Insights to correctly read as "Alumni"
-- **LABEL FIX**: Renamed "Overall Placement" → "Active/Student" in Department Overview
-
-### v8.2 Changes
-- **Phase 1**: Removed hardcoded pipeline multipliers (`0.6`, `0.3`). Pipeline now uses real `eligible` (total students) and `applied` (application counts) from `TeacherAnalyticsProvider`. Remaining stages show "N/A" with explanation.
-- **Phase 2**: All 8 spec metrics implemented: Total Students, Active Drives, Placement Rate, Avg Resume Score, Avg Engagement, Avg Profile Strength, Active Alumni, Active Mentorships.
-- **Phase 3**: Department cards with per-dept name, student count, avg score, top skills, risk level. Sorted by student count.
-- **Phase 4**: Full FL Chart integration: PieChart (resume/risk distribution), BarChart (funnel, dept comparison, skill gaps), LineChart (monthly trends).
-- **Phase 5**: Multi-signal At-Risk detection using ATS + review count + engagement signals. Risk cards show name, dept, score, signals, priority, intervention.
-- **Phase 6**: Student Growth section with ATS improvement, profile, engagement, application rate, placements.
-- **Phase 7**: Dynamic AI narrative generated from provider data — no hardcoded insights.
-- **BUGFIX**: Fixed missing `placements` Context watch in `DepartmentOverview` causing compilation error.
-- **BUGFIX**: Replaced 3 invalid `AppTheme.space6` references with valid `AppTheme.space8`.
+### Known Limitations
+1. Per-student placement *outcome* (shortlist/interview/placed) is not tracked — pipeline shows "N/A" for those stages.
+2. Engagement aggregates iterate per-student docs — slow at 500+ students; a materialized aggregate (Cloud Function) is the future fix.
+3. Analytics are snapshot-based — data appears on dashboard init or pull-to-refresh, not live.
+4. At-risk detection limited to ATS/review signals.
+5. ~~Firebase Storage provisioning~~ — **RESOLVED 2026-08-07** (v8.4.2 S1c/P2): Storage bucket enabled in Console + `storage.rules` deployed. Resume uploads/deletes are live.
+6. **App Check not installed** — `No AppCheckProvider installed` appears as a WARNING on every login/session (placeholder token). Non-blocking: Firestore/Storage rules authenticate via `request.auth` (Firebase Auth), not `app.check()`, so requests are never blocked. Verified harmless on alumni login (2026-08-07). Enabling would be a deliberate future hardening task: add `firebase_app_check`, configure Play Integrity + DeviceCheck, opt-in the rules, redeploy.
+7. **Flattened-vs-nested portfolio shape** — legacy/console-edited user docs may store the portfolio as root-level `portfolio.*` dotted keys instead of a nested `portfolio` map. v8.4.9 (MB17) makes both reads (`getPortfolio`/`portfolioStream`) tolerant of both shapes; app writes always produce the canonical nested shape and self-heal the doc on the next save.

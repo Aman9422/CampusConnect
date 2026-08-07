@@ -15,6 +15,9 @@ class PortfolioTextField extends StatelessWidget {
   final String? Function(String?)? validator;
   final ValueChanged<String>? onFieldSubmitted;
   final TextCapitalization textCapitalization;
+  // v8.4.2 (S5b/L5): length cap for portfolio free-text fields — previously
+  // the 1 MiB Firestore document cap was the only backstop.
+  final int? maxLength;
 
   const PortfolioTextField({
     super.key,
@@ -27,6 +30,7 @@ class PortfolioTextField extends StatelessWidget {
     this.validator,
     this.onFieldSubmitted,
     this.textCapitalization = TextCapitalization.none,
+    this.maxLength,
   });
 
   @override
@@ -45,6 +49,7 @@ class PortfolioTextField extends StatelessWidget {
         TextFormField(
           controller: controller,
           maxLines: maxLines,
+          maxLength: maxLength,
           keyboardType: keyboardType,
           textCapitalization: textCapitalization,
           decoration: InputDecoration(

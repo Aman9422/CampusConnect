@@ -1,4 +1,5 @@
 import 'package:campusconnect/models/portfolio/achievement_model.dart';
+import 'package:campusconnect/models/portfolio/portfolio_parse.dart';
 import 'package:campusconnect/models/portfolio/career_preferences.dart';
 import 'package:campusconnect/models/portfolio/certification_model.dart';
 import 'package:campusconnect/models/portfolio/experience_model.dart';
@@ -24,6 +25,8 @@ class PortfolioModel {
   final List<AchievementModel> achievements;
   final SocialLinks links;
   final CareerPreferences preferences;
+  /// v8.4.1 (T3): Languages known by the student (docs/Task.md Phase 3).
+  final List<String> languages;
 
   const PortfolioModel({
     this.resume,
@@ -34,53 +37,43 @@ class PortfolioModel {
     this.achievements = const [],
     this.links = const SocialLinks(),
     this.preferences = const CareerPreferences(),
+    this.languages = const [],
   });
 
   factory PortfolioModel.empty() => const PortfolioModel();
 
   factory PortfolioModel.fromMap(Map<String, dynamic> map) {
+    // v8.4.7: each section is parsed independently and tolerantly. A
+    // malformed section (string dates, double numbers, wrong list shapes —
+    // console edits / foreign writers / older clients) degrades that section
+    // only, instead of throwing and making the caller fall back to an empty
+    // portfolio while Firestore still has the data.
+    // M10 contract: a non-map `resume` value yields null (empty resume),
+    // while a malformed-but-map resume still parses tolerantly.
     return PortfolioModel(
-      resume: map['resume'] is Map<String, dynamic>
-          ? ResumeMetadata.fromMap(map['resume'] as Map<String, dynamic>)
-          : null,
-      skills:
-          (map['skills'] as List<dynamic>?)
-              ?.whereType<Map<String, dynamic>>()
-              .map(SkillModel.fromMap)
-              .toList() ??
-          const [],
-      projects:
-          (map['projects'] as List<dynamic>?)
-              ?.whereType<Map<String, dynamic>>()
-              .map(ProjectModel.fromMap)
-              .toList() ??
-          const [],
-      certifications:
-          (map['certifications'] as List<dynamic>?)
-              ?.whereType<Map<String, dynamic>>()
-              .map(CertificationModel.fromMap)
-              .toList() ??
-          const [],
-      experience:
-          (map['experience'] as List<dynamic>?)
-              ?.whereType<Map<String, dynamic>>()
-              .map(ExperienceModel.fromMap)
-              .toList() ??
-          const [],
-      achievements:
-          (map['achievements'] as List<dynamic>?)
-              ?.whereType<Map<String, dynamic>>()
-              .map(AchievementModel.fromMap)
-              .toList() ??
-          const [],
-      links: map['links'] is Map<String, dynamic>
-          ? SocialLinks.fromMap(map['links'] as Map<String, dynamic>)
-          : const SocialLinks(),
-      preferences: map['preferences'] is Map<String, dynamic>
-          ? CareerPreferences.fromMap(
-              map['preferences'] as Map<String, dynamic>,
-            )
-          : const CareerPreferences(),
+      resume: parseMap<ResumeMetadata?>(
+        map['resume'],
+        ResumeMetadata.fromMap,
+        null,
+      ),
+      skills: parseMapList(map['skills'], SkillModel.fromMap),
+      projects: parseMapList(map['projects'], ProjectModel.fromMap),
+      certifications: parseMapList(
+        map['certifications'],
+        CertificationModel.fromMap,
+      ),
+      experience: parseMapList(map['experience'], ExperienceModel.fromMap),
+      achievements: parseMapList(
+        map['achievements'],
+        AchievementModel.fromMap,
+      ),
+      links: parseMap(map['links'], SocialLinks.fromMap, const SocialLinks()),
+      preferences: parseMap(
+        map['preferences'],
+        CareerPreferences.fromMap,
+        const CareerPreferences(),
+      ),
+      languages: parseStringList(map['languages']),
     );
   }
 
@@ -94,6 +87,7 @@ class PortfolioModel {
       'achievements': achievements.map((e) => e.toMap()).toList(),
       'links': links.toMap(),
       'preferences': preferences.toMap(),
+      'languages': languages,
     };
   }
 
@@ -106,6 +100,7 @@ class PortfolioModel {
     List<AchievementModel>? achievements,
     SocialLinks? links,
     CareerPreferences? preferences,
+    List<String>? languages,
   }) {
     return PortfolioModel(
       resume: resume ?? this.resume,
@@ -116,6 +111,7 @@ class PortfolioModel {
       achievements: achievements ?? this.achievements,
       links: links ?? this.links,
       preferences: preferences ?? this.preferences,
+      languages: languages ?? this.languages,
     );
   }
 
@@ -130,6 +126,7 @@ class PortfolioModel {
       achievements: achievements,
       links: links,
       preferences: preferences,
+      languages: languages,
     );
   }
 
@@ -146,7 +143,8 @@ class PortfolioModel {
       experience.isEmpty &&
       achievements.isEmpty &&
       links.isEmpty &&
-      preferences.isEmpty;
+      preferences.isEmpty &&
+      languages.isEmpty;
 
   /// Portfolios with only default career preferences still count as empty —
   /// tests rely on [preferences] having a value for roles/locations/salary.
