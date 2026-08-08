@@ -19,6 +19,10 @@ class PortfolioService {
   static final PortfolioService _instance = PortfolioService();
   factory PortfolioService.instance() => _instance;
 
+  /// Cap on a single portfolio write before it is treated as hung.
+  /// Shared by the provider's save path and ResumeService's metadata write.
+  static const Duration saveTimeout = Duration(seconds: 20);
+
   CollectionReference get _usersCollection => _firestore.collection('users');
 
   /// Extract the portfolio section map from a user document.

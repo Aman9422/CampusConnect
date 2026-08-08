@@ -1,412 +1,558 @@
-# CampusConnect v8.4.1 — Resume Portfolio & Firebase Storage Foundation
+# CampusConnect v8.5 — Resume Reviewer Integration & PDF Intelligence
 
-## Objective
+You are working on the CampusConnect Flutter + Firebase project.
 
-Implement the complete Resume Portfolio system, making the student's resume the central asset of CampusConnect.
+## IMPORTANT — READ BEFORE CHANGING CODE
 
-This version establishes the foundation for:
+This project has completed:
 
-* Resume Reviewer (v8.5)
-* Resume Intelligence (v8.6)
-* AI Recommendation Engine (v8.7)
-* Teacher Analytics 2.0
-* Alumni Mentorship Intelligence
-* Placement Resume Snapshot
+* v8.4 — Student Resume Portfolio
+* v8.4.1 — Resume Portfolio + Firebase Storage Foundation
+* v8.4.2 — Issues Hardening
+* v8.4.3 — Manual-Test Bug Fixes
+* v8.4.4 — On-device re-verification
+* v8.4.8 — Portfolio read/refresh fixes
+* v8.4.9 — Flattened portfolio shape read fix + email backfill
 
-The implementation should be production-ready, modular, and backward-compatible with the existing CampusConnect architecture.
+The current architecture is already deployed and working.
 
----
-
-# Design Principles
-
-* Do NOT break existing dashboards.
-* Do NOT remove any existing ATS review functionality.
-* Build on top of the existing architecture.
-* Keep Firestore reads optimized.
-* Use Firebase Storage for PDF files only.
-* Keep all services modular.
-* Follow current project naming conventions.
-* Use Material 3.
-* Maintain dark/light theme compatibility.
-* Preserve all role-based permissions.
+**DO NOT redesign the portfolio architecture.**
+**DO NOT replace the nested `users/{uid}/portfolio` design.**
+**DO NOT introduce a second resume storage architecture.**
+**DO NOT break existing ATS review, placement snapshots, teacher/alumni portfolio access, or Firebase Storage rules.**
 
 ---
 
-# Phase 1 — Resume Storage
+# Version Goal
 
-Implement Firebase Storage integration.
+## v8.5 — Resume Reviewer Integration & PDF Intelligence
 
-Storage path:
+The goal of v8.5 is to make the student's uploaded resume in Firebase Storage the actual source for the existing Resume Reviewer.
 
-resumes/{uid}/latest.pdf
+Currently the portfolio system stores the canonical resume at:
 
-Future-ready structure:
+`resumes/{uid}/latest.pdf`
 
-resumes/
-uid/
-latest.pdf
-history/
-v1.pdf
-v2.pdf
+The existing Resume Reviewer/ATS pipeline should be extended so that the reviewer can consume this uploaded PDF directly.
 
-Implement:
+The unfinished item from the previous cycle was:
 
-* Upload Resume
-* Replace Resume
-* Download Resume
-* Delete Resume
-* Upload Progress
-* File Validation
-* PDF Only
-* Maximum 5 MB
+**MB7 — PDF → text for Resume Review**
+
+Turn this into the first major task of v8.5.
 
 ---
 
-# Phase 2 — Resume Metadata
+# REQUIRED WORKFLOW
 
-Create Firestore metadata document.
+First inspect the existing implementation before modifying anything.
 
-Suggested path:
+Inspect at minimum:
 
-users/{uid}/resume/metadata
+* `lib/views/resume_review_view.dart`
+* `lib/services/ai/resume_review_service.dart`
+* `functions/index.js`
+* `lib/services/firestore/resume_service.dart`
+* `lib/services/storage/storage_service.dart`
+* `lib/models/portfolio/resume_metadata.dart`
+* `lib/models/portfolio/portfolio_model.dart`
+* `lib/providers/portfolio_provider.dart`
+* existing resume-review models/services
+* existing ATS score persistence
+* existing resume review history implementation
+* `firestore.rules`
+* `storage.rules`
+* `docs/todo.md`
+* `docs/issues.md`
+* `docs/v8_workspace_tracker.md`
 
-Fields:
+Trace the complete current Resume Review data flow before coding.
 
-* uploadedAt
-* updatedAt
-* storagePath
-* downloadUrl
-* fileName
-* fileSize
-* mimeType
-* version
-* latestATSScore
-* reviewCount
-* lastReviewAt
-* hasResume
-* isDemoData (optional)
-
----
-
-# Phase 3 — Student Resume Portfolio
-
-Create a dedicated Resume Portfolio section.
-
-Portfolio should display:
-
-Personal Information
-
-Education
-
-CGPA
-
-Skills
-
-Projects
-
-Experience
-
-Certifications
-
-Achievements
-
-Languages
-
-GitHub
-
-LinkedIn
-
-Portfolio Website
-
-Preferred Roles
-
-Preferred Locations
-
-Career Objective
-
-Resume Status
-
-Resume Upload Date
-
-Latest ATS Score
-
-Latest Review
-
-Resume Download Button
-
-Replace Resume Button
-
-Delete Resume Button
+Do not assume how the current implementation works.
 
 ---
 
-# Phase 4 — Resume Service
+# v8.5.1 — Resume Storage → Resume Reviewer
 
-Create a reusable ResumeService responsible for:
+Implement the smallest safe bridge between the uploaded resume and the existing review pipeline.
 
-Upload Resume
+## Desired flow
 
-Download Resume
+Student uploads resume:
 
-Delete Resume
+`resumes/{uid}/latest.pdf`
 
-Replace Resume
+↓
 
-Read Metadata
+Portfolio stores:
 
-Update Metadata
+* `storagePath`
+* `fileName`
+* `fileSize`
+* `mimeType`
+* `uploadedAt`
+* `updatedAt`
+* existing metadata
 
-Check Resume Exists
+↓
 
-Get Resume URL
+Student opens Resume Reviewer
 
-Future support for version history
+↓
 
-Business logic must remain outside UI widgets.
+Reviewer detects the current uploaded resume
 
----
+↓
 
-# Phase 5 — Student Dashboard Integration
+Client sends the authenticated user's resume `storagePath` to the callable `reviewResume`
 
-Replace simple ATS resume card with a Resume Portfolio summary.
+↓
 
-Show:
+Cloud Function:
 
-Resume Uploaded
+1. obtains the authenticated UID from `request.auth.uid`
+2. validates that the supplied storage path belongs to that UID
+3. validates that the path points to the expected resume location
+4. downloads the PDF using Firebase Admin SDK
+5. extracts readable text from the PDF
+6. passes the extracted text through the EXISTING AI/ATS review pipeline
+7. returns the existing review result format
 
-Latest ATS
-
-Resume Age
-
-Last Review
-
-Open Portfolio
-
-Upload / Replace Resume
-
----
-
-# Phase 6 — Teacher Dashboard
-
-Teachers should be able to:
-
-Open Student Portfolio
-
-View Resume Metadata
-
-Download Resume
-
-View Latest ATS
-
-View Resume Status
-
-No editing permissions.
+Do not bypass existing authentication or callable-function security.
 
 ---
 
-# Phase 7 — Alumni Dashboard
+# PDF TEXT EXTRACTION
 
-Alumni should be able to:
+Choose the simplest reliable server-side implementation compatible with the current `functions/package.json`.
 
-Open Student Portfolio
+Before adding a dependency:
 
-Download Resume
+* inspect existing dependencies
+* inspect Node/runtime version
+* verify compatibility with Firebase Functions
+* avoid unnecessarily large or abandoned packages
 
-View Resume Metadata
+The extractor must:
 
-No editing permissions.
+* accept PDF data
+* extract text from normal text-based PDFs
+* gracefully handle empty/unextractable PDFs
+* return a useful error instead of crashing
+* avoid logging resume contents
+* avoid exposing PDF contents to the client unnecessarily
 
----
+If a PDF is image-only/scanned and cannot be text-extracted, return a clear user-facing message such as:
 
-# Phase 8 — Placement Integration
+`This resume appears to be image-based and could not be read automatically. Please upload a text-based PDF.`
 
-Update placement applications.
-
-Each application must store:
-
-studentId
-
-placementId
-
-resumeVersion
-
-resumeStoragePath
-
-atsScoreAtApplication
-
-appliedAt
-
-status
-
-This preserves the resume used when applying even after future uploads.
+Do NOT implement OCR unless the existing architecture already supports it.
 
 ---
 
-# Phase 9 — Firestore Security
+# SECURITY REQUIREMENTS
 
-Ensure:
+This is critical.
 
-Students
+The client must NOT be able to review another student's resume simply by supplying another UID/path.
 
-can upload only their own resumes.
+Server-side validation must enforce:
 
-Teachers
+`request.auth.uid === owner UID in storagePath`
 
-can only read resumes.
+Only allow the expected resume path:
 
-Alumni
+`resumes/{uid}/latest.pdf`
 
-can only read resumes.
+Do not trust a client-supplied UID.
 
-No anonymous access.
+Use:
 
-No public Storage URLs.
+`request.auth.uid`
 
----
+as the authoritative identity.
 
-# Phase 10 — UI
+Do not expose service-account credentials.
 
-Create a clean Resume Portfolio page.
+Do not weaken `storage.rules`.
 
-Sections:
+Do not make the Storage bucket publicly readable.
 
-Header
+Do not add `allow read: if true`.
 
-Resume Status Card
-
-Quick Actions
-
-Personal Details
-
-Education
-
-Projects
-
-Skills
-
-Experience
-
-Certifications
-
-Links
-
-Career Preferences
-
-Resume Metadata
-
-Theme must match CampusConnect.
+Do not log extracted resume text.
 
 ---
 
-# Phase 11 — Architecture
+# v8.5.2 — Resume Review UI Integration
 
-Create (or update) modular components as needed:
+Update `resume_review_view.dart` so the existing reviewer understands the uploaded resume.
 
-Models
+If a resume exists, show:
 
-ResumeMetadata
+* current resume filename
+* upload/version information if already available
+* latest ATS score when available
+* review count when available
+* `Review Uploaded Resume`
+* `Open Uploaded Resume`
+* `Replace Resume`
 
-ResumePortfolio
+The reviewer should use the canonical uploaded resume automatically.
 
-Services
-
-ResumeService
-
-StorageService
-
-Providers
-
-ResumeProvider
-
-Widgets
-
-ResumeCard
-
-ResumeMetadataCard
-
-ResumeActions
-
-ResumeUploadDialog
-
-ResumeStatusChip
-
-Views
-
-ResumePortfolioView
+Avoid making the user manually copy/paste resume text when a valid uploaded PDF exists.
 
 ---
 
-# Phase 12 — Validation
+# FALLBACK BEHAVIOR
 
-Ensure:
+If no uploaded resume exists:
 
+Keep the existing text/manual review functionality if it already exists.
+
+Example:
+
+`No uploaded resume found. Upload a PDF to review your current resume, or continue with the existing manual review option.`
+
+Do not remove working functionality simply because the uploaded-resume path was added.
+
+---
+
+# v8.5.3 — ATS / Portfolio Synchronization
+
+Preserve the existing v8.4.2 behavior:
+
+After a successful review, the system must continue updating:
+
+`users/{uid}/portfolio.resume`
+
+with the existing fields:
+
+* `latestATSScore`
+* `reviewCount`
+* `lastReviewAt`
+* `updatedAt`
+
+Do NOT create a duplicate ATS score elsewhere unless the existing architecture already requires it.
+
+The existing dashboard and portfolio components must continue reading the same source of truth.
+
+Verify that:
+
+* Student Dashboard Latest ATS still updates
+* Student Portfolio Latest ATS still updates
+* Read-only Portfolio ATS still works
+* Resume Age remains correct
+* Resume Review History remains correct
+
+---
+
+# v8.5.4 — Review History
+
+Inspect the existing review-history implementation.
+
+If it already stores individual review records, reuse it.
+
+Do not create duplicate review collections.
+
+Ensure a review generated from the uploaded PDF appears in the existing review history.
+
+Each review should remain associated with the authenticated student.
+
+Do not overwrite previous review records merely because the resume is replaced.
+
+---
+
+# v8.5.5 — Resume Replacement Behavior
+
+Verify this scenario carefully:
+
+1. Student uploads Resume A.
+2. Resume A becomes `resumes/{uid}/latest.pdf`.
+3. Student reviews Resume A.
+4. ATS score updates.
+5. Student replaces the resume with Resume B.
+6. Resume B becomes the current resume.
+7. Student reviews Resume B.
+8. Portfolio now represents Resume B and its latest ATS score.
+9. Previous review history remains intact.
+10. Existing placement applications retain their immutable resume snapshots.
+
+Do NOT modify historical placement snapshots when the current resume changes.
+
+The placement architecture must remain:
+
+CURRENT RESUME
+→ review/portfolio
+
+CURRENT RESUME
+→ placement application
+→ immutable snapshot
+
+---
+
+# v8.5.6 — Error Handling
+
+Handle at minimum:
+
+* unauthenticated user
+* missing resume metadata
+* missing Storage file
+* invalid storage path
+* wrong user's storage path
+* non-PDF file
+* empty PDF
+* unreadable/scanned PDF
+* PDF extraction failure
+* AI review failure
+* network failure
+* callable timeout
+* malformed AI response
+
+The UI must never remain stuck on a loading spinner.
+
+All loading flags must reset using `finally`.
+
+Provide useful SnackBars/error states without exposing internal exceptions or sensitive data.
+
+---
+
+# v8.5.7 — Testing
+
+Add focused tests for the new behavior.
+
+At minimum test:
+
+### Storage path validation
+
+Valid:
+
+`resumes/USER123/latest.pdf`
+
+Invalid:
+
+`resumes/OTHERUSER/latest.pdf`
+
+Invalid:
+
+`users/USER123/resume.pdf`
+
+Invalid:
+
+`resumes/USER123/other.pdf`
+
+### Resume metadata
+
+Verify the existing `ResumeMetadata` parsing still works.
+
+### Review result persistence
+
+Verify that a successful review produces the expected ATS/portfolio update contract.
+
+### Existing functionality
+
+Run all existing tests.
+
+Do not remove or weaken existing tests.
+
+---
+
+# VALIDATION
+
+Run:
+
+```powershell
 flutter analyze
+flutter test
+```
 
-returns
+Also run:
 
-0 errors
+```powershell
+node --check functions/index.js
+```
 
-0 warnings
+If dependencies were changed:
 
-Verify:
+```powershell
+cd functions
+npm install
+cd ..
+```
 
-✔ Upload works
+Then deploy only what actually changed.
 
-✔ Replace works
+For example:
 
-✔ Download works
+```powershell
+firebase deploy --only functions
+```
 
-✔ Delete works
-
-✔ Metadata updates
-
-✔ Teachers can read
-
-✔ Alumni can read
-
-✔ Students cannot access others' resumes
-
-✔ Existing ATS Review remains functional
-
-✔ Existing dashboards continue working
-
-✔ Existing analytics are unaffected
+Do NOT automatically redeploy unrelated Firestore indexes/rules unless they were modified.
 
 ---
 
-# Out of Scope
+# MANUAL TEST MATRIX
 
-Do NOT implement in v8.4:
+After deployment, verify on a real/device build:
 
-Resume parsing
+### Test 1 — Existing resume
 
-AI resume suggestions
+* Login as student
+* Open Portfolio
+* Confirm current resume exists
+* Open Resume Reviewer
+* Review uploaded resume
+* Confirm ATS result appears
 
-Resume version history UI
+### Test 2 — Dashboard
 
-Resume reviewer changes
+Confirm:
 
-AI recommendations
+* Resume Uploaded
+* Latest ATS
+* Last Review
+* Resume Age
 
-Teacher analytics improvements
+remain correct.
 
-Admin dashboard
+### Test 3 — Replace resume
 
-These belong to later roadmap versions.
+* Upload Resume B
+* Confirm Resume B becomes current
+* Review Resume B
+* Confirm latest ATS changes
+* Confirm history remains
+
+### Test 4 — Placement
+
+* Apply for a placement
+* Confirm application stores:
+
+  * `resumeVersion`
+  * `resumeStoragePath`
+  * `atsScoreAtApplication`
+* Replace current resume
+* Confirm old application snapshot remains unchanged.
+
+### Test 5 — Security
+
+Attempt to access another student's resume through the reviewer/storage path.
+
+It MUST fail.
+
+### Test 6 — Bad PDF
+
+Upload an unreadable/image-only PDF and verify the application shows a friendly error instead of crashing or hanging.
 
 ---
 
-# Expected Outcome
+# DOCUMENTATION
 
-CampusConnect should now have a centralized Resume Portfolio system backed by Firebase Storage and Firestore metadata.
+After implementation update:
 
-The resume becomes the single source of truth for:
+## `docs/todo.md`
 
-* Resume Reviewer (v8.5)
-* Resume Intelligence (v8.6)
-* AI Recommendation Engine (v8.7)
-* Placement applications
-* Teacher analytics
-* Alumni mentorship
+Create a new:
 
-The implementation must prioritize maintainability, scalability, and compatibility with future roadmap versions.
+`v8.5 — Resume Reviewer Integration & PDF Intelligence`
+
+section.
+
+Track each subtask individually:
+
+* R1 — Architecture/data-flow audit
+* R2 — PDF extraction
+* R3 — Callable integration
+* R4 — Resume Reviewer UI
+* R5 — ATS/portfolio synchronization
+* R6 — Review history
+* R7 — Resume replacement verification
+* R8 — Error handling
+* R9 — Security tests
+* R10 — Validation/deployment/manual pass
+
+## `docs/issues.md`
+
+Record any newly discovered issues.
+
+Do not mark an issue fixed unless it is actually verified.
+
+## `docs/v8_workspace_tracker.md`
+
+Add a new v8.5 phase with:
+
+* objective
+* architecture
+* subtasks
+* files changed
+* validation
+* deployment status
+* manual verification status
+* known limitations
+
+Update the version number only after the implementation is actually complete.
+
+---
+
+# VERSIONING
+
+Update the Flutter version according to the project's existing versioning convention.
+
+Do not arbitrarily change unrelated version numbers.
+
+---
+
+# IMPORTANT ARCHITECTURE RULES
+
+Preserve:
+
+1. `users/{uid}/portfolio` nested portfolio architecture
+2. `resumes/{uid}/latest.pdf`
+3. Firebase Storage security rules
+4. teacher/alumni read permissions
+5. existing ResumeService
+6. existing PortfolioService
+7. existing PortfolioProvider
+8. existing ATS persistence
+9. existing placement resume snapshots
+10. existing callable authentication
+11. existing review history
+12. Material 3 UI architecture
+
+Do not refactor unrelated modules.
+
+Do not rewrite working code simply for style.
+
+Prefer small, isolated changes.
+
+---
+
+# FINAL REPORT
+
+When finished, report:
+
+1. What was already working
+2. What you changed
+3. Exact files changed
+4. PDF extraction approach and dependency
+5. Security validation
+6. ATS/portfolio relationship
+7. Placement snapshot verification
+8. `flutter analyze` result
+9. `flutter test` result
+10. `node --check` result
+11. Deployment result
+12. Manual test result
+13. Any remaining limitations
+14. Exact next recommended version
+
+Do not claim deployment or manual testing unless it was actually performed.
+
+## PRIMARY SUCCESS CRITERION
+
+A student should be able to:
+
+**Upload Resume → Open Resume Reviewer → Review Uploaded PDF → Receive ATS/AI Review → Portfolio updates → Dashboard updates → Apply to Placement using the current resume → Placement retains an immutable snapshot.**
+
+That complete flow is the definition of v8.5 success.

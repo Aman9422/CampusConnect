@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:firebase_storage/firebase_storage.dart';
@@ -26,6 +27,21 @@ class StorageService {
   static const String resumeFileName = 'latest.pdf';
 
   static const String resumeMimeType = 'application/pdf';
+
+  /// Cap on a single storage operation before it is treated as hung.
+  ///
+  /// v8.4.10 (resume replace hang): the Android Storage SDK can cancel an
+  /// [UploadTask] AFTER it reported success when the app returns from the
+  /// document picker (`StorageTask unable to change internal state to
+  /// INTERNAL_STATE_CANCELED ... from state:INTERNAL_STATE_SUCCESS`). The
+  /// Dart `putFile` future then never completes — with no timeout, the
+  /// caller's spinner spun forever ("Replace Resume stuck in an endless
+  /// loop"). The file DID land in Storage, so surfacing a timeout error is
+  /// safe: the user retries and the replace converges.
+  static const Duration uploadTimeout = Duration(seconds: 60);
+
+  /// Shorter cap for small storage reads/URL resolution.
+  static const Duration quickTimeout = Duration(seconds: 15);
 
   /// v8.4 storage layout: `resumes/{uid}/latest.pdf`
   String resumePath(String uid) => 'resumes/$uid/$resumeFileName';
@@ -86,7 +102,7 @@ class StorageService {
             'Could not read the selected file.',
           );
         }
-        await ref.putData(data, metadata);
+        await ref.putData(data, metadata).timeout(uploadTimeout);
       } else {
         final pickedPath = filePath;
         if (pickedPath == null || pickedPath.isEmpty) {
@@ -94,10 +110,10 @@ class StorageService {
             'Could not read the selected file.',
           );
         }
-        await ref.putFile(File(pickedPath), metadata);
+        await ref.putFile(File(pickedPath), metadata).timeout(uploadTimeout);
       }
 
-      final downloadUrl = await ref.getDownloadURL();
+      final downloadUrl = await ref.getDownloadURL().timeout(quickTimeout);
       final now = DateTime.now();
       return ResumeUploadResult(
         downloadUrl: downloadUrl,
@@ -111,6 +127,11 @@ class StorageService {
       );
     } on StorageServiceException {
       rethrow;
+    } on TimeoutException {
+      debugPrint('StorageService: Resume upload timed out');
+      throw const StorageServiceException(
+        'Upload timed out. Check your connection and try again.',
+      );
     } catch (e) {
       debugPrint('StorageService: Error uploading resume: $e');
       throw const StorageServiceException(
@@ -122,7 +143,7 @@ class StorageService {
   /// Deletes the resume PDF from Storage. Safe to call when no resume exists.
   Future<void> deleteResume(String uid) async {
     try {
-      await _storage.ref(resumePath(uid)).delete();
+      await _storage.ref(resumePath(uid)).delete().timeout(quickTimeout);
     } catch (e) {
       if (e is FirebaseException && e.code == 'object-not-found') {
         return; // Nothing to delete — not an error.
@@ -138,7 +159,7 @@ class StorageService {
   /// storage path. Throws on failure so callers can surface a real error.
   Future<String> downloadUrlFromPath(String path) async {
     try {
-      return await _storage.ref(path).getDownloadURL();
+      return await _storage.ref(path).getDownloadURL().timeout(quickTimeout);
     } catch (e) {
       debugPrint('StorageService: Error resolving download URL: $e');
       rethrow;
@@ -150,7 +171,10 @@ class StorageService {
   /// Used by [ResumeService.downloadResume] for the "Download Resume" action.
   Future<Uint8List> downloadBytes(String path) async {
     try {
-      final data = await _storage.ref(path).getData();
+      final data = await _storage
+          .ref(path)
+          .getData()
+          .timeout(quickTimeout);
       if (data == null || data.isEmpty) {
         throw const StorageServiceException(
           'Could not read the resume file.',

@@ -436,12 +436,13 @@ class PortfolioProvider extends ChangeNotifier {
   }
 
   /// Maps a caught exception to a user-facing message. Storage validation
-  /// errors (file too large / wrong type) carry their own message.
+  /// errors (file too large / wrong type / timeouts) carry their own message.
   String _friendlyError(Object e) {
     final message = e.toString();
     if (message.contains('Maximum resume size') ||
         message.contains('Only PDF files') ||
-        message.contains('empty')) {
+        message.contains('empty') ||
+        message.contains('timed out')) {
       return message;
     }
     return 'Failed to upload resume. Please try again.';

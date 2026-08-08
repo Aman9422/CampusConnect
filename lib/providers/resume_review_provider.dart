@@ -227,14 +227,27 @@ class ResumeReviewProvider with ChangeNotifier {
 
   /// Submit resume for AI review
   ///
-  /// [resumeText] - Resume content as plain text
+  /// [resumeText] - Resume content as plain text (used when [storagePath]
+  /// is not provided).
+  /// [storagePath] - v8.5: optional storage path of the uploaded resume PDF
+  /// (`resumes/{uid}/latest.pdf`). When provided the server downloads and
+  /// extracts the text from the PDF, so [resumeText] may be empty.
   /// [targetRole] - Optional target job role
   ///
   /// Returns true on success, false on failure
   Future<bool> submitReview({
-    required String resumeText,
+    String? resumeText,
+    String? storagePath,
     String? targetRole,
   }) async {
+    // v8.5: explicit validation for each input path (service enforces the
+    // same rules server-side too).
+    final hasStoragePath = storagePath != null && storagePath.isNotEmpty;
+    if (!hasStoragePath && (resumeText == null || resumeText.trim().isEmpty)) {
+      _error = 'Please provide resume text or upload a resume PDF.';
+      notifyListeners();
+      return false;
+    }
     // Pre-flight checks
     if (userId == null) {
       _error = 'Please log in to use resume review.';
@@ -271,6 +284,7 @@ class ResumeReviewProvider with ChangeNotifier {
       final response = await _service.reviewResume(
         userId: userId!,
         resumeText: resumeText,
+        storagePath: storagePath,
         targetRole: targetRole,
       );
 

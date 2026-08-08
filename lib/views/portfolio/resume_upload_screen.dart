@@ -24,6 +24,7 @@ class ResumeUploadScreen extends StatefulWidget {
 
 class _ResumeUploadScreenState extends State<ResumeUploadScreen> {
   bool _isDeleting = false;
+  bool _isPicking = false;
   String? _deleteError;
 
   @override
@@ -51,8 +52,13 @@ class _ResumeUploadScreenState extends State<ResumeUploadScreen> {
           final isUploading = portfolioProvider.isUploadingResume;
           // L7: single busy state drives both action buttons. The provider's
           // own `isSaving` handles Save/Delete, `isUploading` handles upload,
-          // and `_isDeleting` is the local delete-in-progress flag.
-          final isBusy = portfolioProvider.isSaving || isUploading || _isDeleting;
+          // `_isDeleting` is the local delete-in-progress flag, and
+          // `_isPicking` covers the document-picker window (v8.4.10).
+          final isBusy =
+              portfolioProvider.isSaving ||
+              isUploading ||
+              _isDeleting ||
+              _isPicking;
 
           return SingleChildScrollView(
             padding: const EdgeInsets.all(AppTheme.space16),
@@ -91,7 +97,7 @@ class _ResumeUploadScreenState extends State<ResumeUploadScreen> {
                   ),
                   const SizedBox(height: AppTheme.space12),
                 ] else ...[
-                  _buildEmptyState(isDark, isUploading, userId),
+                  _buildEmptyState(isDark, isUploading || _isPicking, userId),
                   const SizedBox(height: AppTheme.space16),
                 ],
                 PortfolioSectionCard(
@@ -367,44 +373,66 @@ class _ResumeUploadScreenState extends State<ResumeUploadScreen> {
   Future<void> _pickAndUpload(String? userId) async {
     if (userId == null) return;
 
-    // C1 fix: `withData: true` is only honoured on Android/iOS/web and
-    // `PlatformFile.bytes` is null on desktop. On desktop we rely on
-    // `file.size` for validation and pass `filePath` for the upload.
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['pdf'],
-      withData: kIsWeb,
-    );
-    if (result == null || result.files.isEmpty) return;
-    if (!mounted) return;
+    // v8.4.10: re-entrancy guard — a double-tap (or a tap during the upload
+    // window) must never stack a second picker or a second upload while one
+    // is already in flight.
+    if (_isPicking) return;
+    setState(() => _isPicking = true);
 
-    final file = result.files.single;
-    // Use `file.size` — it is populated on every platform, unlike
-    // `bytes.length` which is null/0 on desktop.
-    final fileLength = file.size;
+    try {
+      // C1 fix: `withData: true` is only honoured on Android/iOS/web and
+      // `PlatformFile.bytes` is null on desktop. On desktop we rely on
+      // `file.size` for validation and pass `filePath` for the upload.
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf'],
+        withData: kIsWeb,
+      );
+      if (result == null || result.files.isEmpty) return;
+      if (!mounted) return;
 
-    final validationError = StorageService.validateResumeFile(
-      fileName: file.name,
-      length: fileLength,
-    );
-    if (validationError != null) {
-      _showSnack(validationError, error: true);
-      return;
-    }
+      final file = result.files.single;
+      // Use `file.size` — it is populated on every platform, unlike
+      // `bytes.length` which is null/0 on desktop.
+      final fileLength = file.size;
 
-    final provider = context.read<PortfolioProvider>();
-    final success = await provider.uploadResume(
-      userId: userId,
-      // Non-web uploads use the file path; web uploads use the in-memory bytes.
-      filePath: kIsWeb ? null : file.path,
-      bytes: kIsWeb ? file.bytes : null,
-      fileName: file.name,
-      fileLength: fileLength,
-    );
-    if (!mounted) return;
+      final validationError = StorageService.validateResumeFile(
+        fileName: file.name,
+        length: fileLength,
+      );
+      if (validationError != null) {
+        _showSnack(validationError, error: true);
+        return;
+      }
 
-    if (success) {
-      _showSnack('Resume uploaded successfully!', error: false);
+      final provider = context.read<PortfolioProvider>();
+      final success = await provider.uploadResume(
+        userId: userId,
+        // Non-web uploads use the file path; web uploads use the in-memory bytes.
+        filePath: kIsWeb ? null : file.path,
+        bytes: kIsWeb ? file.bytes : null,
+        fileName: file.name,
+        fileLength: fileLength,
+      );
+      if (!mounted) return;
+
+      if (success) {
+        _showSnack('Resume uploaded successfully!', error: false);
+      } else {
+        // v8.4.10: surface failures with the same snackbar pattern as
+        // success — previously a failed replace was only visible through the
+        // banner, making a timeout look like a silent hang.
+        _showSnack(
+          provider.error ?? 'Failed to upload resume. Please try again.',
+          error: true,
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isPicking = false);
+      } else {
+        _isPicking = false;
+      }
     }
   }
 

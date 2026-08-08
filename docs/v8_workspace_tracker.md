@@ -1,7 +1,7 @@
 # CampusConnect — Workspace Tracker
 
-## Status: COMPLETED + DEPLOYED
-## Version: CampusConnect v8.4.9 — Flattened-Shape Portfolio Read Fix + Email Backfill (2026-08-07)
+## Status: IMPLEMENTATION COMPLETE — deployment pending
+## Version: CampusConnect v8.5 — Resume Reviewer Integration & PDF Intelligence (2026-08-08)
 
 ---
 
@@ -22,8 +22,78 @@
 | 18 | **v8.4.4 — On-Device Re-Verification Fix (MB2R)** | ✅ |
 | 19 | **v8.4.8 — Portfolio Read Failure & Refresh-Wipe Fix (MB11–MB16)** | ✅ |
 | 20 | **v8.4.9 — Flattened-Shape Portfolio Read Fix + Email Backfill (MB17–MB19)** | ✅ |
+| 21 | **v8.5 — Resume Reviewer Integration & PDF Intelligence (R1–R9, MB7 delivered)** | ✅ implementation — ⏳ deployment pending |
 
-**Overall Progress: 100%**
+**Overall Progress: 100% (implementation)**
+
+---
+
+## v8.5 — Resume Reviewer Integration & PDF Intelligence
+
+> Source: `docs/Task.md` (v8.5 goal) · Executed via `docs/todo.md` (R1–R10) · Audit: `project_info__15_v8.5_R1_Resume_Review_Integration_Audit.md`
+
+### Objective
+
+Make the student's uploaded resume `resumes/{uid}/latest.pdf` the **actual source** for the existing Resume Reviewer. Complete the unfinished v8.4.3 item **MB7 — PDF → text for Resume Review** server-side: the reviewer consumes the uploaded PDF directly instead of pasted text, while preserving the entire existing ATS/portfolio/history/snapshot architecture.
+
+### Architecture
+
+- **Nested portfolio map preserved** (`users/{uid}/portfolio.resume`) — no redesign, no second storage arch.
+- **Canonical resume unchanged**: `resumes/{uid}/latest.pdf` (Firebase Storage).
+- **Server-side extraction**: the `reviewResume` callable now accepts an optional `storagePath`. When present:
+  1. `request.auth.uid` (authoritative) is compared with the owner embedded in the path — exact match `resumes/{uid}/latest.pdf` only.
+  2. Admin SDK downloads the PDF (5 MB cap via `getMetadata` size check).
+  3. `pdf-parse@^1.1.1` (deep-require `pdf-parse/lib/pdf-parse.js`) extracts text, `\u0000` stripped, trimmed.
+  4. Image-only/empty/unextractable PDFs → friendly `invalid-argument` error (no OCR, no content logging).
+  5. Extracted text flows through the **EXISTING** AI/ATS pipeline; the response keeps the same `{review, usage}` shape.
+- **Client**: `ResumeReviewService.reviewResume` gained an optional `storagePath` (mutually exclusive with pasted text); `ResumeReviewProvider.submitReview` forwards it; the Resume Reviewer UI added **Review Uploaded Resume**, **Open Uploaded Resume**, **Replace Resume**, review count + latest ATS, and a no-resume fallback banner (manual paste preserved).
+- **ATS/history/snapshots**: unchanged — the PDF review returns the same shape, so `onResumeReviewCreatedRefreshMatches` still merges `portfolio.resume.{latestATSScore,reviewCount,lastReviewAt,updatedAt}`, reviews still land in `users/{uid}/resumeReviews` via the existing client-side `_saveToHistory`, placement applications keep immutable `resumes/{uid}/snapshots/app_*.pdf` snapshots.
+
+### Subtasks (R1–R10)
+
+| # | Subtask | Status |
+|---|---------|--------|
+| R1 | Architecture/data-flow audit | ✅ |
+| R2 | PDF extraction (server-side) | ✅ `pdf-parse`, verified on Node vs. real Chromium PDF |
+| R3 | Callable `reviewResume(storagePath)` + client forwarding | ✅ |
+| R4 | Resume Reviewer UI (Review/Open/Replace + fallback) | ✅ |
+| R5 | ATS/portfolio synchronization | ✅ (unchanged shape; trigger still merges) |
+| R6 | Review history | ✅ (existing `resumeReviews` reuse) |
+| R7 | Resume replacement verification | ✅ (reads `latest.pdf` at review time; snapshots untouched) |
+| R8 | Error handling (`not-found`,`invalid-argument` mapped; `finally` resets) | ✅ |
+| R9 | Security tests + existing suite | ✅ 6 new tests; 71/71 total |
+| R10 | Validation/deploy/manual pass | ⏳ deploy + manual matrix pending |
+
+### Files Changed
+
+- `functions/package.json` — added `pdf-parse@^1.1.1`
+- `functions/index.js` — `resumeTextFromStorage(uid, storagePath)` + `reviewResume` storagePath branch; unchanged: quota, quota check order, `{review, usage}` shape, analytics event (now includes `source: "uploaded"`)
+- `lib/services/ai/resume_review_service.dart` — `storagePath` param, server `not-found` mapping, mutual-exclusion validation
+- `lib/providers/resume_review_provider.dart` — `storagePath` passthrough audit (validation matches service)
+- `lib/views/resume_review_view.dart` — uploaded-resume card actions (Review/Open/Replace), review count + ATS, no-resume fallback banner
+- `test/resume_review_storage_path_test.dart` — NEW, 6 storage-path security contract tests
+- `docs/todo.md`, `docs/issues.md`, `docs/v8_workspace_tracker.md`, `pubspec.yaml` (8.4.1+85 → 8.5.0+86)
+
+### Validation
+
+- `flutter analyze` → **0 errors / 0 warnings** (69 pre-existing info lints unchanged)
+- `flutter test` → **71/71 passed** (65 existing + 6 new storage-path tests)
+- `node --check functions/index.js` → pass
+- `pdf-parse` smoke test → extracted expected text from a real Chromium-generated PDF on Node
+
+### Deployment Status
+
+⏳ Not yet deployed — `firebase deploy --only functions` is the pending step (needs Firebase auth/project access; see final report).
+
+### Manual Verification Status
+
+⏳ Pending on-device matrix (`docs/Task.md`): existing resume → review → ATS; dashboard (Resume Uploaded/Latest ATS/Last Review/Resume Age); replace resume; placement snapshot immutability; security cross-UID attempt; bad/image PDF friendly error.
+
+### Known Limitations
+
+1. No OCR — scanned/image-only PDFs return the friendly "image-based" error (task-mandated).
+2. `pdf-parse` bundles 2017-era pdf.js; its xref parser rejected a synthetic minimal PDF but parses real Chromium/Word PDFs. If a real upload ever reports `bad XRef entry`, re-render client-side or switch extractor (documented in `docs/issues.md`).
+3. `metadata.parserVersion` on `ResumeMetadata` remains a placeholder — PDF text is extracted server-side per review, not cached.
 
 ---
 

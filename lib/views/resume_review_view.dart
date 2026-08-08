@@ -500,11 +500,67 @@ class _ResumeReviewViewState extends State<ResumeReviewView> {
   /// the file name, version and latest ATS score, with an Open/Download
   /// action. Hidden entirely when no resume has been uploaded.
   Widget _buildUploadedResumeCard(BuildContext context, bool isDark) {
-    final resume = context.watch<PortfolioProvider>().portfolio?.resume;
+    final portfolioProvider = context.watch<PortfolioProvider>();
+    final resume = portfolioProvider.portfolio?.resume;
     if (resume == null || !resume.hasResume) {
-      return const SizedBox.shrink();
+      // v8.5 (R4): no uploaded resume — keep the manual paste flow working,
+      // but surface a hint so the student knows the PDF path exists.
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: isDark ? AppTheme.darkSurface : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isDark ? Colors.white12 : AppTheme.gray200,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.info_outline,
+                  size: 18,
+                  color: AppTheme.primaryBlue,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'No uploaded resume found. Upload a PDF to review your '
+                    'current resume, or continue with the manual review '
+                    'option below.',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: isDark ? AppTheme.gray300 : AppTheme.gray600,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () =>
+                    Navigator.of(context).pushNamed(resumeUploadRoute),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.primaryBlue,
+                  side: BorderSide(color: AppTheme.primaryBlue),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                ),
+                icon: const Icon(Icons.upload_file_outlined, size: 18),
+                label: const Text('Upload Resume'),
+              ),
+            ),
+          ],
+        ),
+      );
     }
 
+    final resumeProvider = context.watch<ResumeReviewProvider>();
     final fileName = resume.fileName?.isNotEmpty == true
         ? resume.fileName!
         : 'resume.pdf';
@@ -512,6 +568,12 @@ class _ResumeReviewViewState extends State<ResumeReviewView> {
     final url = resume.downloadUrl?.isNotEmpty == true
         ? resume.downloadUrl!
         : null;
+    final storagePath = resume.storagePath?.isNotEmpty == true
+        ? resume.storagePath!
+        : (portfolioProvider.currentUserId != null
+              ? 'resumes/${portfolioProvider.currentUserId}/latest.pdf'
+              : null);
+    final isReviewing = resumeProvider.isLoading;
 
     return Container(
       width: double.infinity,
@@ -585,14 +647,46 @@ class _ResumeReviewViewState extends State<ResumeReviewView> {
           ),
           const SizedBox(height: 4),
           Text(
-            'v${resume.version} · PDF · Uploaded ${resume.resumeAgeInDays} day${resume.resumeAgeInDays == 1 ? '' : 's'} ago',
+            'v${resume.version} · PDF · Uploaded ${resume.resumeAgeInDays} day${resume.resumeAgeInDays == 1 ? '' : 's'} ago'
+            '${resume.reviewCount > 0 ? ' · Reviewed ${resume.reviewCount}×' : ''}',
             style: TextStyle(
               fontSize: 12,
               color: isDark ? AppTheme.gray400 : AppTheme.gray600,
             ),
           ),
           const SizedBox(height: 12),
-          if (url != null)
+
+          // v8.5 (R4): Review the uploaded PDF directly — the server
+          // downloads `resumes/{uid}/latest.pdf`, extracts the text and runs
+          // the same ATS/AI pipeline, so the student never needs to paste.
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed:
+                  storagePath != null && resumeProvider.canSubmitReview
+                  ? () => _reviewUploadedResume(resumeProvider, storagePath)
+                  : null,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryBlue,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 10),
+              ),
+              icon: isReviewing
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.auto_awesome, size: 18),
+              label: const Text('Review Uploaded Resume'),
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          if (url != null) ...[
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
@@ -606,19 +700,58 @@ class _ResumeReviewViewState extends State<ResumeReviewView> {
                 label: const Text('Open Uploaded Resume'),
               ),
             ),
-          const SizedBox(height: 12),
-          Text(
-            'Review uses pasted text below. PDF text extraction (auto-fill from '
-            'your uploaded resume) is planned — paste the resume text for now.',
-            style: TextStyle(
-              fontSize: 12,
-              fontStyle: FontStyle.italic,
-              color: isDark ? AppTheme.gray400 : AppTheme.gray500,
+            const SizedBox(height: 12),
+          ],
+
+          SizedBox(
+            width: double.infinity,
+            child: TextButton.icon(
+              onPressed: isReviewing
+                  ? null
+                  : () => Navigator.of(context).pushNamed(resumeUploadRoute),
+              style: TextButton.styleFrom(
+                foregroundColor: isDark ? AppTheme.gray300 : AppTheme.gray600,
+              ),
+              icon: const Icon(Icons.upload_file_outlined, size: 18),
+              label: const Text('Replace Resume'),
             ),
           ),
         ],
       ),
     );
+  }
+
+  /// v8.5 (R4): Review the current uploaded PDF via its storage path. The
+  /// Cloud Function validates ownership server-side (`request.auth.uid ===
+  /// owner`) and extracts the text from `resumes/{uid}/latest.pdf`.
+  Future<void> _reviewUploadedResume(
+    ResumeReviewProvider provider,
+    String storagePath,
+  ) async {
+    FocusScope.of(context).unfocus();
+
+    final targetRole = _roleController.text.isNotEmpty
+        ? _roleController.text
+        : null;
+
+    final success = await provider.submitReview(
+      resumeText: null,
+      storagePath: storagePath,
+      targetRole: targetRole,
+    );
+
+    if (success && mounted) {
+      // Wait for the results view to be built, then scroll to top.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scrollController.hasClients) {
+          _scrollController.animateTo(
+            0,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+    }
   }
 
   Future<void> _openResumeUrl(BuildContext context, String url) async {

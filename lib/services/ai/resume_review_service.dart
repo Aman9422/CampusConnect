@@ -39,13 +39,20 @@ class ResumeReviewService {
   /// [userId] - Authenticated user's ID (server derives the identity from
   /// Firebase Auth; kept as a parameter for API compatibility)
   /// [resumeText] - Resume content as plain text
+  /// [storagePath] - v8.5: Optional storage path of the uploaded resume PDF
+  /// (`resumes/{uid}/latest.pdf`). When provided, the Cloud Function downloads
+  /// the PDF and extracts the text server-side; [resumeText] is ignored and may
+  /// be empty. The server enforces `request.auth.uid === owner` and the exact
+  /// `resumes/{uid}/latest.pdf` path — a client cannot review another user's
+  /// resume.
   /// [targetRole] - Optional target job role for tailored advice
   ///
   /// Returns ResumeReviewResponse with review data and usage info
   /// Throws exception on failure
   Future<ResumeReviewResponse> reviewResume({
     required String userId,
-    required String resumeText,
+    String? resumeText,
+    String? storagePath,
     String? targetRole,
   }) async {
     try {
@@ -54,24 +61,34 @@ class ResumeReviewService {
         throw ResumeReviewException('User ID is required');
       }
 
-      final trimmedResume = resumeText.trim();
-      if (trimmedResume.length < minResumeLength) {
-        throw ResumeReviewException(
-          'Resume is too short. Please provide at least 100 characters.',
-        );
-      }
-
-      if (trimmedResume.length > maxResumeLength) {
-        throw ResumeReviewException(
-          'Resume is too long. Maximum $maxResumeLength characters allowed.\n'
-          'Current: ${trimmedResume.length} characters.',
-        );
+      if (storagePath == null || storagePath.isEmpty) {
+        // Manual text path requires content.
+        final trimmed = (resumeText ?? '').trim();
+        if (trimmed.isEmpty) {
+          throw ResumeReviewException(
+            'Resume text is required when no uploaded resume is provided.',
+          );
+        }
+        if (trimmed.length < minResumeLength) {
+          throw ResumeReviewException(
+            'Resume is too short. Please provide at least 100 characters.',
+          );
+        }
+        if (trimmed.length > maxResumeLength) {
+          throw ResumeReviewException(
+            'Resume is too long. Maximum $maxResumeLength characters allowed.\n'
+            'Current: ${trimmed.length} characters.',
+          );
+        }
       }
 
       debugPrint('ResumeReviewService: Sending review request...');
 
       // v8.4.2 (S6b/P3): callable call — uid comes from Firebase Auth context
       // on the server; the client no longer transmits `userId`.
+      // v8.5: when reviewing the uploaded PDF, the callable receives
+      // `storagePath`; the server downloads + extracts the text itself.
+      final hasStoragePath = storagePath != null && storagePath.isNotEmpty;
       final callable = _functions.httpsCallable(
         'reviewResume',
         options: HttpsCallableOptions(
@@ -79,7 +96,10 @@ class ResumeReviewService {
         ),
       );
       final result = await callable.call<Map<String, dynamic>>({
-        'resumeText': trimmedResume,
+        if (hasStoragePath)
+          'storagePath': storagePath
+        else
+          'resumeText': (resumeText ?? '').trim(),
         'targetRole': targetRole ?? 'General / Entry Level',
         'experienceLevel': 'Student / Fresher',
       });
@@ -101,6 +121,10 @@ class ResumeReviewService {
           );
         case 'invalid-argument':
           throw ResumeReviewException(e.message ?? 'Invalid request');
+        case 'not-found':
+          throw ResumeReviewException(
+            'Resume file not found. Please upload your resume and try again.',
+          );
         case 'internal':
         case 'unavailable':
           throw ResumeReviewException(

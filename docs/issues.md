@@ -11,6 +11,41 @@
 
 ---
 
+## 🆕 v8.4.10 — "Replace Resume" stuck in an endless loop (upload spinner never ends)
+
+### Bug 7 — Replace Resume: spinner spins forever, upload "not going anywhere" (then v2 appears after leaving/revisiting)
+| | |
+|---|---|
+| Severity | High (UI deadlock — reported by the user on-device) |
+| Status | 🟢 **FIXED** |
+| Root cause | Firebase Storage Android SDK race: the `UploadTask` reached `INTERNAL_STATE_SUCCESS` (the file physically landed at `resumes/{uid}/latest.pdf`) but a cancel signal — emitted when the app resumed from the document picker / activity lifecycle — arrived AFTER success (`StorageTask: unable to change internal state to: INTERNAL_STATE_CANCELED ... from state:INTERNAL_STATE_SUCCESS`). The Dart `putFile(...)` future then never completed promptly. `PortfolioProvider.uploadResume` → `ResumeService.uploadResume` → `StorageService.uploadResume` were all **unbounded awaits** (unlike `savePortfolio`, which has `saveTimeout`), so `_isUploadingResume` stayed `true` forever → "Replace Resume" showed the infinite spinner/"endless loop". The chain only completed after the user navigated away (lifecycle nudges), which is why the new v2 resume appeared on revisit. |
+| Fix | Every network hop in the resume-upload chain is now bounded so a hung future always surfaces a clean error and the spinner always resets: (1) `StorageService` — `putFile`/`putData` under `uploadTimeout` (60 s), `getDownloadURL`/`delete`/`downloadBytes` under `quickTimeout` (15 s), with `TimeoutException` mapped to a "Upload timed out. Check your connection and try again." message; (2) `ResumeService` — the Firestore metadata write in both `uploadResume` and `deleteResume` runs under `PortfolioService.saveTimeout` (20 s); (3) `PortfolioProvider._friendlyError` passes "timed out" messages through verbatim; (4) `ResumeUploadScreen` — `_isPicking` re-entrancy guard (double-tap can't stack pickers/uploads; button shows busy state during the document-picker window) and a **failure snackbar** (previously failures were silently only visible via the banner, making a timeout look like a hang). |
+| Files | `lib/services/storage/storage_service.dart`, `lib/services/firestore/resume_service.dart`, `lib/services/firestore/portfolio_service.dart`, `lib/providers/portfolio_provider.dart`, `lib/views/portfolio/resume_upload_screen.dart` |
+| Verification | `flutter analyze` 0 issues on all 5 changed files. Manual pass needed on-device: replace resume → success snackbar; simulate offline/hang → "Upload timed out" snackbar + banner + spinner clears; remove resume → spinner clears on failure. |
+
+---
+
+## 🆕 v8.5 — Resume Reviewer Integration & PDF Intelligence (2026-08-08)
+
+### Bug 4 (REOPEN) — Resume Review still asks for resume in text form; can't access the uploaded resume directly
+| | |
+|---|---|
+| Severity | Medium (feature/UX gap) |
+| Status | 🟢 **FIXED — v8.5 (MB7 delivered)** |
+| What changed | The unfinished v8.4.3 item **MB7 — PDF → text for Resume Review** is now implemented server-side: `reviewResume` accepts `storagePath` (`resumes/{uid}/latest.pdf`), validates `request.auth.uid === owner` + exact path match, downloads the PDF via Admin SDK, extracts text with `pdf-parse@1.1.1` (deep-require `pdf-parse/lib/pdf-parse.js` to avoid the package's test-data `main` side effect), and feeds the extracted text through the EXISTING AI/ATS pipeline, returning the same `{review, usage}` shape. The Resume Reviewer UI now has **Review Uploaded Resume**, **Open Uploaded Resume**, **Replace Resume**, review count + latest ATS, with the manual-paste flow kept as a fallback. |
+| Verification | `flutter analyze` 0 errors; `flutter test` **71/71** (65 existing + 6 new storage-path security tests); `node --check functions/index.js` pass; `pdf-parse` smoke-tested on Node against a real Chromium-generated text PDF (extracted all expected text). On-device manual matrix (Upload → Review → ATS → Dashboard → Placement snapshot) still pending — see `docs/todo.md` R10. |
+| Files (this pass) | `functions/package.json` (added `pdf-parse@^1.1.1`), `functions/index.js` (`resumeTextFromStorage` + `reviewResume` storagePath branch), `lib/services/ai/resume_review_service.dart`, `lib/providers/resume_review_provider.dart`, `lib/views/resume_review_view.dart`, `test/resume_review_storage_path_test.dart` (new), `docs/todo.md`, `docs/issues.md`, `docs/v8_workspace_tracker.md`, `pubspec.yaml` |
+
+### New finding — pdf-parse bundled pdf.js (v1.10.100) xref strictness
+| | |
+|---|---|
+| Severity | Low (note — not an app bug) |
+| Status | 🟢 Documented |
+| Details | The `pdf-parse@1.1.1` bundle ships 2017-era pdf.js builds. Its xref parser rejects some hand-crafted *minimal* PDFs (`bad XRef entry`) even when byte-correct by the PDF spec, but successfully parses real PDFs produced by Chromium/Edge. Resumes uploaded to CampusConnect are user-generated PDFs (Chromium/Word/etc.), so this is not reachable in practice. If a future report shows `bad XRef entry` on a real upload, the fix is to render the PDF pages first (client-side) or switch the extractor (e.g., `pdfjs-dist` modern build) — deferred. |
+| Verification | Reproduced with a synthetic minimal PDF on Node; real Chromium-generated PDF extracted text correctly. |
+
+---
+
 ## 🆕 v8.4.4 — On-Device Re-Verification Fix (post-deploy manual pass)
 
 ### Bug 1R — Resume upload says "success" but the dashboard placeholder still shows "No Resume"

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:campusconnect/models/portfolio/portfolio_model.dart';
 import 'package:campusconnect/models/portfolio/resume_metadata.dart';
 import 'package:campusconnect/services/firestore/portfolio_service.dart';
@@ -76,7 +78,9 @@ class ResumeService {
       ),
     );
 
-    await _portfolioService.savePortfolio(uid, updated, previous: current);
+    await _portfolioService
+        .savePortfolio(uid, updated, previous: current)
+        .timeout(PortfolioService.saveTimeout);
     return updated;
   }
 
@@ -92,7 +96,11 @@ class ResumeService {
 
     final current = previousPortfolio ?? PortfolioModel.empty();
     final updated = current.copyWithoutResume();
-    await _portfolioService.savePortfolio(uid, updated, previous: current);
+    // v8.4.10: bound the metadata write like the upload path — a hung
+    // Firestore write must never leave the Remove button spinning forever.
+    await _portfolioService
+        .savePortfolio(uid, updated, previous: current)
+        .timeout(PortfolioService.saveTimeout);
     return updated;
   }
 

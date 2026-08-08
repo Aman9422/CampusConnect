@@ -41,15 +41,6 @@ class ProfileService {
 
   /// Create a new profile (first login)
   ///
-  /// v8.4.8 (MB14): `createProfile` previously did `doc(uid).set(...)` with
-  /// **no merge**, which overwrites the WHOLE user document. `initializeProfile`
-  /// checks `profileExists` first, so normally this only runs when the doc is
-  /// missing — but a race between its `exists` check and this write (role /
-  /// setup re-entry, or a doc created by another flow in between) could land
-  /// the non-merge `set` on an existing document and silently destroy the
-  /// `portfolio` map (resume, projects, skills, …). Now this method re-checks
-  /// existence itself: a fresh doc gets the full `set` (initial creation),
-  /// while an existing doc is merged so `portfolio` and any sections not in
   /// `StudentProfile.toFirestore()` are preserved.
   Future<void> createProfile(String uid, String email) async {
     try {

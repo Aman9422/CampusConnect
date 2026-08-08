@@ -3,6 +3,10 @@ const {onDocumentWritten, onDocumentCreated} = require("firebase-functions/v2/fi
 const {onSchedule} = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
 const { generateAIResponse, generateChatResponse, generateResumeReviewAI } = require("./ai/aiProvider");
+// v8.5 (R2): server-side PDF → text extraction for the Resume Reviewer.
+// Deep require avoids pdf-parse's main-entry test-data side effect; the
+// extractor is pure-JS and runs on the Node 20 functions runtime.
+const pdfParse = require("pdf-parse/lib/pdf-parse.js");
 
 admin.initializeApp();
 
@@ -778,7 +782,7 @@ const RESUME_MIN_LENGTH = 100; // Minimum resume characters
 // the monthly quota or attach reviews to another account. The GET usage-check
 // path is now the `{checkUsage: true}` callable flag.
 exports.reviewResume = onCall(
-    {maxInstances: 5, timeoutSeconds: 120},
+    {maxInstances: 5, timeoutSeconds: 120, memory: "512MiB"},
     async (request) => {
       // v8.4.2 (S6b/P3): uid from Firebase Auth is the only identity source.
       const userId = request.auth?.uid;
@@ -798,25 +802,33 @@ exports.reviewResume = onCall(
 
       try {
         // Extract data from request
-        const { resumeText, targetRole, experienceLevel } = request.data || {};
+        const { resumeText, storagePath, targetRole, experienceLevel } =
+            request.data || {};
 
-        if (!resumeText) {
-          throw new admin.functions.https.HttpsError(
-              "invalid-argument",
-              "Resume text is required."
-          );
+        // v8.5 (R3): resolve the resume text either from the uploaded PDF
+        // (`storagePath`) or the pasted manual text fallback.
+        let trimmedResume;
+        let reviewSource = "pasted";
+        if (storagePath) {
+          trimmedResume = await resumeTextFromStorage(userId, storagePath);
+          reviewSource = "uploaded";
+        } else {
+          if (!resumeText) {
+            throw new admin.functions.https.HttpsError(
+                "invalid-argument",
+                "Resume text is required."
+            );
+          }
+          trimmedResume = resumeText.trim();
         }
 
-        const trimmedResume = resumeText.trim();
-
-        // Validate resume length
+        // Validate resume length (PDF path already truncated to max).
         if (trimmedResume.length < RESUME_MIN_LENGTH) {
           throw new admin.functions.https.HttpsError(
               "invalid-argument",
               `Resume too short. Minimum ${RESUME_MIN_LENGTH} characters required.`
           );
         }
-
         if (trimmedResume.length > RESUME_MAX_LENGTH) {
           throw new admin.functions.https.HttpsError(
               "invalid-argument",
@@ -824,13 +836,13 @@ exports.reviewResume = onCall(
           );
         }
 
-        console.log(`Resume review request from user: ${userId}`);
+        console.log(`Resume review request from user: ${userId} (${reviewSource})`);
         console.log(`Resume length: ${trimmedResume.length} characters`);
         console.log(`Target role: ${targetRole || "General"}`);
 
         // Check monthly usage limit BEFORE incrementing
         const currentUsage = await getResumeUsage(userId);
-        
+
         if (currentUsage.monthlyCount >= RESUME_MONTHLY_LIMIT) {
           throw new admin.functions.https.HttpsError(
               "resource-exhausted",
@@ -842,7 +854,7 @@ exports.reviewResume = onCall(
         // Increment usage count (only after quota check passes)
         const usageData = await trackResumeUsage(userId);
 
-        // Generate AI review (Real AI via Groq/HuggingFace)
+        // Generate AI review (Real AI via Groq/HuggingFace).
         let reviewResult;
         try {
           const aiResult = await generateResumeReviewAI(
@@ -866,13 +878,15 @@ exports.reviewResume = onCall(
           userId: userId,
           metadata: {
             resumeLength: trimmedResume.length,
+            source: reviewSource,
+            storagePath: storagePath || null,
             targetRole: targetRole || "General",
             atsScore: reviewResult.atsScore,
             monthlyUsage: usageData.monthlyCount,
           },
         });
 
-        // Return successful response
+        // Return successful response (unchanged shape for the client).
         return {
           review: reviewResult,
           usage: usageData,
@@ -891,6 +905,97 @@ exports.reviewResume = onCall(
       }
     }
 );
+
+/**
+ * v8.5 (R2/R3): Extract resume text from the authenticated user's uploaded
+ * resume PDF in Firebase Storage.
+ *
+ * Security contract enforced here (never trust client-supplied identity):
+ *   - [uid] is `request.auth.uid` from the callable context (authoritative).
+ *   - [storagePath] is allowed ONLY when it exactly equals
+ *     `resumes/{uid}/latest.pdf`. Any other path (other user, other file,
+ *     different layout) is rejected with `invalid-argument`.
+ *
+ * @param {string} uid - Authenticated user id
+ * @param {string} storagePath - Client-supplied storage path
+ * @returns {Promise<string>} Extracted resume text (max RESUME_MAX_LENGTH)
+ * @throws {HttpsError#invalid-argument|not-found}
+ */
+async function resumeTextFromStorage(uid, storagePath) {
+  const expectedPath = `resumes/${uid}/latest.pdf`;
+  if (typeof storagePath !== "string" || storagePath !== expectedPath) {
+    throw new admin.functions.https.HttpsError(
+        "invalid-argument",
+        "The supplied resume path is not a valid resume for this account."
+    );
+  }
+
+  let data;
+  try {
+    const file = admin.storage().bucket().file(storagePath);
+    const [metadata] = await file.getMetadata();
+    if (metadata.size != null && metadata.size > 5 * 1024 * 1024) {
+      throw new admin.functions.https.HttpsError(
+          "invalid-argument",
+          "Resume exceeds the 5 MB limit."
+      );
+    }
+    const [buffer] = await file.download();
+    data = buffer;
+  } catch (error) {
+    if (error instanceof admin.functions.https.HttpsError) throw error;
+    if (error && (error.code === 404 || error.code === "not-found")) {
+      throw new admin.functions.https.HttpsError(
+          "not-found",
+          "Resume file not found. Please upload your resume and try again."
+      );
+    }
+    throw new admin.functions.https.HttpsError(
+        "internal",
+        "Could not read your resume. Please try again later."
+    );
+  }
+
+  if (!data || data.length === 0) {
+    throw new admin.functions.https.HttpsError(
+        "invalid-argument",
+        "This resume appears to be image-based and could not be read automatically. Please upload a text-based PDF."
+    );
+  }
+
+  let text;
+  try {
+    const parsed = await pdfParse(data);
+    text = (parsed.text || "").replace(/\u0000/g, "").trim();
+  } catch (parseError) {
+    console.error(
+        `resumeTextFromStorage: PDF parse failed for ${storagePath}:`,
+        parseError.message || parseError
+    );
+    throw new admin.functions.https.HttpsError(
+        "invalid-argument",
+        "This resume appears to be image-based and could not be read automatically. Please upload a text-based PDF."
+    );
+  }
+
+  // No text below an absolute minimum means the PDF is image-only/scanned.
+  if (text.length < RESUME_MIN_LENGTH) {
+    throw new admin.functions.https.HttpsError(
+        "invalid-argument",
+        "This resume appears to be image-based and could not be read automatically. Please upload a text-based PDF."
+    );
+  }
+
+  // Truncate to the same ceiling the manual path enforces.
+  if (text.length > RESUME_MAX_LENGTH) {
+    text = text.substring(0, RESUME_MAX_LENGTH);
+  }
+
+  console.log(
+      `resumeTextFromStorage: extracted ${text.length} characters from ${storagePath}`
+  );
+  return text;
+}
 
 /**
  * Track resume review usage per user (monthly limit)
