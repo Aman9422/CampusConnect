@@ -335,6 +335,22 @@ service cloud.firestore {
     }
 
     // ===============================================
+    // v8.7: ALUMNI GROUP CHAT — alumni-only shared group
+    // ===============================================
+    // Single shared group for verified Alumni. Students, Teachers and
+    // unauthenticated users are denied read and write. The sender UID must
+    // equal the authenticated user's UID (never trust a client-supplied
+    // senderId — Task §8). Users may only update/delete (soft-delete) their
+    // own messages.
+    match /alumni_group_messages/{messageId} {
+      allow read: if isAuthenticated() && userRole() == 'alumni';
+      allow create: if isAuthenticated() && userRole() == 'alumni' &&
+        request.resource.data.senderId == request.auth.uid;
+      allow update, delete: if isAuthenticated() && userRole() == 'alumni' &&
+        resource.data.senderId == request.auth.uid;
+    }
+
+    // ===============================================
     // DENY EVERYTHING ELSE
     // ===============================================
     match /{document=**} {

@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'package:campusconnect/enums/user_role.dart';
 import 'package:campusconnect/models/badge.dart';
 import 'package:campusconnect/models/student_profile.dart';
 import 'package:campusconnect/models/user_activity.dart';
@@ -19,6 +20,16 @@ class EngagementService {
 
   static final EngagementService _instance = EngagementService();
   factory EngagementService.instance() => _instance;
+
+  /// v8.7.1: role-aware label for the activity badge.
+  ///
+  /// Alumni see "Active Alumni" — "Active Student" is a Student-flavored title
+  /// and mismatched on the Alumni dashboard. Single source of truth for the
+  /// client engine; the Cloud Function mirrors this exact rule so the badge
+  /// never flickers between writers (same class as the v8.6 threshold fix).
+  static String activeBadgeTitle(UserRole role) {
+    return role == UserRole.alumni ? 'Active Alumni' : 'Active Student';
+  }
 
   CollectionReference<Map<String, dynamic>> _activitiesRef(String userId) {
     return _firestore.collection('users').doc(userId).collection('activities');
@@ -107,6 +118,7 @@ class EngagementService {
         profileStrength: profileStrength.round(),
         streakDays: streakDays,
         activityPoints: activityPoints,
+        role: profile.role ?? UserRole.student,
       );
 
       final summary = {
@@ -182,8 +194,14 @@ class EngagementService {
     required int profileStrength,
     required int streakDays,
     required int activityPoints,
+    UserRole role = UserRole.student,
   }) {
     final now = DateTime.now();
+    final isAlumni = role == UserRole.alumni;
+    final activeTitle = isAlumni ? 'Active Alumni' : 'Active Student';
+    final activeDescription = isAlumni
+        ? 'Stay active and engaged in the alumni community.'
+        : 'Earn 50 engagement points.';
 
     return [
       Badge(
@@ -211,8 +229,8 @@ class EngagementService {
       Badge(
         id: 'active_student',
         type: BadgeType.activeStudent,
-        title: 'Active Student',
-        description: 'Earn 50 engagement points.',
+        title: activeTitle,
+        description: activeDescription,
         icon: 'school',
         progress: activityPoints,
         target: 50,

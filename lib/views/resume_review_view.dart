@@ -1,7 +1,9 @@
 import 'package:campusconnect/constants/routes.dart'; // v6.8
+import 'package:campusconnect/enums/user_role.dart';
 import 'package:campusconnect/models/resume_review.dart';
 import 'package:campusconnect/providers/portfolio_provider.dart';
 import 'package:campusconnect/providers/resume_review_provider.dart';
+import 'package:campusconnect/providers/role_provider.dart';
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/widgets/offline_banner.dart';
 import 'package:flutter/material.dart';
@@ -270,6 +272,11 @@ class _ResumeReviewViewState extends State<ResumeReviewView> {
     ResumeReviewProvider provider,
     bool isDark,
   ) {
+    // v8.7: Alumni use the text-input Resume Reviewer only — no uploaded-PDF
+    // card, no portfolio/upload CTA (Task §2/§5). Students keep the full
+    // uploaded-resume integration unchanged.
+    final isAlumni = context.watch<RoleProvider>().userRole == UserRole.alumni;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -285,8 +292,11 @@ class _ResumeReviewViewState extends State<ResumeReviewView> {
           // this is the UX bridge (Bug 4): file name / version / ATS chip +
           // View/Download action. The text field below remains for users who
           // prefer to paste.
-          _buildUploadedResumeCard(context, isDark),
-          const SizedBox(height: 20),
+          // v8.7: Alumni skip this entirely — they only paste text (Task §2).
+          if (!isAlumni) ...[
+            _buildUploadedResumeCard(context, isDark),
+            const SizedBox(height: 20),
+          ],
 
           // Target role input (optional)
           _buildSectionLabel('Target Role (Optional)', isDark),
@@ -511,20 +521,14 @@ class _ResumeReviewViewState extends State<ResumeReviewView> {
         decoration: BoxDecoration(
           color: isDark ? AppTheme.darkSurface : Colors.white,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isDark ? Colors.white12 : AppTheme.gray200,
-          ),
+          border: Border.all(color: isDark ? Colors.white12 : AppTheme.gray200),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Icon(
-                  Icons.info_outline,
-                  size: 18,
-                  color: AppTheme.primaryBlue,
-                ),
+                Icon(Icons.info_outline, size: 18, color: AppTheme.primaryBlue),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -581,9 +585,7 @@ class _ResumeReviewViewState extends State<ResumeReviewView> {
       decoration: BoxDecoration(
         color: isDark ? AppTheme.darkSurface : Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDark ? Colors.white12 : AppTheme.gray200,
-        ),
+        border: Border.all(color: isDark ? Colors.white12 : AppTheme.gray200),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -662,8 +664,7 @@ class _ResumeReviewViewState extends State<ResumeReviewView> {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              onPressed:
-                  storagePath != null && resumeProvider.canSubmitReview
+              onPressed: storagePath != null && resumeProvider.canSubmitReview
                   ? () => _reviewUploadedResume(resumeProvider, storagePath)
                   : null,
               style: ElevatedButton.styleFrom(

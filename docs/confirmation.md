@@ -1,182 +1,264 @@
-# CampusConnect v8.4.1 — Final Audit & Architecture Stability Review
+# CampusConnect v8.5.2 — Final Audit & Architecture Stability Review
 
-> Audit date: 2026-08-07 · Scope: `docs/Task.md` (v8.4.1), `docs/todo.md` (T0–T7), `docs/v8_workspace_tracker.md`, `project_info__12.md`, and full source review of the v8.4.1 changes — `ResumeMetadata`, `StorageService`, `ResumeService`, `PortfolioProvider`, `PortfolioService`, portfolio views, `ResumeSummaryCard`, placement snapshot chain (`functions/index.js`, `Application`, `PlacementsService`, `PlacementsProvider`, `placements_list_view.dart`), routes, `main.dart`, `firestore.rules`, `storage.rules`, `firestore.indexes.json`.
+> ## v8.7 Resolution Banner (2026-08-09)
+>
+> **v8.7 delivered — Alumni Experience Simplification & Alumni Group Chat (8.6.0+89 → 8.7.0+90).**
+> - **Role separation**: Portfolio is a Student career-development feature. The Alumni dashboard's `ResumeSummaryCard` + portfolio refresh were removed (replaced with an **Alumni Community** card + quick action); the Alumni profile's "My Portfolio" tile was removed; the Resume Reviewer hides the uploaded-resume card / upload CTA for Alumni (text-input only). The 7 Student Portfolio editing routes are now role-gated (`_guardStudentPortfolio`) — Alumni who manually access them get a safe blocked view. `portfolioReadOnlyRoute` stays open so Alumni can still VIEW a Student's portfolio. **The Student Portfolio subsystem is NOT deleted.**
+> - **Alumni text-based Resume Reviewer**: Alumni paste resume text → the SAME `reviewResume` callable → existing ATS pipeline (no second engine, no second storage). Quota (`resume_usage/{uid}`) and history (`users/{uid}/resumeReviews`) reused unchanged, UID-scoped.
+> - **Alumni Group Chat**: `alumni_group_messages/{messageId}` (senderId, senderName, senderPhotoUrl?, message, createdAt, editedAt?, isDeleted?) with `AlumniGroupChatService` → `AlumniGroupChatProvider` → `AlumniGroupChatView` (Material 3 chat: sender name + timestamp, own-message bubbles, empty/loading/error/sending states, auto-scroll on new messages). No composite index needed (single-field `orderBy('createdAt')`). Provider registered/initialized/reset at all 5 logout sites.
+> - **Security**: `firestore.rules` `alumni_group_messages` block — read Alumni-only; create Alumni-only with `senderId == request.auth.uid`; update/delete own messages only. Students/Teachers/unauthenticated denied server-side. Existing rules not weakened.
+> - **Validation**: `flutter analyze` **0 errors / 0 warnings** (68 pre-existing info lints); `flutter test` **124/124 passed** (83 existing + 41 new v8.7/v8.7.1 tests); `node --check functions/index.js` pass; `dart format` clean.
+> - **Deployment**: ✅ **DEPLOYED 2026-08-09** — `firebase deploy --only firestore:rules` **SUCCESS** (alumni_group_messages Alumni-only rules live). A follow-up v8.7.1 pass made the dashboard activity badge role-aware (Alumni see **"Active Alumni"** instead of "Active Student") and deployed the functions (15/15 success).
+> - **v8.7.1 badge fix (user report)**: both badge engines (client `EngagementService` + server `recomputeEngagementSummary`) hardcoded "Active Student"; now role-aware in both so the badge can never flicker between writers. See `docs/issues.md` v8.7.1 entry.
+> - On-device manual matrix per `docs/Task.md` §22 remains.
+>
+> Full delivery log: **`docs/issues.md` — v8.7 section** · **`docs/v8_workspace_tracker.md` — v8.7 / v8.7.1 sections** · **`docs/todo.md` — v8.7 checklist**.
+
+> ## v8.6 Resolution Banner (2026-08-09)
+>
+> **All code findings from this audit are FIXED — the v8.6 pass resolved every actionable item on the Prioritized Fix List (§10).**
+> - 🔴 Deploy gap (#1): code verified; has been carried into B14 (`firebase deploy --only functions` + `--only firestore:indexes`) — flagged for the deploy owner.
+> - 🟠 HIGH #2–#6: all fixed (`OpportunityService` client notification batch removed; `ResumeReviewProvider` subscription leak fixed; `reviewResume` quota now consumes atomically + rolls back on AI failure; `ResumeService.uploadResume` preserves `reviewCount`/`lastReviewAt`; composite indexes added to `firestore.indexes.json`).
+> - 🟡 MED #7–#10: all fixed (`onProfileUpdatedRefreshAI` timestamp value-comparison; single recommendation writer — client delegates to the new `refreshRecommendations` callable; atomic quota; ProfileView logout provider-reset parity).
+> - 🔵 LOW: short-PDF message, phantom-portfolio guard, and badge threshold ≥85 fixed in code; PDF-truncation notice surfaced via callable `warning`; remaining LOW items explicitly deferred in `docs/issues.md` (v8.6 section).
+> - 🟡 MED #9 (engagement write contention) + the remaining LOW items are documented Known Limitations — no code change.
+> - **Validation**: `node --check functions/index.js` pass; `flutter analyze` / `flutter test` results recorded in B12 (see `docs/todo.md`).
+>
+> Full fix log (each finding → root cause → fix → files): **`docs/issues.md` — v8.6 section**.
+
+---
+
+> Audit date: 2026-08-09 · Scope: `docs/Task.md` (v8.5.2 goal), `docs/todo.md` (A1–A8), `docs/v8_workspace_tracker.md`, `project_info__16_v8.5.2_Alumni_Resume_Reviewer_Audit.md`, and full source review of the v8.5.2 delivery — `functions/index.js` (trigger + callables), `lib/views/profile/profile_view.dart`, `lib/views/dashboards/alumni_dashboard_view.dart`, `test/alumni_resume_review_test.dart`, plus the entire resume/portfolio subsystem (`ResumeService`, `PortfolioService`, `StorageService`, `PortfolioProvider`, `ResumeReviewProvider`, `ResumeReviewService`, `ResumeHistoryService`, `PortfolioCacheService`, `PortfolioModel`, `ResumeMetadata`), all dashboards, `main.dart`/routes, `firestore.rules`, `storage.rules`, `firestore.indexes.json`, placement/mentorship/opportunity/chat/notification/analytics services, and the test suite.
 > Severity: 🔴 Critical · 🟠 High · 🟡 Medium · 🔵 Low
-> Previous audit (v8.4.6 era) preserved at `project_info__11.md`.
+> This document supersedes the v8.4.1 final audit previously stored here. The v8.4.1 audit's content is preserved in the git history and referenced from `docs/v8_workspace_tracker.md` (Cross-Cutting Notes).
 
 ---
 
-## Summary
+## 1. Executive Summary
 
-v8.4.1 has been **verified against the code, the static-analysis claim, and the test suite**, and it is genuinely complete per `docs/Todo.md` T0–T7:
+**v8.5.2's stated goal is met in code**: the Alumni Resume Reviewer integration is correctly wired — Alumni have a "My Portfolio" tile (`ProfileView` A3), a `ResumeSummaryCard` dashboard surface (`alumni_dashboard_view.dart` A4), and the `onResumeReviewCreatedRefreshMatches` trigger now merges ATS metadata for **any** role (`functions/index.js` A2) while keeping the student-only recommendation enrichment gated. The reviewer itself is role-agnostic, `request.auth.uid` is the sole callable identity, and the read-only student portfolio remains strictly read-only. **83/83 tests, 0 analyze errors, and `node --check` pass are consistent with what the code shows.**
 
-- **`flutter analyze` → 0 errors / 0 warnings.** Only 69 pre-existing `info`-level lints (deprecated `withOpacity`/`value`, `use_build_context_synchronously`, legacy archived files). None introduced by v8.4.1 files.
-- **`flutter test` → 45/45 pass** (auth regression 14, auth 24, portfolio read-only view 1, verify-email navigation 2, portfolio model/validators included in prior 45 baseline).
-- **T0–T7 confirmed in source**: nested-map architecture decision documented; `latest.pdf` storage path; all Phase 2 metadata fields on `ResumeMetadata` with legacy-key fallbacks; `ResumeService` façade delegating Storage + per-section Firestore diffs; `careerObjective`/`languages` + Resume Status chip + metadata rows in both portfolio views; `ResumeSummaryCard` on the student dashboard; placement resume snapshot end-to-end (callable → model → provider → dialog); version `8.4.1+85`.
+**However, the audit found 1 critical deployment gap, 5 high-severity bugs (3 of them old/pre-existing code that v8.4.3 / v8.4.2 missed), and a cluster of index/scale/edge issues.**
 
-**However, the audit found real issues that would surface in production.** The most severe is a **Storage-rules bug that will deny owner deletes once Firebase Storage is provisioned** (`storage.rules` write rule references `request.resource.contentType` which is null on delete). The Phase 8 "resume snapshot" is also **metadata-only** — it stores a path that later uploads overwrite, so the preserved-resume guarantee is not actually met at the byte level. Several smaller correctness gaps (F10 incomplete in the experience manager, status inconsistency between the two application write paths, a possibly-missing composite index, provider subscription leak) are detailed below.
+### Root cause of the original v8.5.2 defect (A1 audit — already fixed in code)
 
----
+`onResumeReviewCreatedRefreshMatches` early-returned `if (userData.role !== "student")` before merging `portfolio.resume.{reviewCount,lastReviewAt,updatedAt,latestATSScore}`, so Alumni reviews never persisted ATS data. The A2 fix (verified present): the ATS → `portfolio.resume` merge now runs for **any** role; `refreshRecommendationsForStudent` stays gated to `role === "student"`; activity logging + engagement recompute run for every review author.
 
-## 1. Verified-Fixed (code matches the docs)
+### 🔴 CRITICAL — not a code bug, a deployment gap
+- **The v8.5.2 trigger change (`functions/index.js` A2) is NOT deployed.** `docs/todo.md` A8 and `docs/v8_workspace_tracker.md` both state deployment pending. Production therefore **still runs the old `if (userData.role !== "student") return;` gate** — Alumni ATS sync is **broken in production right now** until `firebase deploy --only functions` is run.
 
-| Task | Evidence in source |
-|------|--------------------|
-| **T0** Architecture decision | `docs/v8_workspace_tracker.md` + `ResumeMetadata` doc comment: nested map `users/{uid}/portfolio.resume` retained; deviation from `users/{uid}/resume/metadata` documented. |
-| **T1** Metadata + path | `resume_metadata.dart` — `storagePath`, `fileSize`, `mimeType`, `uploadedAt`/`updatedAt`, `latestATSScore`, `reviewCount`, `lastReviewAt`, `isDemoData`, tolerant `fromMap` (legacy `uploadDate`/`lastUpdated`/`atsScore`), back-compat getters, `hasResume`, `resumeAgeInDays`. `storage_service.dart` — `resumes/{uid}/latest.pdf`, `resumeHistoryPath`, 5 MB + PDF validation, original `fileName` in `ResumeUploadResult`. |
-| **T2** ResumeService | `resume_service.dart` exists; upload/delete orchestrate Storage + `PortfolioService.savePortfolio(..., previous)` per-section diffs; `downloadResume`/`getResumeUrl`/`checkResumeExists`/`readMetadata`/`historyPath`. `PortfolioProvider.uploadResume/deleteResume` delegate to it; F5/H4 + F6 guards preserved (`_isDisposed`, `_lastUid`). |
-| **T3** Portfolio fields + UI | `career_preferences.dart` (`careerObjective`), `portfolio_model.dart` (`languages`, `isEmpty` includes them), edit UI for both; Resume Status chip, size/type/storage-path/version/review-count rows, Latest ATS + Resume Age in `student_portfolio_screen.dart` and `portfolio_read_only_view.dart`. |
-| **T4** Dashboard summary | `resume_summary_card.dart` wired into `_StudentDashboardTab` via `Consumer<PortfolioProvider>`; Uploaded/no-resume chip, Latest ATS, Resume Age, Last Review, Open Portfolio + Upload/Replace. |
-| **T5** Placement snapshot | `functions/index.js` `logPlacementApplication` persists `resumeVersion`/`resumeStoragePath`/`atsScoreAtApplication` (both write paths); `Application` model + `studentId` alias; `PlacementsService.applyForPlacement/Direct` forward them; `_ApplyDialogWidget` uses the uploaded resume URL with text fallback. |
-| **T6** Version | `pubspec.yaml` = `8.4.1+85`. |
-| **T7** Validation | `flutter analyze` 0/0 (verified); `flutter test` 45/45 (verified). |
+### 🟠 HIGH (new findings this audit)
+1. **`OpportunityService.createOpportunity` still writes cross-user notifications client-side** — the exact Bug 5 pattern that v8.4.3 (MB8) removed from mentorship and chat but **missed in OpportunityService**. The batch write to `users/{studentUid}/notifications/...` always hits `PERMISSION_DENIED` under rule F7 (owner-only create), producing the same log noise Bug 5 produced, and with >500 students exceeds Firestore's 500-write batch cap. The `onOpportunityPostedNotifyStudents` trigger already delivers these correctly server-side, so the client write is redundant legacy code that must be removed.
+2. **`ResumeReviewProvider` connectivity subscription leaks** — `_startConnectivityMonitoring()` calls `_connectivity.onConnectivityChanged.listen(...)` and discards the subscription; `reset()` never cancels it. Every login stacks a new listener; after provider disposal a late callback can fire `notifyListeners()` → "used after being disposed" crash class in debug. This is exactly the M5 leak v8.4.2 fixed in `PlacementsProvider` but **the same fix was never applied to `ResumeReviewProvider`**.
+3. **`reviewResume` consumes the monthly quota even when the AI provider fails** — `trackResumeUsage(userId)` increments BEFORE `generateResumeReviewAI(...)`. On AI error the user loses a review credit with no rollback. The code comment says "increment only after quota check passes" — it does, but there is no compensation on the AI-failure path.
+4. **Resume replacement wipes `portfolio.resume.reviewCount` + `lastReviewAt`** — `ResumeService.uploadResume` builds a fresh `ResumeMetadata(...)` that starts `reviewCount` at 0 and `lastReviewAt` at null. The ATS score is (correctly) cleared, but the user's review-history counters on the dashboard / portfolio are reset even though `users/{uid}/resumeReviews` still holds every past review.
+5. **Missing composite indexes in `firestore.indexes.json`** — the codebase queries composite combinations that are not declared in the repo (details in §5). They only work today because v8.4.2's deploy preserved pre-existing remote-only indexes. A fresh project / CI deploy will fail with "index required" on Chat, Opportunities, and Mentorship screens.
 
----
+### 🟡 MEDIUM (logical / architectural)
+6. **`onProfileUpdatedRefreshAI` compares Firestore `Timestamp`s with `!==` (identity), which is always true** — `before.updatedAt !== after.updatedAt` is true for any two snapshot objects, so every non-portfolio `users/{uid}` write by a completed student (profile save, email backfill, any `metadata.updatedAt` stamp) spins the recommendation + engagement recompute. The `isPortfolioOnlyChange` guard stops portfolio diffs, but the `updatedAt` comparison is a logical error (should be `.toMillis()` / `.isEqual`).
+7. **Two competing recommendation engines** — the server-side `refreshRecommendationsForStudent` (`functions/index.js`) and the client-side `RecommendationService.refreshRecommendations` (`lib`) both write `users/{uid}/recommendations/{id}` with the **same doc IDs but different scoring models** (server: `overlapSkills*18`, limit 4+4; client: `min(45, overlap*15)`, limit 5+5). Profile updates / resume reviews trigger the server engine; app init / refresh triggers the client engine. They can clobber each other's output, so the AI Smart Picks feed is unstable depending on which writer runs last.
+8. **Quota race in `reviewResume`** — `getResumeUsage` (outside transaction) then `trackResumeUsage` (transaction) are not atomic together; two concurrent calls can both pass the limit check and increment → 6+ reviews in a month. Low likelihood, but the check-then-increment should be one transaction.
+9. **`generateResumeAnalysis` and `onProfileUpdatedRefreshAI` engagement writes contend** — multiple triggers call `recomputeEngagementSummary` with last-writer-wins `set(merge)`. Acceptable at current scale; becomes noisy under load.
+10. **ProfileView logout resets fewer providers than dashboard logout** — `_handleProfileLogout` omits Chat, Mentorship, Opportunity, AlumniDirectory, TeacherAnalytics, ActivityFeed. It is currently covered by AuthGuard's post-logout safety net, but the inconsistency is fragile — if AuthGuard's fallback ever changes, streaming providers survive logout.
 
-## 2. 🆕 Bugs & Issues Found (v8.4.1 audit)
-
-### 2.1 🔴 CRITICAL — `storage.rules` write rule denies owner **delete**
-- **File**: `storage.rules`.
-- **Code**:
-  ```
-  allow write: if request.auth != null &&
-    request.auth.uid == userId &&
-    request.resource.contentType.matches('application/pdf') &&
-    request.resource.size < 5 * 1024 * 1024;
-  ```
-- **Problem**: on a Storage **delete** operation, `request.resource` is **null**. Referencing `request.resource.contentType` in the rule makes the evaluation fail → the request is **denied**. `StorageService.deleteResume` (`ref.delete()`) will therefore get `permission-denied` for the owner once Storage is provisioned — the "Delete Resume" feature silently breaks.
-- **Fix**: allow deletes explicitly:
-  ```
-  allow write: if request.auth != null && request.auth.uid == userId &&
-    (request.resource == null ||   // delete
-       (request.resource.contentType.matches('application/pdf') &&
-        request.resource.size < 5 * 1024 * 1024));
-  ```
-  (or `request.method == 'delete'` branch). This must be deployed together with `firebase deploy --only storage` when Storage is enabled.
-
-### 2.2 🟠 HIGH — Phase 8 "resume snapshot" is metadata-only; the bytes are not preserved
-- **Files**: `functions/index.js` `logPlacementApplication`, `Application.resumeStoragePath`, `StorageService.resumePath`.
-- **Problem**: the application stores `resumeStoragePath = resumes/{uid}/latest.pdf` (or the live download URL). `latest.pdf` is **overwritten in place** on every re-upload (`uploadResume` → same path). So the snapshot promise — "This preserves the resume used when applying even after future uploads" (`docs/Task.md` Phase 8) — holds for the metadata fields but **not for the actual resume content**. A recruiter/analyst opening the application's resume after the student re-uploads sees the new file.
-- **Fix (recommended)**: in `logPlacementApplication`, copy the object to an immutable path at apply time, e.g. `resumes/{uid}/snapshots/app_{placementId}.pdf` (Storage `copyTo` in Node Admin SDK), and store **that** path + URL. Metadata-only is acceptable only if the product explicitly accepts "latest resume" semantics.
-- **Note**: `resumeVersion` gives a version number but there is no version *history* (out of scope per Task.md), so the number alone cannot recover the old file either.
-
-### 2.3 🟠 HIGH — Composite index for `applications` is not declared in `firestore.indexes.json` (verify + add)
-- **Queries** needing it: `getUserApplicationsOnce` and stream `getUserApplicationsWithDetails` — `applications where userId == … orderBy appliedAt desc`.
-- **Problem**: composite index `applications: userId ASC / appliedAt DESC` is required. It is **not present** in `firestore.indexes.json`. The v8.4.6 deployment note says 8 pre-existing *remote* indexes were left undeclared, so the index may exist in the deployed project — but it is missing from the repo, so a fresh project / CI deploy will hit "index required" and the student dashboard placements section (and apply-states) will silently fail. Same risk class as F3.
-- **Fix**: add the index to `firestore.indexes.json`:
-  ```json
-  { "collectionGroup": "applications", "queryScope": "COLLECTION",
-    "fields": [ {"fieldPath":"userId","order":"ASCENDING"},
-                {"fieldPath":"appliedAt","order":"DESCENDING"} ] }
-  ```
-  and deploy. Verify the remote project already has it.
-
-### 2.4 🟡 MEDIUM — Application `status` is inconsistent between the two write paths
-- **File**: `functions/index.js` (`logPlacementApplication`).
-- **Code**: global `applications/{appId}` is written `status: "applied"`; the mirror `placements/{placementId}/applications/{uid}` is written `status: "pending"`. `applyForPlacementDirect` writes `"applied"` to both; the `Application` model defaults to `"applied"`.
-- **Problem**: the same application reads `pending` through one path and `applied` through the other. Any future teacher pipeline (or an admin tool reading the subcollection) will disagree with the student's "Applied" state.
-- **Fix**: write `status: "applied"` in both places in the callable (or clearly define "pending" as a deliberate pre-approval state and mirror it everywhere).
-
-### 2.5 🟡 MEDIUM — Cloud Function accepts a client-supplied `resumeStoragePath` without ownership validation
-- **File**: `functions/index.js` `logPlacementApplication`.
-- **Problem**: `resumeStoragePath` comes from `request.data` and is stored as-is. A malicious student can pass **another student's** storage path (`resumes/otherUid/latest.pdf`) into their own application record. Impact is limited (metadata only; reads are still rule-gated), but the record would misattribute a resume.
-- **Fix**: server-side check — `if (!resumeStoragePath?.startsWith(\`resumes/${uid}/\`)) resumeStoragePath = null;` (and validate `atsScoreAtApplication` is an int 0–100).
-
-### 2.6 🟡 MEDIUM — F10 (inverted-date guard) was applied to Projects but **not** Experience
-- **File**: `lib/views/portfolio/experience_manager_screen.dart` `_formatDuration`.
-- **Problem**: Projects manager has `if (end.isBefore(start)) return startStr;` (F10), and so do the preview/read-only views (M9), but the Experience manager returns `'$startStr — ${DateFormat('MMM yyyy').format(end)}'` unconditionally. Legacy/inverted data renders "Dec 2024 — Aug 2024" in the Experience manager.
-- **Fix**: add the same guard to `experience_manager_screen.dart`.
-
-### 2.7 🟡 MEDIUM — Apply dialog can silently drop the resume snapshot
-- **File**: `lib/views/placements/placements_list_view.dart` `_ApplyDialogWidget.didChangeDependencies`.
-- **Problem**: it reads `context.read<PortfolioProvider>().portfolio` once (seed-once). If the dialog is opened before `PortfolioProvider.initWithUser` completes (AuthGuard initializes it in a post-frame callback), the portfolio is null → the dialog falls back to the text-paste field even though the student has an uploaded resume; the snapshot fields (`resumeVersion` etc.) are never attached.
-- **Also**: when `resume.hasResume` is true via `storagePath` only (legacy doc with no `downloadUrl`), `_resumeUrl = resume!.downloadUrl ?? ''` → `hasUploadedResume` is false → same silent fallback.
-- **Fix**: (a) await provider init or show a loading state in the dialog; (b) when `downloadUrl` is missing, resolve via `ResumeService.getResumeUrl`/`downloadUrlFromPath`.
-
-### 2.8 🟡 MEDIUM — `PlacementsProvider` connectivity subscription leaks and can notify after reset
-- **File**: `lib/providers/placements_provider.dart`.
-- **Problem**: `_startConnectivityMonitoring()` subscribes to `Connectivity.onConnectivityChanged` but the stream-subscription is never cancelled (`dispose()` is empty; `reset()` doesn't cancel it). After logout, a connectivity change calls `notifyListeners()` on a provider whose listeners may be gone, and the subscription leaks across logins (stacking listeners on re-init → duplicate `notifyListeners`).
-- **Fix**: keep the `StreamSubscription`, cancel it in `reset()`/`dispose()`, and guard the callback with `_isDisposed`.
-
-### 2.9 🔵 LOW — `applyForPlacementDirect` is dead code
-- `PlacementsService.applyForPlacementDirect` exists as a "fallback if Cloud Function unavailable" but **nothing calls it** — `PlacementsProvider.applyForPlacement` only uses the callable. Either wire an offline/secondary path or remove the dead method (matches the M8 dead-code cleanup goal).
-
-### 2.10 🔵 LOW — Stale doc comments reference `resume.pdf`
-- `storage_service.dart` class-level doc and `resume_upload_screen.dart` doc say `resumes/{uid}/resume.pdf`; the actual path is `latest.pdf`. `storage.rules` header comment says `resumes/{uid}/resume.pdf` too. Cosmetic, but confusing for the next engineer (and the rules comment is now wrong).
-
-### 2.11 🔵 LOW — No length caps on career objective / languages / many portfolio fields
-- `careerObjective` is a free-form 3-line field with no `maxLength`; languages are free-form strings. A student can persist a huge objective; Firestore 1 MiB doc limit is the only backstop. Add `maxLength` (e.g. 500) to `PortfolioTextField` usages.
-
-### 2.12 🔵 LOW — Users cannot delete their own notifications (rules)
-- `firestore.rules` notifications: `allow read, update: if isOwner(userId); allow create: if isOwner(userId);` — **no `delete`**. Clients can mark-read/update but never delete a notification. Add `allow delete: if isOwner(userId);` if the UI offers deletion (or document the decision).
-
-### 2.13 🔵 LOW — Seed script has no portfolio/resume data
-- `scripts/seed_firestore/seed.js` (v8.3) predates the portfolio — demo students have empty portfolios, so Teacher "View Portfolio" and the new Resume Summary card show empty states for all demo data. Extend the seeder (phase 15) with portfolio sections + `resume` metadata + `languages` + `careerObjective`, tagged `isDemoData: true`.
-
-### 2.14 🔵 LOW — Linux not registered in `firebase.json` FlutterFire platforms
-- `linux/` exists in the repo but `firebase.json` → `flutter.platforms` lists only android/ios/macos/web/windows. `Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform)` will throw on Linux builds. Pre-existing; fix by adding the linux config block.
+### 🔵 LOW (edge / boundary)
+- `resumeTextFromStorage` rejects extracted text < 100 chars as "image-based" — a genuine short resume PDF gets a misleading message.
+- PDF text is silently truncated to 5000 chars before analysis (matches the manual-path ceiling; the user is not told).
+- `logPlacementApplication` copies the resume snapshot BEFORE the idempotency transaction — duplicate apply attempts re-copy / re-sign the snapshot needlessly.
+- `onResumeReviewCreatedRefreshMatches` creates a phantom `portfolio` / `portfolio.resume` map on users with **no portfolio** (manual-paste review; no upload). Harmless today (models treat no-storagePath resumes as empty) but pollutes documents and will suppress the MB13 "portfolio missing" diagnostic.
+- Server badge threshold (`profile_pro` earned at 100) differs from client badge logic (earned at ≥85).
+- `Application.fromFirestore` ignores the stored `studentId` alias (harmless; `userId` is canonical).
+- Scheduler `recomputeEngagementScores` iterates all completed users sequentially — will exceed the 540s function timeout at ~1000+ users (documented Known Limitation 2).
 
 ---
 
-## 3. Role-Based Access / Rules / Indexes Audit
+## 2. Root Cause (v8.5.2) — State of the Fix
 
-| Area | Verdict |
-|------|---------|
-| `firestore.rules` — `canWriteRole` (F1) | ✅ Role self-elevation closed; short-circuit order is safe for first-time create and role-less documents. |
-| `firestore.rules` — owner read/write + teacher read + alumni whole-doc read (M2) | ✅ Intent correct. M2 caveat (alumni read whole student doc) remains a documented trade-off of the nested-map design. |
-| `firestore.rules` — notifications create owner-only (F7) | ✅ Fixed. `delete` missing (see §2.12). |
-| `storage.rules` — owner write PDF/5 MB (C3/H2) | 🟠 **Owner delete broken** (§2.1). |
-| `storage.rules` — teacher/alumni read via Firestore role lookup | ✅ Correct `exists()` guard. |
-| `storage.rules` — `request.resource.size < 5 * 1024 * 1024` | ⚠️ Strictly *less than* 5 MB; a file of exactly 5 MB (5,242,880 bytes) is rejected while the client allows `<=`. Align the two (use `<= 5*1024*1024`). |
-| `firestore.indexes.json` — notifications ASC (F3) | ✅ Now present (both ASC and DESC). |
-| `firestore.indexes.json` — applications composite | 🟠 **Missing from repo** (§2.3). |
-| Cloud Function `logPlacementApplication` — auth from callable context | ✅ `request.auth?.uid` — cannot be spoofed. |
-| Cloud Function — snapshot path ownership | 🟡 Client-supplied path not validated (§2.5). |
-| `askAI` HTTP body `userId` | ⚠️ Pre-existing: no auth binding on HTTP `userId`; App Check + callable migration recommended (long-standing item). |
-| `onProfileUpdatedRefreshAI` trigger | ✅ Portfolio diffs excluded — portfolio saves correctly do not retrigger AI recompute. |
+Verified in source (`functions/index.js` → `onResumeReviewCreatedRefreshMatches`):
 
----
+```js
+const isStudent = userData.role === "student";
+// portfolio.resume merge — runs for ANY role (A2 fix)
+await admin.firestore().collection("users").doc(userId)
+    .set(portfolioResumeMerge, {merge: true});
+// student-only enrichment stays gated
+if (isStudent) { await refreshRecommendationsForStudent(...); }
+// activity log + engagement recompute — role-agnostic (unchanged)
+```
 
-## 4. Edge Cases & Boundary Handling
+The fix is **correct and minimal**: ATS merge role-agnostic, recommendations still student-gated, engagement/activity run for every author. The two UX gaps (A3 profile tile, A4 dashboard card) are present and correctly route Alumni to the role-agnostic `studentPortfolioRoute` / `resumeUploadRoute`.
 
-- **Zero-resume path**: upload screen, resume card, portfolio views, read-only view, apply dialog — all branch on `hasResume`; empty states are intentional (verified).
-- **Legacy documents**: `ResumeMetadata.fromMap` tolerates `uploadDate`/`lastUpdated`/`atsScore`; but a legacy storagePath-only resume loses the apply-dialog snapshot (§2.7).
-- **Date inversion**: guarded in preview, read-only, projects manager (M9/F10); **missing in experience manager (§2.6)**.
-- **Upload size boundary**: client accepts `<= 5 MB`, storage rule rejects `>= 5 MB` — boundary mismatch (§3).
-- **Version increment**: `(current.resume?.version ?? 0) + 1` — correct, starts at 1 on first upload, keeps incrementing on replace.
-- **Delete idempotency**: `StorageService.deleteResume` tolerates `object-not-found` client-side; rules must still permit the delete (§2.1).
-- **`_isDisposed`/`_lastUid` guards** in `PortfolioProvider.uploadResume/deleteResume/refresh` — present and correct; `PlacementsProvider` connectivity callback is the remaining unprotected surface (§2.8).
+> **v8.6 note**: this trigger's merge now carries a phantom-portfolio guard (the ATS merge only runs when `userData.portfolio.resume` already exists), and a `refreshRecommendations` callable was added as the single client entry point.
+
+**Deployment state**: `docs/todo.md` A8 = pending; `docs/v8_workspace_tracker.md` = "NOT deployed — pending code review + deploy". **Deploy is the immediate next step.**
 
 ---
 
-## 5. Prioritized Fix List
+## 3. Role-Based / Security Verification (v8.5.2 tasks §3, §11)
 
-| # | Sev | Area | Fix |
-|---|-----|------|-----|
-| 1 | 🔴 | Storage rules | Allow deletes: `request.resource == null ||` branch in the write rule (§2.1). Deploy with Storage enablement. |
-| 2 | 🟠 | Phase 8 | Copy resume to an immutable snapshot path in `logPlacementApplication` (`resumes/{uid}/snapshots/app_{pid}.pdf`) and store that path/URL (§2.2). |
-| 3 | 🟠 | Indexes | Add `applications userId ASC / appliedAt DESC` to `firestore.indexes.json`; verify remote; deploy (§2.3). |
-| 4 | 🟡 | Function | Validate `resumeStoragePath` ownership + `atsScoreAtApplication` range server-side (§2.5). |
-| 5 | 🟡 | Function | Unify application `status` (`"applied"` in both write paths) (§2.4). |
-| 6 | 🟡 | UI | Apply F10 guard to `experience_manager_screen.dart` `_formatDuration` (§2.6). |
-| 7 | 🟡 | UI | Apply-dialog: await portfolio init / resolve `downloadUrl` from `storagePath` before falling back to text (§2.7). |
-| 8 | 🟡 | Provider | Cancel the connectivity `StreamSubscription` on reset/dispose + `_isDisposed` guard (§2.8). |
-| 9 | 🔵 | Hygiene | Remove or wire `applyForPlacementDirect`; fix `resume.pdf` doc comments; size-boundary alignment; notifications delete rule; maxLength caps; seed portfolio data; linux in `firebase.json`. |
+| Requirement | Status / Evidence |
+|---|---|
+| Student flow unchanged (upload → review → ATS → history) | ✅ `ResumeUploadScreen`, `ResumeReviewView`, `_saveToHistory` all UID-scoped |
+| Alumni equivalent personal flow | ✅ A2/A3/A4 — same UID-scoped services; own `resumes/{uid}/latest.pdf` |
+| Reviewer strictly personal (`request.auth.uid === owner`) | ✅ `resumeTextFromStorage` exact-match `resumes/{uid}/latest.pdf`; cross-UID path → `invalid-argument` |
+| Alumni cannot upload/replace/delete/review a student's resume | ✅ `PortfolioReadOnlyView` renders View Resume only; no write actions; storage/firestore rules deny |
+| Alumni cannot modify student ATS / create review on student's behalf | ✅ rules + callable identity |
+| Review history isolated per UID (`users/{uid}/resumeReviews`) | ✅ `firestore.rules` owner-scoped + `ResumeHistoryService`; collectionGroup teacher read only |
+| Role immutability (F1) | ✅ `canWriteRole` guard in `firestore.rules` |
+| Alumni directory / teacher reads | ✅ as designed (M2 whole-doc caveat documented) |
+| Client never sends a UID for authorization | ✅ `ResumeReviewService.reviewResume` no longer transmits `userId`; callable derives from auth |
+
+**Unverified in this session** (read-only scope at audit time): `EditPortfolioScreen` and the six manager screens (`projects/certifications/experience/achievements` + `career_preferences`, `social_links` sub-screens). The v8.5.2 Alumni flow routes through `studentPortfolioRoute` → its **Edit action** → `editPortfolioRoute`. `StudentPortfolioScreen` itself is role-agnostic, but the edit screen and managers need explicit verification — **any role gate or student-only assumption inside them would break the Alumni portfolio edit path**. This is the one gap in audit coverage; verify before declaring Alumni editing complete.
+
+> **v8.6 RESOLVED (B10)**: `EditPortfolioScreen`, `ProjectsManagerScreen`, `CertificationsManagerScreen`, `ExperienceManagerScreen`, `AchievementsManagerScreen`, plus the in-file `career_preferences`/`social_links` sub-sections were all read. None branch on `role`; each writes through the shared `PortfolioProvider` → `PortfolioService.savePortfolio` (UID-scoped, role-agnostic). Alumni portfolio editing is confirmed safe.
 
 ---
 
-## 6. Improvements for the Project (roadmap)
+## 4. Data Flow — Alumni Review (v8.5.2 target path, traced)
 
-**Correctness / safety first**
-1. **Enable Firebase Storage & deploy rules** — the single deployment blocker (console → `firebase deploy --only storage`). Without it, uploads/delete are untestable in production and §2.1 cannot be proven either way.
-2. **Wire ATS score into portfolio metadata (true Phase 2 completion)** — extend `onResumeReviewCreatedRefreshMatches` (Cloud Function) to write `latestATSScore`, `reviewCount`, `lastReviewAt` into `users/{uid}/portfolio.resume` (merge). This instantly powers Latest ATS on the dashboard, portfolio, read-only view, and `atsScoreAtApplication` snapshots. Currently those UI hooks always show "—". This is the v8.5 bridge.
-3. **App Check** — closes the forged-`userId` AI-spend hole and raises the bar on all rule bypasses.
-4. **Materialized analytics** — replace the per-student N+1 reads (`getStudentResumeData`, `getEngagementAggregates`) with a Cloud Function-maintained `teacher_analytics/summary` doc; scale past the free tier.
-5. **Dead-code + lint cleanup** — remove archived legacy views (`lib/views/archived/notes_view_legacy.dart`, the source of ~33 of 69 info lints), migrate deprecated `withOpacity`/`value:` to `withValues`/`initialValue`, and finish M8 (dead services).
-6. **Documentation accuracy** — keep `docs/confirmation.md`, `docs/confirmation.md` issues, and the workspace tracker in lockstep with source (the H4/L4/L5 claim mismatch in v8.4.5-era docs was a real hazard the tracker has since corrected).
+1. Alumni taps "My Portfolio" (new tile, `profile_view.dart` A3) → `studentPortfolioRoute` → `StudentPortfolioScreen` (reads signed-in `PortfolioProvider`).
+2. Portfolio → Resume → Replace/Upload → `ResumeUploadScreen` → `PortfolioProvider.uploadResume` → `ResumeService.uploadResume` → `StorageService` `resumes/{uid}/latest.pdf` (5 MB PDF owner-write rule) → per-section Firestore diff.
+3. Resume → (Reviewer entry) `resumeReviewRoute` → `ResumeReviewView` → "Review Uploaded Resume" → `storagePath = portfolio.resume.storagePath` (fallback `resumes/${currentUserId}/latest.pdf`) → `ResumeReviewProvider.submitReview(storagePath:)`.
+4. `reviewResume` callable → `request.auth.uid` → exact path match → Admin SDK download ≤ 5 MB → `pdf-parse` → text (≥100 chars, ≤5000) → existing AI/ATS pipeline → `{review, usage}`.
+5. Client `_saveToHistory` → `users/{uid}/resumeReviews` → **trigger** → ATS merge into `portfolio.resume` (A2, any role) + activity + engagement.
+6. Dashboard `ResumeSummaryCard` (A4) shows Latest ATS / Review count / Last Review — from merged metadata; Alumni pull-to-refresh calls `PortfolioProvider.refresh()`.
 
-**Product next**
-7. **Resume version history UI (v8.5 path is pre-wired)** — `resumes/{uid}/history/v{n}.pdf` + `historyPath` already exist; add copy-to-history on replace and a picker.
-8. **Placement snapshot bytes (see §2.2)** — makes the apply record fully auditable and enables "resume at application time" reviews.
-9. **Demo data** — extend the seeder so every dashboard (Teacher portfolio drill-down, Resume card, ATS hooks) has realistic data after seeding.
-10. **Offline-first portfolio** — `PortfolioService.portfolioStream` exists but the app uses one-shot `get()`; switching the provider to a stream would make edits instant and conflict-safe once per-section diff saves are in.
+**Placement snapshots are untouched by this flow** — `resumes/{uid}/snapshots/app_{applicationId}.pdf` is immutable at apply time; replacing `latest.pdf` never modifies snapshots. ✅
+
+---
+
+## 5. Firestore Indexes — Missing-from-Repo Audit
+
+`firestore.indexes.json` declares: notes (uploadedBy/uploadedAt), recommendations (isActive/score/createdAt), notifications (type/createdAt ASC+DESC), opportunities (isActive/applicationDeadline; company/isActive/postedAt), mentorship_requests (status/createdAt), applications (userId/appliedAt), placements (isActive/postedAt; company/isActive/postedAt).
+
+**Queries in code WITHOUT a matching declared index:**
+
+| Query (file) | Required composite | Repo? |
+|---|---|---|
+| `chats.where(participantIds, arrayContains: userId).orderBy(lastMessageAt, desc)` — `chat_service.dart` (stream + once) | `chats: participantIds ASC / lastMessageAt DESC` | ❌ **MISSING** |
+| `opportunities.where(isActive, ==true).orderBy(postedAt, desc)` — `opportunity_service.dart` (getActive/getRecent/stream) | `opportunities: isActive ASC / postedAt DESC` | ❌ **MISSING** |
+| `opportunities.where(alumniId, ==X).orderBy(postedAt, desc)` — `opportunity_service.dart` (getAlumni/stream) | `opportunities: alumniId ASC / postedAt DESC` | ❌ **MISSING** |
+| `opportunities` search combos (jobType/location + isActive + orderBy) | several composites | ❌ **MISSING** |
+| `mentorship_requests.where(studentId, ==X).orderBy(createdAt, desc)` — `mentorship_service.dart` | `mentorship_requests: studentId ASC / createdAt DESC` | ❌ **MISSING** |
+| `mentorship_requests.where(alumniId, ==X).orderBy(createdAt, desc)` | `alumniId ASC / createdAt DESC` | ❌ **MISSING** |
+| `mentorship_requests.where(alumniId).where(status, ==).orderBy(createdAt, desc)` | `alumniId ASC / status ASC / createdAt DESC` | ❌ **MISSING** |
+| `mentorship_requests.where(studentId).where(alumniId).where(status, whereIn)` — `hasActiveRequest` | `studentId ASC / alumniId ASC / status ASC` | ❌ **MISSING** |
+| `recommendations` (users/{uid}/recommendations) where isActive + orderBy score desc + createdAt desc | `recommendations: isActive ASC / score DESC / createdAt DESC` | ✅ declared (collectionGroup COLLECTION scope serves the scoped query) |
+
+**Effect**: These work on the deployed project only because v8.4.2's non-interactive deploy preserved pre-existing remote-only composite indexes. A fresh project, CI environment, or index re-deploy that drops undeclared indexes will break Chat lists, Opportunities browse/filter, and Mentorship tabs with "index required" errors. Add all of the above to `firestore.indexes.json`.
+
+> **v8.6 RESOLVED (B6)**: all of the above composites are now declared in `firestore.indexes.json` (21 indexes total). `firebase deploy --only firestore:indexes` is included in B14.
+
+**Rules audit** — `storage.rules` and `firestore.rules` verified:
+- Storage write: owner + `request.resource == null` delete branch + `<= 5 MB` PDF — ✅ (C1/L3 fixed).
+- Storage read: owner + teacher/alumni via Firestore role lookup with `exists()` guard — ✅ (C3 fixed).
+- Firestore: F1 role immutability, F7 notifications owner-create, S5a owner-delete on notifications, resumeReviews owner + teacher collectionGroup read, applications collectionGroup teacher read — all ✅.
+- Notifications subcollection `allow delete: if isOwner(userId)` — ✅ present (S5a).
+- One gap worth noting: `match /{subcollection=**}` under `users/{userId}` grants the **owner** read/write to ALL current/future subcollections — acceptable given the F7 rules override for notifications and the resumeReviews-specific rule, but any future sensitive subcollection must remember the catch-all.
+
+---
+
+## 6. Cloud Functions — Detailed Findings
+
+| Function | Verdict |
+|---|---|
+| `askAI` | Callable + auth-only identity (S6b). Rate/spam fail-open, soft daily limit. Pre-existing acceptable. |
+| `logPlacementApplication` | Ownership validation on `resumeStoragePath` (`startsWith resumes/{uid}/`) — note it does **not** enforce `.pdf`/`latest.pdf` (harmless — copy fails non-fatally). Resume snapshot copy happens before the idempotency transaction (redundant on duplicates). `atsScoreAtApplication` coerced / range-checked. |
+| `reviewResume` | Auth ✅; `checkUsage` flag ✅; exact-path storage review ✅; **v8.6 FIXED — quota consumed atomically (`consumeResumeQuota`) + rolled back on AI failure (`rollbackResumeUsage`)**; PDF truncation surfaced via `warning: "truncated"` in the callable response. |
+| `resumeTextFromStorage` | Exact path = `resumes/{uid}/latest.pdf`; 5 MB metadata check; friendly `not-found` / `invalid-argument`; **v8.6 FIXED — short-text resumes now get an accurate "too short" message instead of the image-only mislabel**. |
+| `generateResumeAnalysis` | Owner-scoped review read; cached-result path correct; usage increments only on new analysis — ✅. |
+| `onProfileUpdatedRefreshAI` | **v8.6 FIXED (MED #6)** — `updatedAt` compared by value via `.toMillis()` (string fallback); `changed` is now only true for real diffs. |
+| `onResumeReviewCreatedRefreshMatches` | v8.5.2 A2 fix verified correct; **v8.6 FIXED — phantom-portfolio guard added (merge only when `userData.portfolio.resume` exists)**; engagement write contention (MED #9) remains a documented Known Limitation. |
+| `refreshRecommendations` (new callable) | **v8.6 ADDED (MED #7)** — single client entry point delegating to the server engine; auth-uid-scoped. |
+| `onOpportunityPostedNotifyStudents` | Correct server-side notification; unbounded student query — batches at 400, fine at current scale; **v8.6 FIXED — the redundant client-side twin in `OpportunityService` was removed (HIGH #1)**. |
+| `onMentorshipRequestCreated` / `ResponseNotifyStudent` / `onChatMessageCreated` | Deterministic doc IDs = idempotent; 30-day backfill guard on chat; ✅. |
+| Schedulers | `autoExpireOpportunities` index covered; `sendInactivityReminders` index covered; `recomputeEngagementScores` sequential iteration — timeout risk at scale (LOW, deferred). |
+| `refreshRecommendationsForStudent` | **v8.6 RESOLVED (MED #7)** — now the single writer; client engine removed. |
+
+---
+
+## 7. Routing Audit
+
+All 40+ routes declared in `lib/constants/routes.dart` are registered in `main.dart` (`routes:` or `onGenerateRoute`).
+✅ `resumeReviewDetailRoute`, `chatRoute`/`chatDetailRoute`, `completeMentorshipRoute` argument handling in `onGenerateRoute` — correct with fallbacks.
+✅ `studentPortfolioRoute`, `editPortfolioRoute`, six managers, `resumeUploadRoute`, `portfolioReadOnlyRoute` — registered.
+✅ `portfolioReadOnlyRoute` consumers pass a String uid (`mentorship_requests_view.dart` → `request.studentId`).
+⚠️ `profileRoute` and `profileViewRoute` both map to `ProfileView` (duplicate alias — harmless).
+No dangling route references found.
+
+---
+
+## 8. Edge & Boundary Cases
+
+- **Replace resume**: `version` increments; `latestATSScore` correctly nulled; **v8.6 FIXED (HIGH #4)** — `reviewCount`/`lastReviewAt` carried forward from the previous portfolio resume metadata.
+- **Delete resume**: `copyWithoutResume()` clears all resume metadata; idempotent; rules allow owner delete (S1a). ✅
+- **5 MB boundary**: `<= 5 MB` client and rule — aligned. ✅
+- **storagePath-only legacy resumes**: `ResumeService.getResumeUrl` resolves via Storage; apply dialog + preview + read-only all use it (S4c/N2). ✅
+- **Concurrent quota**: **v8.6 FIXED (MED #8)** — check+increment in a single transaction.
+- **0-byte / wrong-type files**: client + server + rules all reject. ✅
+- **Image-only PDFs**: friendly `invalid-argument`, no OCR (documented limitation). ✅
+- **Inverted dates**: guarded in projects, preview, read-only (F10/M9) — the experience manager includes the guard too. ✅
+- **Empty portfolio feed**: `PortfolioProvider` stale-stream guards (v8.4.4 / v8.4.8) verified intact in `_listenToPortfolio` + `refresh`. ✅
+- **Teacher on portfolio**: no tile (M5); provider initialized but unused. ✅
+
+---
+
+## 9. Validation Status (as recorded; not re-run in this session)
+
+- `flutter analyze` → recorded 0 errors / 0 warnings (68 pre-existing info lints).
+- `flutter test` → recorded **83/83** (71 existing + 12 `alumni_resume_review_test.dart`).
+- `node --check functions/index.js` → recorded pass.
+
+> **v8.6 B12 re-validation**: see `docs/todo.md` B12 for the freshly run results (`node --check` re-run after all v8.6 function edits; `flutter analyze` / `flutter test` re-run).
+
+- Deployment → **NOT deployed** (v8.5.2 trigger change + v8.6 functions/indexes pending).
+
+---
+
+## 10. Prioritized Fix List (next version / Act Mode)
+
+| # | Sev | Item |
+|---|-----|------|
+| 1 | 🔴 | Deploy the A2 trigger: `firebase deploy --only functions --non-interactive` (fixes Alumni ATS in production). |
+| 2 | 🟠 | Remove the redundant client-side cross-user notification batch in `OpportunityService.createOpportunity` (Bug 5 pattern — v8.4.3 missed it). |
+| 3 | 🟠 | Fix `ResumeReviewProvider`: retain + cancel the connectivity `StreamSubscription` in `reset()`/`dispose()` with a `_isDisposed` guard (apply the M5 fix). |
+| 4 | 🟠 | Quota integrity in `reviewResume`: roll back `trackResumeUsage` on AI failure (or increment after success). |
+| 5 | 🟠 | Preserve `reviewCount`/`lastReviewAt` across resume replacement (`ResumeService.uploadResume`: carry forward from `previousPortfolio.resume`). |
+| 6 | 🟠 | Add the missing composite indexes to `firestore.indexes.json` (§5 table) and deploy `firestore:indexes`. |
+| 7 | 🟡 | Fix `onProfileUpdatedRefreshAI` `updatedAt` comparison to a value comparison (`toMillis()`/`isEqual`). |
+| 8 | 🟡 | Reconcile the two recommendation engines (server vs client) or gate one to avoid clobbering. |
+| 9 | 🟡 | Verify `EditPortfolioScreen` + six manager screens for hidden role gates (Alumni edit path). |
+| 10 | 🟡 | Make the quota check+increment atomic in `reviewResume`. |
+| 11 | 🔵 | Phantom-portfolio creation on no-portfolio reviews; short-PDF message; silent PDF truncation notice; badge threshold alignment; snapshot-copy-before-idempotency; ProfileView logout provider-reset consistency. |
+
+> **v8.6 disposition**: items 2–8, 10, and 11 (phantom-portfolio guard, short-PDF message, truncation warning, badge ≥85, ProfileView logout reset) — **FIXED**. Item 9 — **VERIFIED clean**. Item 1 — code verified, deployment carried into B14. See `docs/issues.md` v8.6 section for the full log.
+
+---
+
+## 11. Improvements for the Project (roadmap)
+
+**Correctness / stability first**
+1. **Enable App Check** (long-standing): install `firebase_app_check`, configure Play Integrity + DeviceCheck, opt the rules in — closes the remaining forged-request surface and removes the AppCheck warning on every login.
+2. **Materialize teacher analytics** — replace the per-student N+1 loops (`getStudentResumeData`, `getEngagementAggregates`, `getDepartmentAnalytics`) with a Cloud Function-maintained `teacher_analytics/summary` doc; scale past the free tier.
+3. **Unify the two recommendation engines** — keep the server-side `refreshRecommendationsForStudent` as canonical and stop the client from recomputing (or vice-versa), then write a contract test asserting a single writer. *(v8.6 delivered the single-writer contract; a contract test can be added in a later pass.)*
+4. **Scheduled recompute** — shard by batches / `Promise.all` with concurrency caps, or trigger-per-user on write instead of a daily full scan.
+5. **Move notifications fully server-side** — audit every remaining client-side cross-user write (like finding #2) and delete the dead ones.
+6. **Index hygiene** — declare ALL composite indexes in the repo; add a CI check (`firestore.indexes.json` vs a query inventory) to prevent drift. *(v8.6 declared all 21; CI check is a follow-up.)*
+
+**Product**
+7. **Resume version history UI** — `resumes/{uid}/history/v{n}.pdf` + `historyPath` are pre-wired; copy-to-history on replace + a picker delivers the placement-snapshot "resume at apply time" for real.
+8. **Clean up archived legacy views** — `lib/views/archived/` is the source of most of the 68 info lints; deleting it + migrating `withOpacity`/`value:` to `withValues`/`initialValue` gets to 0 clean.
+9. **Add the missing contract tests** — EditPortfolio/manager role-agnosticism, opportunity-notification removal, quota-rollback path, write-amplification regression for the trigger.
+10. **Seeder parity** — extend `seed.js` so Teacher portfolio drill-down + Alumni dashboard resume card have realistic data (`isDemoData: true`).
+
+---
+
+## 12. Files Inventory (most significant, this audit)
+
+**v8.5.2 changed files (verified correct):** `functions/index.js` (A2), `lib/views/profile/profile_view.dart` (A3), `lib/views/dashboards/alumni_dashboard_view.dart` (A4), `test/alumni_resume_review_test.dart` (A5), `pubspec.yaml` (8.5.2+88), `docs/todo.md` / `docs/issues.md` / `docs/v8_workspace_tracker.md`.
+
+**Bug sites identified (files to change next):** `lib/services/firestore/opportunity_service.dart` (#2), `lib/providers/resume_review_provider.dart` (#3), `functions/index.js` (#4 quota, #6 trigger, #8 race, #9 contention), `lib/services/firestore/resume_service.dart` (#5), `firestore.indexes.json` (#6), `lib/services/firestore/recommendation_service.dart` + `functions/index.js` (#7).
+
+**v8.6 changed files:** `lib/services/firestore/opportunity_service.dart`, `lib/providers/resume_review_provider.dart`, `lib/services/firestore/resume_service.dart`, `lib/services/firestore/recommendation_service.dart`, `lib/views/profile/profile_view.dart`, `functions/index.js` (quota + callable + phantom guard + badge + short-PDF + timestamp), `firestore.indexes.json`, `docs/todo.md`, `docs/issues.md`, `docs/confirmation.md`, `docs/v8_workspace_tracker.md`, `pubspec.yaml`.
+
+**Key files NOT re-read this session (coverage gaps):** `lib/views/placements/placements_list_view.dart` apply dialog, `functions/ai/groqProvider.js`/`huggingfaceProvider.js`, `lib/providers/chat_provider.dart`, `lib/providers/ai_chat_provider.dart`. *(The EditPortfolio + manager coverage gap from this audit was closed in v8.6 B10.)*

@@ -1,7 +1,206 @@
 # CampusConnect — Workspace Tracker
 
-## Status: IMPLEMENTATION COMPLETE — deployment pending
-## Version: CampusConnect v8.5 — Resume Reviewer Integration & PDF Intelligence (2026-08-08)
+## Status: IMPLEMENTATION COMPLETE — ✅ DEPLOYED (2026-08-09, v8.7: `firestore.rules` for `alumni_group_messages`)
+## Version: CampusConnect v8.7.0+90 — Alumni Experience Simplification & Alumni Group Chat (2026-08-09)
+
+---
+
+## v8.7 — Alumni Experience Simplification & Alumni Group Chat
+
+> Source: `docs/Task.md` (v8.7 goal) · Executed via `docs/todo.md` (Phase 1–5) · Architecture report: `project_info__19.md` (2026-08-09) · Issues log: `docs/issues.md` (v8.7 section) · Confirmation: `docs/confirmation.md` (v8.7 Resolution Banner)
+
+### Objective
+
+Simplify the Alumni experience based on the actual intended Alumni role. **Portfolio is a Student career-development feature.** Alumni use a lightweight profile (already required at registration) + an optional text-based AI Resume Review + the Alumni Community Chat. Alumni are no longer required to upload a PDF resume, maintain a portfolio, or enter education/projects/certifications/skills/experience/social links/career preferences into CampusConnect. The full Student Portfolio subsystem is unchanged.
+
+### Why Alumni Portfolio access was removed
+
+v8.5.2 deliberately routed Alumni into the Student Portfolio editing workflow (an Alumni "My Portfolio" profile tile + a dashboard `ResumeSummaryCard` wired to `PortfolioProvider` with upload/replace actions). The Alumni role is meant to be **low-friction** — a lightweight profile, an optional ATS text review, and Alumni community participation — not portfolio maintenance. This version removes/hides every Alumni-facing portfolio surface. This is a **role-based UI/access change only**: the Student Portfolio subsystem (`users/{uid}/portfolio` nested map, `resumes/{uid}/latest.pdf`, all 10 portfolio screens, read-only views, placement snapshots) is fully intact.
+
+### What Shipped
+
+| # | Item | Deliverable |
+|---|------|-------------|
+| P1 | **Role separation (UI/access)** | Alumni dashboard: `ResumeSummaryCard` + `PortfolioProvider` refresh removed; replaced with an **Alumni Community** primary card + quick action (Task §10). Alumni profile: the v8.5.2 "My Portfolio" tile removed — only Edit Profile remains (Task §11). `ResumeReviewView`: the uploaded-resume card / upload CTA is hidden for Alumni (`if (!isAlumni)`) — text-input only (Task §2/§5). The 7 Student Portfolio editing routes are wrapped in `_guardStudentPortfolio` in `main.dart` — Alumni who manually access them get a safe blocked view ("Portfolios are for Students" + CTA to Alumni Community) (Task §5/§14). `portfolioReadOnlyRoute` stays open so Alumni can still VIEW a Student's portfolio (Task §13). |
+| P2 | **Alumni text-based Resume Reviewer** | Alumni paste resume text (≥100, ≤5000 chars — existing `ResumeReviewService` validation) → `ResumeReviewProvider.submitReview(resumeText:)` → the **SAME `reviewResume` callable** (Task §3). No second AI/ATS engine, no second resume storage. Quota (`resume_usage/{uid}`, atomic `consumeResumeQuota`) and history (`users/{uid}/resumeReviews`) are UID-scoped and reused unchanged (Task §4/§18). Cloud Function analytics already tags `source: "pasted"` vs `"uploaded"` (Task §19) — no function change. Student uploaded-PDF reviews are untouched. |
+| P3 | **Alumni Group Chat** | New `alumni_group_messages/{messageId}` collection. `AlumniGroupChatService` — real-time `orderBy('createdAt')` stream (single-field order ⇒ **no composite index needed**, Task §16; client-side soft-delete filter avoids a `where('isDeleted')`+orderBy composite), `sendMessage` with `FieldValue.serverTimestamp()`, `deleteMessage` soft-delete. `AlumniGroupChatProvider` — ChatProvider lifecycle discipline: `initWithUser`/`reset`, `_isDisposed`, stream subscription cancelled on reset/dispose, `isSending`/`error` states. `AlumniGroupChatView` — Material 3 chat: sender name + initials avatar + timestamp, own messages right-aligned in primary color, date separators, empty/loading/error/sending states, **auto-scroll only when the message count grows**. `alumniGroupChatRoute` registered + `_guardAlumniGroupChat` (non-Alumni → denied view). |
+| P4 | **Registry / lifecycle** | `AlumniGroupChatProvider` registered in `MultiProvider`; initialized in AuthGuard post-frame; **reset at all 5 logout sites** (AuthGuard fallback, Alumni dashboard, Profile view, Student dashboard, Teacher dashboard) — no Firestore permission errors from live listeners on logout. |
+| P5 | **Security rules** | `firestore.rules` gained `alumni_group_messages`: read Alumni-only; create Alumni-only with `senderId == request.auth.uid`; update/delete own messages only (soft-delete). Students/Teachers/unauthenticated denied. Sender identity is authoritative from Firebase Auth — a client-supplied `senderId` never matches `request.auth.uid` and is rejected (Task §8). Existing rules not weakened; bottom catch-all deny retained. |
+| P6 | **Version + docs** | `pubspec.yaml` `8.6.0+89` → `8.7.0+90` (Task §25). `docs/todo.md`, `docs/issues.md`, `docs/confirmation.md`, `docs/v8_workspace_tracker.md` updated (Task §24). |
+
+### Architecture (final)
+
+**Student:** Dashboard → My Portfolio → Full Portfolio → Uploaded PDF Resume → Review Uploaded Resume (server extraction) → ATS → Review History → Placement Resume Snapshot. **Unchanged.**
+
+**Alumni:** Dashboard → Lightweight Profile → Text Resume Reviewer (paste → existing `reviewResume` pipeline) → ATS / Feedback → Review History → Alumni Community Chat (single shared group). **No PDF, no portfolio, no metadata entry required.**
+
+**Alumni → Student:** read-only portfolio access only (`portfolioReadOnlyRoute`) — no upload / replace / delete / review / ATS-write actions. Firestore + storage rules already enforce this (v8.5.2, unchanged).
+
+### Files Changed
+
+**Created:** `lib/models/alumni_group_message.dart`, `lib/services/firestore/alumni_group_chat_service.dart`, `lib/providers/alumni_group_chat_provider.dart`, `lib/views/chats/alumni_group_chat_view.dart`, `test/alumni_group_chat_test.dart` (17 tests), `test/alumni_resume_text_review_test.dart` (13 tests), `test/alumni_portfolio_access_test.dart` (8 tests)
+
+**Modified:** `lib/constants/routes.dart` (`alumniGroupChatRoute`), `lib/main.dart` (`AlumniGroupChatProvider` wiring + AuthGuard init + logout resets + `_guardStudentPortfolio`/`_guardAlumniGroupChat` + blocked/denied views), `lib/views/dashboards/alumni_dashboard_view.dart` (Alumni Community card; removed `ResumeSummaryCard`/portfolio refresh), `lib/views/profile/profile_view.dart` (removed Alumni "My Portfolio" tile), `lib/views/resume_review_view.dart` (Alumni text-only reviewer), `firestore.rules` (`alumni_group_messages`), `pubspec.yaml` (`8.7.0+90`)
+
+**Unchanged by design:** `firestore.indexes.json` (no new index), all Student portfolio screens, `ResumeReviewProvider`/`ResumeReviewService` (quota + history reused as-is). `functions/index.js` was untouched in the v8.7 core pass (no AI/ATS/quota/history changes); the only function change is the v8.7.1 role-aware badge rule (see the v8.7.1 section below).
+
+### Validation (Task §23)
+
+- `flutter analyze` → **0 errors / 0 warnings** (68 pre-existing info lints, none in v8.7 files)
+- `flutter test` → **124/124 passed** (83 pre-existing + 41 new v8.7/v8.7.1 tests: group-chat security/state contract, alumni text-review pipeline/quota/history contract, alumni portfolio access + read-only, role-aware badge title)
+- `node --check functions/index.js` → pass (functions unchanged in v8.7)
+- `dart format` → clean on all changed files
+
+### Deployment Status
+
+✅ **DEPLOYED 2026-08-09** — `firebase deploy --only firestore:rules --non-interactive` **SUCCESS** (`rules file firestore.rules compiled successfully`; `released rules firestore.rules to cloud.firestore`). The `alumni_group_messages` **Alumni-only** rules (read Alumni-only; create Alumni-only with `senderId == request.auth.uid`; update/delete own messages only) are **live in production**. Functions were deployed in the v8.7.1 badge-fix pass (15/15 updated). On-device manual matrix per `docs/Task.md` §22 remains: Student portfolio regression, Alumni text review, Alumni Community chat (send/receive/logout-login), Student/Teacher/anon chat denial, Alumni → Student read-only.
+
+---
+
+## v8.7.1 — Alumni Dashboard Badge Title Fix (2026-08-09)
+
+> Reported by the user during v8.7 review: the Alumni dashboard's Engagement card showed the Student-flavored badge **"Active Student"**.
+
+### Root cause
+
+Both badge engines hardcoded "Active Student": client `EngagementService._buildBadges` (`lib/services/firestore/engagement_service.dart`) and the server `recomputeEngagementSummary` (`functions/index.js` → `engagement_summary/summary`). Alumni share the same engagement pipeline, so every Alumni saw the Student-oriented title.
+
+### Fix
+
+Role-aware activity badge — Alumni now see **"Active Alumni"**; students keep "Active Student". Applied identically in BOTH writers so the badge never flickers between client/server recompute (same class as the v8.6 badge-threshold conflict):
+
+- `lib/services/firestore/engagement_service.dart` — `recomputeEngagement` passes `profile.role ?? UserRole.student` into `_buildBadges`, which computes the title/description from the role; new public static `EngagementService.activeBadgeTitle(UserRole)` is the single source of truth for the client.
+- `functions/index.js` — `recomputeEngagementSummary` computes `activeTitle`/`activeDescription` from `userData.role === "alumni"` before building the badge list.
+- Badge `id`/`type` (`active_student` / `activeStudent`) untouched — no schema change. Existing stored summaries self-heal on the next recompute (app init, dashboard refresh, or the daily `recomputeEngagementScores` scheduler).
+
+### Files
+
+`lib/services/firestore/engagement_service.dart`, `functions/index.js`, `test/alumni_badge_title_test.dart` (new, 3 tests).
+
+### Validation & Deployment
+
+- `flutter analyze` → **0 errors / 0 warnings** (68 pre-existing info lints)
+- `flutter test` → **124/124 passed** (121 + 3 new badge-title tests)
+- `node --check functions/index.js` → pass
+- `dart format` → clean
+- ✅ **DEPLOYED 2026-08-09** — `firebase deploy --only functions --non-interactive` **SUCCESS** (15/15 functions updated; server badge rule live in production)
+
+---
+
+## v8.6 — Final Audit & Architecture Stability Fixes
+
+> Source: `project_info__17.md` / `project_info__18.md` (2026-08-09 final audit) · Executed via `docs/todo.md` (B1–B14) · Issues log: `docs/issues.md` (v8.6 section) · Confirmation: `docs/confirmation.md` (v8.6 Resolution Banner)
+
+### Objective
+
+Resolve every actionable item on the audit's Prioritized Fix List (§10) — 1 critical deploy gap, 5 HIGH, 5 MEDIUM, and a curated set of LOW items — restoring single-writer / single-source-of-truth contracts and closing the audit's one coverage gap (EditPortfolio + manager screens).
+
+### What Shipped
+
+| # | Item | Fix |
+|---|------|-----|
+| B2 | **HIGH 1** — `OpportunityService` client-side cross-user notification batch | Removed entirely — server trigger `onOpportunityPostedNotifyStudents` is the only notifier (no more `PERMISSION_DENIED` noise, no 500-write batch cap risk) |
+| B3 | **HIGH 2** — `ResumeReviewProvider` connectivity subscription leak | M5 fix applied: retained `_connectivitySubscription`, `_isDisposed` guard, cancelled in `reset()`/`dispose()` |
+| B4 | **HIGH 3 + MED 8** — `reviewResume` quota consumed before AI call + non-atomic check | `consumeResumeQuota` (single transaction check+increment) + `rollbackResumeUsage` on AI failure; `getResumeUsage` kept for `checkUsage` only |
+| B5 | **HIGH 4** — resume replacement wiped `reviewCount`/`lastReviewAt` | `ResumeService.uploadResume` carries both forward from the previous portfolio resume metadata |
+| B6 | **HIGH 5** — missing composite indexes | All 21 composites declared in `firestore.indexes.json` (chats, opportunities ×5, mentorship_requests ×4 + existing 9) |
+| B7 | **MED 6** — `onProfileUpdatedRefreshAI` Timestamp identity comparison | Value comparison via `.toMillis()` (string fallback for legacy values) |
+| B8 | **MED 7** — two competing recommendation engines | Single-writer restored: new `refreshRecommendations` callable; client `RecommendationService.refreshRecommendations` delegates (no client-side writes); provider reads the Firestore stream |
+| B9 | **MED 10** — ProfileView logout reset fewer providers | `_handleProfileLogout` now resets the same provider set as the dashboard logout |
+| B10 | **MED gap #9** — EditPortfolio + manager screens unverified | All 5 screens + in-file career-preferences/social-links sub-sections read — **no role gates**; writes go through role-agnostic `PortfolioProvider`/`PortfolioService` |
+| B11 | **LOW** — short-PDF message, phantom-portfolio guard, badge threshold | `resumeTextFromStorage` distinguishes "too short" from image-only; ATS merge only when `portfolio.resume` exists; server `profile_pro` badge threshold aligned to ≥85; PDF truncation surfaced via callable `warning: "truncated"` |
+
+### Files Changed
+
+- `lib/services/firestore/opportunity_service.dart` — B2
+- `lib/providers/resume_review_provider.dart` — B3
+- `functions/index.js` — B4/B7/B8/B11 (`consumeResumeQuota`, `rollbackResumeUsage`, timestamp value-compare, `refreshRecommendations` callable, phantom-portfolio guard, short-PDF message, badge ≥85)
+- `lib/services/firestore/resume_service.dart` — B5
+- `firestore.indexes.json` — B6 (21 indexes)
+- `lib/services/firestore/recommendation_service.dart` — B8 (client delegates; removed the competing client scoring engine)
+- `lib/views/profile/profile_view.dart` — B9
+- `docs/todo.md`, `docs/issues.md`, `docs/confirmation.md`, `docs/v8_workspace_tracker.md`, `pubspec.yaml` — version `8.5.2+88` → `8.6.0+89`
+
+### Validation (freshly re-run in B12)
+
+- `flutter analyze` → **0 errors / 0 warnings** (68 pre-existing info lints, none in changed files)
+- `flutter test` → **83/83 passed**
+- `node --check functions/index.js` → pass
+- `dart format` → clean on all changed files
+
+### Deployment Status
+
+✅ **DEPLOYED 2026-08-09 (B14)** — `firebase deploy --only functions --non-interactive` **SUCCESS** (15/15 functions updated/created, incl. the new `refreshRecommendations` callable); `firebase deploy --only firestore:indexes --non-interactive` **SUCCESS** (21 indexes deployed; 1 pre-existing remote index + 2 field overrides preserved). This also closed the 🔴 v8.5.2 deploy gap (A2 trigger) — Alumni ATS sync is live in production. On-device manual matrix remains.
+
+---
+
+## v8.5.2 — Alumni Resume Reviewer & Portfolio Integration
+
+> Source: `docs/Task.md` (v8.5.2 goal) · Executed via `docs/todo.md` (A1–A8) · Audit: `project_info__16_v8.5.2_Alumni_Resume_Reviewer_Audit.md`
+
+### Objective
+
+Ensure Students AND Alumni can independently review their own uploaded resume (My Portfolio → Resume → Review Uploaded Resume → ATS → Review history), while Alumni viewing a student's portfolio remain strictly read-only. Integration + hardening only — no second pipeline, no second storage location, no duplicate ATS data, no UI redesign (Task §19).
+
+### Root Cause (A1 audit — documented before fixing)
+
+**Cloud Function trigger `onResumeReviewCreatedRefreshMatches` early-returned `if (userData.role !== "student")`** before merging `portfolio.resume.{reviewCount,lastReviewAt,updatedAt,latestATSScore}`. Alumni reviews therefore:
+
+1. landed in `users/{uid}/resumeReviews` ✅ (client `_saveToHistory` — role-agnostic)
+2. incremented `resume_usage/{uid}` ✅ (callable — role-agnostic)
+3. **never merged ATS → `users/{uid}/portfolio.resume`** ❌ → Alumni portfolio/dashboard showed `Latest ATS —` and 0 reviews.
+
+Also two UX gaps: `ProfileView._buildAlumniProfile` had no "My Portfolio" tile (student-only), and the Alumni dashboard had no `ResumeSummaryCard` surface.
+
+### Architecture Decision
+
+- **Single source of truth unchanged**: `users/{uid}/portfolio.resume` for resume metadata + ATS, for BOTH roles (Task §7).
+- **ATS merge is role-agnostic**: runs for any review author. Student-only enrichment (`refreshRecommendationsForStudent`) stays gated to `role === "student"`; activity log + engagement recompute run for every author (Alumni dashboard reads those).
+- **Reviewer stays strictly personal** (`request.auth.uid === owner`, exact `resumes/{uid}/latest.pdf`) — the server remains authoritative; an Alumni can never review a student's resume.
+- **Read-only student portfolio preserved**: `PortfolioReadOnlyView` (View Resume only) + firestore/storage rules (alumni read, never write).
+
+### Files Changed
+
+- `functions/index.js` — A2: relaxed the role gate in `onResumeReviewCreatedRefreshMatches` (ATS merge for any role; recommendations still student-gated)
+- `lib/views/profile/profile_view.dart` — A3: "My Portfolio" tile added to the Alumni profile → `studentPortfolioRoute`
+- `lib/views/dashboards/alumni_dashboard_view.dart` — A4: `ResumeSummaryCard` added (Open Portfolio / Upload-Replace routed to shared `studentPortfolioRoute`/`resumeUploadRoute`); portfolio refresh added to pull-to-refresh
+- `test/alumni_resume_review_test.dart` — A5: NEW, 12 contract tests (ATS merge for alumni, student-only gating preserved, own storage path enforced, history isolated per UID, student regression)
+- `pubspec.yaml` — version `8.5.0+86` → `8.5.2+88`
+- `docs/todo.md`, `docs/issues.md`, `docs/v8_workspace_tracker.md`
+
+### Student Behavior
+
+Unchanged: My Portfolio → Resume → Review Uploaded Resume → PDF analyzed → ATS → Review history; dashboard `ResumeSummaryCard`; placement snapshot with `resumeVersion`/`resumeStoragePath`/`atsScoreAtApplication`; `onResumeReviewCreatedRefreshMatches` still refreshes their recommendations/engagement.
+
+### Alumni Behavior
+
+Equivalent personal flow (Task §3): Dashboard `ResumeSummaryCard` (Upload / Open / Review / ATS) → Portfolio → Resume → Review Uploaded Resume → PDF analyzed → ATS persisted into `users/{uid}/portfolio.resume` → Review history under `users/{uid}/resumeReviews` (own-UID only). Manual-paste fallback preserved (Task §6). No Alumni-only storage system — reuses `resumes/{uid}/latest.pdf`.
+
+### Read-Only Student Portfolio Behavior (Alumni → Student)
+
+Strictly read-only: open portfolio, view resume (View Resume), see allowed ATS/skills/projects/etc. NO upload / replace / delete / review / ATS-write actions (Task §3/§11). `reviewResume` rejects `resumes/OTHER_USER/latest.pdf` server-side even if a malicious client supplies the path.
+
+### Security
+
+- Personal reviewer: `request.auth.uid == current user's UID`
+- Storage: owner-only writes `resumes/{uid}/latest.pdf`; teachers/alumni read via Firestore role lookup
+- Reviewer: exact-match `resumes/{uid}/latest.pdf` (cross-UID rejected)
+- Review history: `users/{uid}/resumeReviews` owner-scoped (firestore.rules + ResumeHistoryService)
+- Alumni cannot modify a student's portfolio (read-only)
+
+### Validation
+
+- `flutter analyze` → **0 errors / 0 warnings** (68 pre-existing info lints, none in changed files)
+- `flutter test` → **83/83 passed** (71 existing + 12 new alumni tests)
+- `node --check functions/index.js` → pass
+
+### Deployment Status
+
+✅ **DEPLOYED 2026-08-09** (v8.6 B14) — `firebase deploy --only functions --non-interactive` **SUCCESS**. The A2 trigger (ATS merge for any role) is live in production; the v8.6 deploy also shipped the new `refreshRecommendations` callable and quota/rollback helpers in the same codebase.
+
+### Remaining Manual Tests (device)
+
+Planned: Alumni upload → review PDF → ATS appears in Alumni portfolio + dashboard → review history → replace resume → review again; Alumni → Student portfolio read-only (no upload/replace/delete/review); cross-UID review attempt rejected; Student regression (upload/review/ATS/dashboard/placement snapshot).
 
 ---
 

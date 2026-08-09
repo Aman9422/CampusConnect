@@ -1,51 +1,79 @@
-# CampusConnect — Task Tracker
+# CampusConnect v8.7 — Alumni Experience Simplification & Alumni Group Chat
 
-> Current cycle: **v8.5 — Resume Reviewer Integration & PDF Intelligence** (docs/Task.md)
-> Status: **R1–R9 COMPLETE** · R10 in flight (docs/, version bump, deploy, manual pass)
+> Portfolio is a Student career-development feature. Alumni use a lightweight profile + optional text-based Resume Review + Alumni Community Chat.
 
----
+## Task Status
 
-## v8.5 — Resume Reviewer Integration & PDF Intelligence
+- [x] **Phase 0: Audit & Planning**
+  - [x] Inspect routing, providers, services, Firestore schema/rules, Cloud Functions, and user role model
+  - [x] Document current v8.6 architecture and decide integration points (see `project_info__19.md`)
 
-> Goal: make `resumes/{uid}/latest.pdf` the actual source for the existing Resume Reviewer.
-> Primary success flow: Upload → Review Uploaded PDF → ATS/AI review → Portfolio updates → Dashboard updates → Apply to placement with immutable snapshot.
+- [x] **Phase 1: Role Separation (UI/access)**
+  - [x] Hide/remove Portfolio navigation & workflow from all Alumni surfaces (Dashboard, Profile, nav, quick actions, resume cards)
+  - [x] Guard portfolio routes for Alumni (safe redirect / blocked message)
+  - [x] Confirm Student Portfolio remains fully intact
 
-| # | Subtask | Status |
-|---|---------|--------|
-| R1 | Architecture/data-flow audit | ✅ DONE — `project_info__15_v8.5_R1_Resume_Review_Integration_Audit.md` |
-| R2 | PDF text extraction (server-side, functions/) | ✅ DONE — `pdf-parse@1.1.1` deep-require (`pdf-parse/lib/pdf-parse.js`), verified on Node against a real Chromium-generated PDF |
-| R3 | Callable integration: `reviewResume(storagePath)` + client path forwarding | ✅ DONE |
-| R4 | Resume Reviewer UI: Review Uploaded Resume / Replace Resume / review count | ✅ DONE |
-| R5 | ATS/portfolio synchronization verification | ✅ DONE — unchanged `{review, usage}` shape → `onResumeReviewCreatedRefreshMatches` keeps merging `portfolio.resume.{latestATSScore,reviewCount,lastReviewAt,updatedAt}` |
-| R6 | Review history verification | ✅ DONE — PDF reviews reuse the existing client-side `_saveToHistory` → `users/{uid}/resumeReviews` |
-| R7 | Resume replacement verification | ✅ DONE — server reads `resumes/{uid}/latest.pdf` at review time; history + placement snapshots untouched |
-| R8 | Error handling (new codes + friendly messages) | ✅ DONE — `not-found` / `invalid-argument` mapped in `ResumeReviewService`; loading flags reset in `finally` |
-| R9 | Security tests (storage-path validation) + existing suite | ✅ DONE — `test/resume_review_storage_path_test.dart` (6 tests); `flutter analyze` 0 errors; `flutter test` 71/71 |
-| R10 | Validation/deployment/manual pass + docs (issues, tracker, version) | ⏳ IN PROGRESS — docs/version done below; deploy + manual matrix pending |
+- [x] **Phase 2: Alumni Text-Based Resume Reviewer**
+  - [x] Alumni Resume Review screen shows text-input only (hide uploaded-resume card / upload CTA for Alumni)
+  - [x] Wire Alumni text reviews into the existing Resume Review pipeline (no second AI/ATS engine)
+  - [x] Store Alumni review history under their own UID; reuse existing quota
+  - [x] Keep Student uploaded-PDF reviewer unchanged
 
----
+- [x] **Phase 3: Alumni Group Chat**
+  - [x] Create AlumniGroupChatService (Firestore `alumni_group_messages/{messageId}`)
+  - [x] Create AlumniGroupChatProvider (real-time stream, send, loading/error states)
+  - [x] Create AlumniGroupChatView (Material 3 chat UI: message list, timestamps, sender name, input bar, empty/loading/error states, auto-scroll)
+  - [x] Add route (`alumniGroupChatRoute`) and navigation entry point on Alumni Dashboard
+  - [x] Update Firestore rules (read/create Alumni-only, sender UID = request.auth.uid, update/delete own messages only)
+  - [x] Add Firestore index only if required for chat query — **not required** (single-field `orderBy('createdAt')`, no composite)
 
-## v8.5.1 — Resume Storage → Resume Reviewer (detailed checklist)
+- [x] **Phase 4: Alumni Dashboard / Profile updates**
+  - [x] Update Alumni Dashboard primary actions (Alumni Community, Resume Review, Profile)
+  - [x] Keep Alumni Profile lightweight; no portfolio requirements
 
-- [x] R1 — Trace complete Resume Review data flow (view → service → provider → callable → AI pipeline → ATS persistence → history → snapshots)
-- [x] R2 — Add server-side PDF text extractor (functions/) compatible with Node 20 / firebase-functions v5
-- [x] R2 — Graceful handling of empty / image-only / unextractable PDFs (friendly user message, no OCR, no content logging)
-- [x] R3 — `reviewResume` accepts `storagePath`; enforces `request.auth.uid === owner` and exact `resumes/{uid}/latest.pdf`
-- [x] R3 — Admin SDK downloads the PDF; extracted text flows through the EXISTING AI/ATS pipeline; returns the same `{review, usage}` shape
-- [x] R3 — Client: `ResumeReviewService.reviewResume(storagePath)`, provider passthrough
-- [x] R4 — Resume Reviewer UI uses the uploaded resume automatically (Review Uploaded Resume / Open / Replace) with manual-paste fallback
-- [x] R5 — Confirm `onResumeReviewCreatedRefreshMatches` keeps updating `portfolio.resume.{latestATSScore,reviewCount,lastReviewAt,updatedAt}` for PDF reviews
-- [x] R6 — Confirm PDF reviews land in `users/{uid}/resumeReviews` (existing history)
-- [x] R7 — Confirm resume replacement (A→B) updates current resume/ATS, preserves history + placement snapshots
-- [x] R8 — Map `not-found` / image-only / invalid-path / oversized errors to friendly messages; loading flags reset in `finally`
-- [x] R9 — `test/resume_review_storage_path_test.dart` (valid + invalid cases per docs/Task.md) + existing suite green
-- [x] R10 — Validate: `flutter analyze` (0 errors), `flutter test` (71/71), `node --check functions/index.js` (pass)
-- [x] R10 — Docs: `docs/todo.md`, `docs/issues.md`, `docs/v8_workspace_tracker.md` updated; pubspec `8.4.1+85` → `8.5.0+86`
-- [x] R10 — Deploy `--only functions` **SUCCESS** (2026-08-08 — all 14 functions updated, incl. `reviewResume` + triggers)
-- [ ] R10 — Manual test matrix (device) — pending: upload → review PDF → ATS → dashboard → replace resume → placement snapshot → cross-UID security attempt → bad/image PDF
+- [ ] **Phase 5: Docs, Version & Validation**
+  - [x] Update pubspec version to v8.7 per convention (`8.6.0+89` → `8.7.0+90`)
+  - [x] Update `docs/todo.md`, `docs/issues.md`
+  - [x] Add tests for Alumni behavior (portfolio access, text review, group chat security/state)
+  - [x] Update `docs/v8_workspace_tracker.md`, `docs/confirmation.md`
+  - [x] Run `flutter analyze`, `flutter test`, `node --check functions/index.js`, `dart format` on changed files
+  - [ ] Manual testing matrix verification (Student, Alumni, Security) — requires on-device verification, pending
 
----
+## Detailed Rollout Log
 
-## Archive — Previous Cycles
+### Phase 1 — Role Separation (UI/access)
 
-*(Previous cycles tracked in `docs/v8_workspace_tracker.md` — v8.4 … v8.4.9 all complete + deployed.)*
+- **Alumni Dashboard** (`lib/views/dashboards/alumni_dashboard_view.dart`): removed the v8.5.2 `ResumeSummaryCard` + `PortfolioProvider` watch/refresh. Replaced with an **Alumni Community** primary card (→ `alumniGroupChatRoute`) and a "Community" quick action. Dashboard no longer implies Alumni must build a portfolio (Task §10).
+- **Alumni Profile** (`lib/views/profile/profile_view.dart`): removed the v8.5.2 (A3) Alumni "My Portfolio" tile. Only Edit Profile remains (Task §11). The Student/Teacher branch keeps its student-only "My Portfolio" tile unchanged.
+- **Resume Review UI** (`lib/views/resume_review_view.dart`): Alumni see only **Target Role (Optional)** + **Resume Text**; the uploaded-resume card (Review/Open/Replace + upload CTA) is gated `if (!isAlumni)` (Task §2/§5). Students keep the full uploaded-PDF integration.
+- **Portfolio route guards** (`lib/main.dart`): `_guardStudentPortfolio` wraps the 7 editing routes (`studentPortfolioRoute`, `editPortfolioRoute`, managers, `resumeUploadRoute`). Alumni get a safe blocked view ("Portfolios are for Students" + CTA to Alumni Community). `portfolioReadOnlyRoute` remains open for read-only Alumni → Student viewing (Task §13).
+
+### Phase 2 — Alumni Text Resume Reviewer
+
+- Alumni paste resume text (≥100, ≤5000 chars — existing `ResumeReviewService` validation) → `submitReview(resumeText:)` → the SAME `reviewResume` callable (Task §3). **No second AI/ATS engine, no second storage system.**
+- Quota (`resume_usage/{uid}`, atomic `consumeResumeQuota`) and history (`users/{uid}/resumeReviews`) are UID-scoped and reused unchanged (Task §4/§18).
+- Cloud Function analytics already tags text reviews `source: "pasted"` vs uploaded `"uploaded"` (Task §19) — no function change needed.
+
+### Phase 3 — Alumni Group Chat
+
+- `lib/models/alumni_group_message.dart` — message model (`senderId`, `senderName`, `senderPhotoUrl?`, `message`, `createdAt`, `editedAt?`, `isDeleted?`).
+- `lib/services/firestore/alumni_group_chat_service.dart` — real-time stream `orderBy('createdAt')` (client-side soft-delete filter avoids a composite index — Task §16), `sendMessage` with `FieldValue.serverTimestamp()`, `deleteMessage`.
+- `lib/providers/alumni_group_chat_provider.dart` — ChatProvider lifecycle discipline: `initWithUser` / `reset` / `_isDisposed` guards, stream subscription cancelled on reset/dispose, `isSending`/`error`/`clearError`.
+- `lib/views/chats/alumni_group_chat_view.dart` — Material 3 chat: sender name + timestamp, own-message bubbles right-aligned, date separators, empty/loading/error/sending states, **auto-scroll only when the message count grows** (not on keystrokes).
+- `lib/constants/routes.dart` — `alumniGroupChatRoute`.
+- `lib/main.dart` — provider registered in `MultiProvider`, initialized in AuthGuard post-frame, **reset at all 5 logout sites** (AuthGuard fallback, Alumni dashboard, Profile view, Student dashboard, Teacher dashboard), route wired with `_guardAlumniGroupChat` (non-Alumni → denied view).
+- `firestore.rules` — `alumni_group_messages` block: read Alumni-only; create Alumni-only with `senderId == request.auth.uid`; update/delete own messages only. Students/Teachers/unauthenticated denied (Task §8).
+- No Firestore index added — the single-field `orderBy('createdAt')` query is served by the automatic single-field index (Task §16).
+
+### Phase 4 — Alumni Dashboard / Profile
+
+- Dashboard primary actions: **Alumni Community**, **Resume Review**, Mentorship, Directory (quick actions) + Alumni Community card at the top.
+- Profile stays lightweight — no Portfolio editing requirements (Task §11).
+
+### Phase 5 — Docs, Version & Validation
+
+- `pubspec.yaml`: `8.6.0+89` → `8.7.0+90`.
+- `docs/issues.md`: v8.7 section added (role separation, text reviewer, group chat, security, deployment status).
+- Tests added: `test/alumni_group_chat_test.dart` (17), `test/alumni_resume_text_review_test.dart` (13), `test/alumni_portfolio_access_test.dart` (8).
+- Validation: `flutter analyze` **0 errors / 0 warnings** (68 pre-existing info lints); `flutter test` **121/121 passed** (83 pre-existing + 38 new); `node --check functions/index.js` pass; `dart format` clean on all changed files.
+- Pending: manual matrix (on-device) + `firebase deploy --only firestore:rules` to release the `alumni_group_messages` rules.

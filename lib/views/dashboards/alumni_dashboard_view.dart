@@ -3,6 +3,7 @@ import 'package:campusconnect/models/recommendation.dart';
 import 'package:campusconnect/models/student_profile.dart';
 import 'package:campusconnect/providers/activity_feed_provider.dart';
 import 'package:campusconnect/providers/ai_chat_provider.dart';
+import 'package:campusconnect/providers/alumni_group_chat_provider.dart'; // v8.7
 import 'package:campusconnect/providers/ai_usage_provider.dart';
 import 'package:campusconnect/providers/alumni_directory_provider.dart';
 import 'package:campusconnect/providers/chat_provider.dart';
@@ -24,7 +25,8 @@ import 'package:campusconnect/views/widgets/notification_badge.dart';
 import 'package:campusconnect/views/mentorship/mentorship_requests_view.dart';
 import 'package:campusconnect/views/opportunities/opportunities_view.dart';
 import 'package:campusconnect/views/chat/ai_chat_view.dart';
-import 'package:campusconnect/views/profile/profile_view.dart' as extracted_profile;
+import 'package:campusconnect/views/profile/profile_view.dart'
+    as extracted_profile;
 import 'package:campusconnect/views/shared/main_navigation_view.dart';
 import 'package:campusconnect/views/widgets/initials_avatar.dart';
 import 'package:flutter/material.dart';
@@ -107,12 +109,16 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
     final recommendation = context.watch<RecommendationProvider>();
 
     return Scaffold(
-      backgroundColor: isDark ? AppTheme.darkBackground : const Color(0xFFF8FAFC),
+      backgroundColor: isDark
+          ? AppTheme.darkBackground
+          : const Color(0xFFF8FAFC),
       appBar: _buildAppBar(context, isDark),
       body: RefreshIndicator(
         onRefresh: () async {
-          await context.read<EngagementProvider>().refresh();
-          await context.read<ActivityFeedProvider>().refresh();
+          await Future.wait([
+            context.read<EngagementProvider>().refresh(),
+            context.read<ActivityFeedProvider>().refresh(),
+          ]);
         },
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -124,8 +130,21 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
               _buildWelcomeRow(context, profile, engagement, isDark),
               const SizedBox(height: AppTheme.space20),
 
+              // v8.7: Alumni Community card — the primary Alumni social
+              // surface. Alumni do NOT build a Student-style portfolio;
+              // instead they connect with fellow Alumni in the shared group
+              // chat (Task §6/§10).
+              _buildAlumniCommunityCard(context, isDark),
+              const SizedBox(height: AppTheme.space24),
+
               // 2. Key Metrics Grid (compact 2×2)
-              _buildMetricsGrid(profile, mentorship, opportunities, engagement, isDark),
+              _buildMetricsGrid(
+                profile,
+                mentorship,
+                opportunities,
+                engagement,
+                isDark,
+              ),
               const SizedBox(height: AppTheme.space24),
 
               // 3. AI Smart Picks
@@ -203,6 +222,7 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
                   context.read<ChatProvider>().reset();
                   context.read<NotificationsProvider>().reset();
                   context.read<PortfolioProvider>().reset();
+                  context.read<AlumniGroupChatProvider>().reset(); // v8.7
                   try {
                     await AuthService.firebase().logOut();
                   } catch (_) {}
@@ -214,8 +234,15 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
             PopupMenuItem(
               value: 'profile',
               child: ListTile(
-                leading: Icon(Icons.person_outline, size: 20, color: isDark ? AppTheme.gray400 : null),
-                title: Text('Profile', style: TextStyle(color: isDark ? Colors.white : null)),
+                leading: Icon(
+                  Icons.person_outline,
+                  size: 20,
+                  color: isDark ? AppTheme.gray400 : null,
+                ),
+                title: Text(
+                  'Profile',
+                  style: TextStyle(color: isDark ? Colors.white : null),
+                ),
                 dense: true,
                 contentPadding: EdgeInsets.zero,
               ),
@@ -223,17 +250,21 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
             PopupMenuItem(
               value: 'settings',
               child: ListTile(
-                leading: Icon(Icons.settings_outlined, size: 20, color: isDark ? AppTheme.gray400 : null),
-                title: Text('Settings', style: TextStyle(color: isDark ? Colors.white : null)),
+                leading: Icon(
+                  Icons.settings_outlined,
+                  size: 20,
+                  color: isDark ? AppTheme.gray400 : null,
+                ),
+                title: Text(
+                  'Settings',
+                  style: TextStyle(color: isDark ? Colors.white : null),
+                ),
                 dense: true,
                 contentPadding: EdgeInsets.zero,
               ),
             ),
             const PopupMenuDivider(),
-            const PopupMenuItem(
-              value: 'logout',
-              child: Text('Log out'),
-            ),
+            const PopupMenuItem(value: 'logout', child: Text('Log out')),
           ],
         ),
       ],
@@ -251,7 +282,8 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
   ) {
     final name = profile?.personal.effectiveDisplayName ?? 'Alumni';
     final company = profile?.company;
-    final designation = profile?.designation ?? profile?.jobRole ?? 'Professional';
+    final designation =
+        profile?.designation ?? profile?.jobRole ?? 'Professional';
     final streak = engagement.dailyStreak;
 
     return Container(
@@ -305,11 +337,18 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.local_fire_department, size: 16, color: Colors.yellowAccent),
+                  Icon(
+                    Icons.local_fire_department,
+                    size: 16,
+                    color: Colors.yellowAccent,
+                  ),
                   const SizedBox(width: 4),
                   Text(
                     '$streak',
-                    style: AppTheme.label.copyWith(color: Colors.white, fontWeight: FontWeight.w700),
+                    style: AppTheme.label.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ],
               ),
@@ -330,7 +369,8 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
     bool isDark,
   ) {
     final totalMentees =
-        mentorship.acceptedMentorshipsCount + mentorship.completedMentorshipsCount;
+        mentorship.acceptedMentorshipsCount +
+        mentorship.completedMentorshipsCount;
     final totalOpps = opportunities.myOpportunities?.length ?? 0;
     final skillsCount = profile?.skills?.length ?? 0;
     final profileStrength = engagement.profileStrength;
@@ -348,26 +388,67 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
         const SizedBox(height: AppTheme.space12),
         Row(
           children: [
-            Expanded(child: _metricTile('$totalMentees', 'Mentees', Icons.people_outline, AppTheme.primaryBlue, isDark)),
+            Expanded(
+              child: _metricTile(
+                '$totalMentees',
+                'Mentees',
+                Icons.people_outline,
+                AppTheme.primaryBlue,
+                isDark,
+              ),
+            ),
             const SizedBox(width: AppTheme.space12),
-            Expanded(child: _metricTile('$totalOpps', 'Opportunities', Icons.work_outline, AppTheme.success, isDark)),
+            Expanded(
+              child: _metricTile(
+                '$totalOpps',
+                'Opportunities',
+                Icons.work_outline,
+                AppTheme.success,
+                isDark,
+              ),
+            ),
           ],
         ),
         const SizedBox(height: AppTheme.space12),
         Row(
           children: [
-            Expanded(child: _metricTile('$skillsCount', 'Skills', Icons.lightbulb_outline, AppTheme.warning, isDark)),
+            Expanded(
+              child: _metricTile(
+                '$skillsCount',
+                'Skills',
+                Icons.lightbulb_outline,
+                AppTheme.warning,
+                isDark,
+              ),
+            ),
             const SizedBox(width: AppTheme.space12),
-            Expanded(child: _metricTile('$profileStrength%', 'Profile', Icons.trending_up_rounded, AppTheme.secondaryIndigo, isDark)),
+            Expanded(
+              child: _metricTile(
+                '$profileStrength%',
+                'Profile',
+                Icons.trending_up_rounded,
+                AppTheme.secondaryIndigo,
+                isDark,
+              ),
+            ),
           ],
         ),
       ],
     );
   }
 
-  Widget _metricTile(String value, String label, IconData icon, Color color, bool isDark) {
+  Widget _metricTile(
+    String value,
+    String label,
+    IconData icon,
+    Color color,
+    bool isDark,
+  ) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: AppTheme.space16, horizontal: AppTheme.space16),
+      padding: const EdgeInsets.symmetric(
+        vertical: AppTheme.space16,
+        horizontal: AppTheme.space16,
+      ),
       decoration: BoxDecoration(
         color: isDark ? AppTheme.darkSurface : AppTheme.surface,
         borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
@@ -396,7 +477,9 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
               ),
               Text(
                 label,
-                style: AppTheme.caption.copyWith(color: isDark ? AppTheme.gray400 : AppTheme.gray500),
+                style: AppTheme.caption.copyWith(
+                  color: isDark ? AppTheme.gray400 : AppTheme.gray500,
+                ),
               ),
             ],
           ),
@@ -408,7 +491,11 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
   // ──────────────────────────────────────────────
   // 3. AI Smart Picks
   // ──────────────────────────────────────────────
-  Widget _buildAIPicksSection(BuildContext context, RecommendationProvider recommendation, bool isDark) {
+  Widget _buildAIPicksSection(
+    BuildContext context,
+    RecommendationProvider recommendation,
+    bool isDark,
+  ) {
     final picks = recommendation.recommendations.take(3).toList();
 
     return Column(
@@ -429,7 +516,13 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
         ),
         const SizedBox(height: AppTheme.space12),
         if (recommendation.isLoading && recommendation.recommendations.isEmpty)
-          const Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)))
+          const Center(
+            child: SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          )
         else if (picks.isEmpty)
           Container(
             width: double.infinity,
@@ -437,11 +530,15 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
             decoration: BoxDecoration(
               color: isDark ? AppTheme.darkSurface : AppTheme.surface,
               borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
-              border: Border.all(color: isDark ? AppTheme.gray700 : AppTheme.gray200),
+              border: Border.all(
+                color: isDark ? AppTheme.gray700 : AppTheme.gray200,
+              ),
             ),
             child: Text(
               'Complete your profile and stay active to unlock personalized recommendations.',
-              style: AppTheme.bodySmall.copyWith(color: isDark ? AppTheme.gray400 : AppTheme.gray600),
+              style: AppTheme.bodySmall.copyWith(
+                color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+              ),
             ),
           )
         else
@@ -449,22 +546,34 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
             decoration: BoxDecoration(
               color: isDark ? AppTheme.darkSurface : AppTheme.surface,
               borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
-              border: Border.all(color: isDark ? AppTheme.gray700 : AppTheme.gray200),
+              border: Border.all(
+                color: isDark ? AppTheme.gray700 : AppTheme.gray200,
+              ),
             ),
             child: Column(
-              children: picks.map((r) => _recommendationCard(context, r, isDark)).toList(),
+              children: picks
+                  .map((r) => _recommendationCard(context, r, isDark))
+                  .toList(),
             ),
           ),
       ],
     );
   }
 
-  Widget _recommendationCard(BuildContext context, Recommendation recommendation, bool isDark) {
-    final scoreColor = recommendation.score >= 75 ? AppTheme.success : AppTheme.primaryBlue;
+  Widget _recommendationCard(
+    BuildContext context,
+    Recommendation recommendation,
+    bool isDark,
+  ) {
+    final scoreColor = recommendation.score >= 75
+        ? AppTheme.success
+        : AppTheme.primaryBlue;
 
     return InkWell(
       onTap: () async {
-        await context.read<RecommendationProvider>().markInteracted(recommendation.id);
+        await context.read<RecommendationProvider>().markInteracted(
+          recommendation.id,
+        );
         if (!context.mounted) return;
         switch (recommendation.type) {
           case RecommendationType.mentor:
@@ -483,9 +592,16 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
         }
       },
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: AppTheme.space16, vertical: 14),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppTheme.space16,
+          vertical: 14,
+        ),
         decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: isDark ? AppTheme.gray700 : AppTheme.gray200)),
+          border: Border(
+            bottom: BorderSide(
+              color: isDark ? AppTheme.gray700 : AppTheme.gray200,
+            ),
+          ),
         ),
         child: Row(
           children: [
@@ -496,7 +612,11 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
                 color: scoreColor.withValues(alpha: isDark ? 0.2 : 0.1),
                 borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
               ),
-              child: Icon(_recommendationIcon(recommendation.type), color: scoreColor, size: 18),
+              child: Icon(
+                _recommendationIcon(recommendation.type),
+                color: scoreColor,
+                size: 18,
+              ),
             ),
             const SizedBox(width: AppTheme.space12),
             Expanded(
@@ -517,7 +637,9 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
                     recommendation.description,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: AppTheme.bodySmall.copyWith(color: isDark ? AppTheme.gray400 : AppTheme.gray600),
+                    style: AppTheme.bodySmall.copyWith(
+                      color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+                    ),
                   ),
                 ],
               ),
@@ -531,7 +653,10 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
               ),
               child: Text(
                 '${recommendation.score.round()}%',
-                style: AppTheme.caption.copyWith(color: scoreColor, fontWeight: FontWeight.w700),
+                style: AppTheme.caption.copyWith(
+                  color: scoreColor,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
           ],
@@ -555,14 +680,111 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
   }
 
   // ──────────────────────────────────────────────
-  // 4. Quick Actions (professional button row)
+  // 4. Alumni Community Card (v8.7)
+  // ──────────────────────────────────────────────
+  // The primary Alumni social surface. Alumni connect with each other in the
+  // shared Alumni Group Chat — no Student-style portfolio required (Task
+  // §6/§10). Access is Alumni-only (role-gated entry + Firestore rules).
+  Widget _buildAlumniCommunityCard(BuildContext context, bool isDark) {
+    return InkWell(
+      onTap: () => Navigator.pushNamed(context, alumniGroupChatRoute),
+      borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(AppTheme.space20),
+        decoration: BoxDecoration(
+          color: isDark ? AppTheme.darkSurface : AppTheme.surface,
+          borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
+          border: Border.all(
+            color: isDark ? AppTheme.gray700 : AppTheme.gray200,
+          ),
+          boxShadow: isDark
+              ? null
+              : [
+                  BoxShadow(
+                    color: AppTheme.primaryBlue.withValues(alpha: 0.08),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryBlue.withValues(
+                  alpha: isDark ? 0.25 : 0.1,
+                ),
+                borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+              ),
+              child: Icon(
+                Icons.forum_outlined,
+                color: AppTheme.primaryBlue,
+                size: 28,
+              ),
+            ),
+            const SizedBox(width: AppTheme.space16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Alumni Community',
+                    style: AppTheme.titleSmall.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? Colors.white : AppTheme.gray900,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Connect, share and network with fellow alumni',
+                    style: AppTheme.bodySmall.copyWith(
+                      color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right,
+              color: isDark ? AppTheme.gray500 : AppTheme.gray400,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ──────────────────────────────────────────────
+  // 5. Quick Actions (professional button row)
   // ──────────────────────────────────────────────
   Widget _buildQuickActions(BuildContext context, bool isDark) {
     final actions = [
-      _QuickAction('Create Job', Icons.add_circle_outline, AppTheme.primaryBlue, createOpportunityRoute),
-      _QuickAction('Resume Review', Icons.description_outlined, AppTheme.success, resumeReviewRoute),
-      _QuickAction('Mentorship', Icons.school_outlined, AppTheme.warning, mentorshipRequestsRoute),
-      _QuickAction('Directory', Icons.people_outline, AppTheme.secondaryIndigo, alumniDirectoryRoute),
+      _QuickAction(
+        'Community',
+        Icons.forum_outlined,
+        AppTheme.primaryBlue,
+        alumniGroupChatRoute,
+      ),
+      _QuickAction(
+        'Resume Review',
+        Icons.description_outlined,
+        AppTheme.success,
+        resumeReviewRoute,
+      ),
+      _QuickAction(
+        'Mentorship',
+        Icons.school_outlined,
+        AppTheme.warning,
+        mentorshipRequestsRoute,
+      ),
+      _QuickAction(
+        'Directory',
+        Icons.people_outline,
+        AppTheme.secondaryIndigo,
+        alumniDirectoryRoute,
+      ),
     ];
 
     return Column(
@@ -577,7 +799,9 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
         ),
         const SizedBox(height: AppTheme.space12),
         Row(
-          children: actions.map((a) => Expanded(child: _actionButton(context, a, isDark))).toList(),
+          children: actions
+              .map((a) => Expanded(child: _actionButton(context, a, isDark)))
+              .toList(),
         ),
       ],
     );
@@ -590,11 +814,16 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
         onTap: () => Navigator.pushNamed(context, action.route),
         borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: AppTheme.space8),
+          padding: const EdgeInsets.symmetric(
+            vertical: 14,
+            horizontal: AppTheme.space8,
+          ),
           decoration: BoxDecoration(
             color: isDark ? AppTheme.darkSurface : AppTheme.surface,
             borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
-            border: Border.all(color: isDark ? AppTheme.gray700 : AppTheme.gray200),
+            border: Border.all(
+              color: isDark ? AppTheme.gray700 : AppTheme.gray200,
+            ),
           ),
           child: Column(
             children: [
@@ -628,34 +857,42 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
 
     final pendingCount = mentorship.pendingRequestsCount;
     if (pendingCount > 0) {
-      activities.add(_ActivityItem(
-        '$pendingCount pending mentorship request${pendingCount > 1 ? 's' : ''}',
-        'Review mentorship requests from students',
-        Icons.school_outlined,
-        AppTheme.warning,
-      ));
+      activities.add(
+        _ActivityItem(
+          '$pendingCount pending mentorship request${pendingCount > 1 ? 's' : ''}',
+          'Review mentorship requests from students',
+          Icons.school_outlined,
+          AppTheme.warning,
+        ),
+      );
     }
     final acceptedCount = mentorship.acceptedMentorshipsCount;
     if (acceptedCount > 0) {
-      activities.add(_ActivityItem(
-        '$acceptedCount active mentorship${acceptedCount > 1 ? 's' : ''}',
-        'You are currently mentoring students',
-        Icons.handshake_rounded,
-        AppTheme.success,
-      ));
+      activities.add(
+        _ActivityItem(
+          '$acceptedCount active mentorship${acceptedCount > 1 ? 's' : ''}',
+          'You are currently mentoring students',
+          Icons.handshake_rounded,
+          AppTheme.success,
+        ),
+      );
     }
     final completedCount = mentorship.completedMentorshipsCount;
     if (completedCount > 0) {
-      activities.add(_ActivityItem(
-        '$completedCount completed mentorship${completedCount > 1 ? 's' : ''}',
-        'Mentorship journeys finished',
-        Icons.celebration_outlined,
-        AppTheme.primaryBlue,
-      ));
+      activities.add(
+        _ActivityItem(
+          '$completedCount completed mentorship${completedCount > 1 ? 's' : ''}',
+          'Mentorship journeys finished',
+          Icons.celebration_outlined,
+          AppTheme.primaryBlue,
+        ),
+      );
     }
 
     for (final a in activityFeed.allActivities.take(3)) {
-      activities.add(_ActivityItem(a.title, a.description, a.icon, a.iconColor));
+      activities.add(
+        _ActivityItem(a.title, a.description, a.icon, a.iconColor),
+      );
     }
 
     return Column(
@@ -674,14 +911,20 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
           decoration: BoxDecoration(
             color: isDark ? AppTheme.darkSurface : AppTheme.surface,
             borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
-            border: Border.all(color: isDark ? AppTheme.gray700 : AppTheme.gray200),
+            border: Border.all(
+              color: isDark ? AppTheme.gray700 : AppTheme.gray200,
+            ),
           ),
           child: activities.isEmpty
               ? const Padding(
                   padding: EdgeInsets.all(AppTheme.space24),
                   child: Center(child: Text('No recent activities')),
                 )
-              : Column(children: activities.map((a) => _activityItem(a, isDark)).toList()),
+              : Column(
+                  children: activities
+                      .map((a) => _activityItem(a, isDark))
+                      .toList(),
+                ),
         ),
       ],
     );
@@ -689,9 +932,17 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
 
   Widget _activityItem(_ActivityItem item, bool isDark) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: AppTheme.space16, vertical: AppTheme.space12),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppTheme.space16,
+        vertical: AppTheme.space12,
+      ),
       decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: isDark ? AppTheme.gray700 : AppTheme.gray200, width: 0.5)),
+        border: Border(
+          bottom: BorderSide(
+            color: isDark ? AppTheme.gray700 : AppTheme.gray200,
+            width: 0.5,
+          ),
+        ),
       ),
       child: Row(
         children: [
@@ -719,7 +970,9 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
                 ),
                 Text(
                   item.subtitle,
-                  style: AppTheme.caption.copyWith(color: isDark ? AppTheme.gray400 : AppTheme.gray500),
+                  style: AppTheme.caption.copyWith(
+                    color: isDark ? AppTheme.gray400 : AppTheme.gray500,
+                  ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -734,7 +987,11 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
   // ──────────────────────────────────────────────
   // 6. Engagement & Badges (compact card)
   // ──────────────────────────────────────────────
-  Widget _buildEngagementBadges(BuildContext context, EngagementProvider engagement, bool isDark) {
+  Widget _buildEngagementBadges(
+    BuildContext context,
+    EngagementProvider engagement,
+    bool isDark,
+  ) {
     final score = engagement.engagementScore;
     final strength = engagement.profileStrength;
     final streak = engagement.dailyStreak;
@@ -765,7 +1022,11 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.local_fire_department, size: 16, color: AppTheme.warning),
+                    Icon(
+                      Icons.local_fire_department,
+                      size: 16,
+                      color: AppTheme.warning,
+                    ),
                     const SizedBox(width: 4),
                     Text(
                       '$streak day${streak > 1 ? 's' : ''}',
@@ -785,7 +1046,12 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Engagement', style: AppTheme.caption.copyWith(color: isDark ? AppTheme.gray400 : AppTheme.gray500)),
+                    Text(
+                      'Engagement',
+                      style: AppTheme.caption.copyWith(
+                        color: isDark ? AppTheme.gray400 : AppTheme.gray500,
+                      ),
+                    ),
                     const SizedBox(height: 4),
                     ClipRRect(
                       borderRadius: BorderRadius.circular(99),
@@ -793,11 +1059,19 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
                         minHeight: 6,
                         value: score.clamp(0, 100) / 100,
                         color: AppTheme.success,
-                        backgroundColor: isDark ? AppTheme.gray700 : AppTheme.gray200,
+                        backgroundColor: isDark
+                            ? AppTheme.gray700
+                            : AppTheme.gray200,
                       ),
                     ),
                     const SizedBox(height: 2),
-                    Text('$score%', style: AppTheme.caption.copyWith(color: AppTheme.success, fontWeight: FontWeight.w700)),
+                    Text(
+                      '$score%',
+                      style: AppTheme.caption.copyWith(
+                        color: AppTheme.success,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -806,7 +1080,12 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Profile', style: AppTheme.caption.copyWith(color: isDark ? AppTheme.gray400 : AppTheme.gray500)),
+                    Text(
+                      'Profile',
+                      style: AppTheme.caption.copyWith(
+                        color: isDark ? AppTheme.gray400 : AppTheme.gray500,
+                      ),
+                    ),
                     const SizedBox(height: 4),
                     ClipRRect(
                       borderRadius: BorderRadius.circular(99),
@@ -814,11 +1093,19 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
                         minHeight: 6,
                         value: strength.clamp(0, 100) / 100,
                         color: AppTheme.primaryBlue,
-                        backgroundColor: isDark ? AppTheme.gray700 : AppTheme.gray200,
+                        backgroundColor: isDark
+                            ? AppTheme.gray700
+                            : AppTheme.gray200,
                       ),
                     ),
                     const SizedBox(height: 2),
-                    Text('$strength%', style: AppTheme.caption.copyWith(color: AppTheme.primaryBlue, fontWeight: FontWeight.w700)),
+                    Text(
+                      '$strength%',
+                      style: AppTheme.caption.copyWith(
+                        color: AppTheme.primaryBlue,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -830,18 +1117,32 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
               spacing: 8,
               runSpacing: 6,
               children: badges
-                  .map((badge) => Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: AppTheme.secondaryIndigo.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(AppTheme.radiusFull),
-                          border: Border.all(color: AppTheme.secondaryIndigo.withValues(alpha: 0.25)),
+                  .map(
+                    (badge) => Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppTheme.secondaryIndigo.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(
+                          AppTheme.radiusFull,
                         ),
-                        child: Text(
-                          badge.title,
-                          style: AppTheme.caption.copyWith(color: AppTheme.secondaryIndigo, fontWeight: FontWeight.w600),
+                        border: Border.all(
+                          color: AppTheme.secondaryIndigo.withValues(
+                            alpha: 0.25,
+                          ),
                         ),
-                      ))
+                      ),
+                      child: Text(
+                        badge.title,
+                        style: AppTheme.caption.copyWith(
+                          color: AppTheme.secondaryIndigo,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  )
                   .toList(),
             ),
           ],
@@ -866,8 +1167,13 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
               ),
               ElevatedButton(
                 onPressed: () => Navigator.of(context).pop(true),
-                style: ElevatedButton.styleFrom(backgroundColor: AppTheme.error),
-                child: const Text('Sign Out', style: TextStyle(color: Colors.white)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.error,
+                ),
+                child: const Text(
+                  'Sign Out',
+                  style: TextStyle(color: Colors.white),
+                ),
               ),
             ],
           ),

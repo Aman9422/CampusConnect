@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:campusconnect/models/resume_review.dart';
 import 'package:campusconnect/models/user_activity.dart';
@@ -22,6 +23,11 @@ class ResumeReviewProvider with ChangeNotifier {
   final ResumeHistoryService _historyService; // v6.8
   final EngagementService _engagementService;
   final Connectivity _connectivity = Connectivity();
+  // v8.6 (HIGH 2): keep the subscription so it can be cancelled on
+  // reset()/dispose() — prevents leaks + duplicate notifyListeners across
+  // logins and notify-after-dispose (the M5 fix v8.4.2 applied to
+  // PlacementsProvider but not here).
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
 
   String? userId;
 
@@ -62,6 +68,9 @@ class ResumeReviewProvider with ChangeNotifier {
   /// Whether provider has been initialized
   bool _isInitialized = false;
   bool get isInitialized => _isInitialized;
+
+  // v8.6 (HIGH 2): flag to stop operations/listeners after logout/dispose.
+  bool _isDisposed = false;
 
   // v6.8: History state
   List<ResumeReviewHistory> _history = [];
@@ -159,6 +168,8 @@ class ResumeReviewProvider with ChangeNotifier {
   Future<void> initWithUser(String newUserId) async {
     if (userId == newUserId && _isInitialized) return;
 
+    // v8.6 (HIGH 2): a fresh init revives the provider after reset().
+    _isDisposed = false;
     userId = newUserId;
     _startConnectivityMonitoring();
     await _loadUsage();
@@ -192,12 +203,25 @@ class ResumeReviewProvider with ChangeNotifier {
     _aiUsage = const AIAnalysisUsage();
     _aiProviderUsed = null;
 
+    // v8.6 (HIGH 2): mark disposed + cancel the connectivity subscription so
+    // no listener survives logout (prevents leaks + duplicate notifyListeners
+    // on the next login).
+    _isDisposed = true;
+    _cancelConnectivityMonitoring();
+
     notifyListeners();
   }
 
   /// Start monitoring network connectivity
+  /// v8.6 (HIGH 2): the subscription is retained so it can be cancelled on
+  /// reset()/dispose(); the callback guards with [_isDisposed] so it never
+  /// notifies listeners after logout/provider disposal (M5 pattern).
   void _startConnectivityMonitoring() {
-    _connectivity.onConnectivityChanged.listen((result) {
+    _connectivitySubscription ??= _connectivity.onConnectivityChanged.listen((
+      result,
+    ) {
+      if (_isDisposed) return; // v8.6 (HIGH 2): no notify after dispose
+
       final wasOnline = _isOnline;
       _isOnline = !result.contains(ConnectivityResult.none);
 
@@ -208,6 +232,13 @@ class ResumeReviewProvider with ChangeNotifier {
         notifyListeners();
       }
     });
+  }
+
+  /// v8.6 (HIGH 2): cancel the connectivity subscription and clear the
+  /// reference so it can be re-established on the next [initWithUser].
+  void _cancelConnectivityMonitoring() {
+    _connectivitySubscription?.cancel();
+    _connectivitySubscription = null;
   }
 
   /// Load current usage from backend
@@ -823,5 +854,14 @@ class ResumeReviewProvider with ChangeNotifier {
       aiGeneratedAt: DateTime.now(),
       aiProviderUsed: providerUsed,
     );
+  }
+
+  @override
+  void dispose() {
+    // v8.6 (HIGH 2): cancel the connectivity subscription to prevent leaks
+    // when the provider is disposed (e.g. app teardown) — M5 pattern.
+    _cancelConnectivityMonitoring();
+    _isDisposed = true;
+    super.dispose();
   }
 }

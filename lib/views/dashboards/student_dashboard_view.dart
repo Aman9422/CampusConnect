@@ -5,6 +5,7 @@ import 'package:campusconnect/models/placement_eligibility.dart';
 import 'package:campusconnect/models/recommendation.dart';
 import 'package:campusconnect/providers/activity_feed_provider.dart';
 import 'package:campusconnect/providers/ai_chat_provider.dart';
+import 'package:campusconnect/providers/alumni_group_chat_provider.dart'; // v8.7
 import 'package:campusconnect/providers/ai_usage_provider.dart';
 import 'package:campusconnect/providers/alumni_directory_provider.dart';
 import 'package:campusconnect/providers/chat_provider.dart';
@@ -164,6 +165,7 @@ class _StudentDashboardTab extends StatelessWidget {
                     context.read<AlumniDirectoryProvider>().reset();
                     context.read<TeacherAnalyticsProvider>().reset();
                     context.read<PortfolioProvider>().reset(); // v8.4
+                    context.read<AlumniGroupChatProvider>().reset(); // v8.7
                     try {
                       await AuthService.firebase().logOut();
                     } catch (_) {

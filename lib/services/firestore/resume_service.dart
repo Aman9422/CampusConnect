@@ -63,6 +63,12 @@ class ResumeService {
     );
 
     final current = previousPortfolio ?? PortfolioModel.empty();
+    // v8.6 (HIGH 4): preserve the user's review history counters across a
+    // resume replacement. The ATS score is (correctly) cleared — a new resume
+    // has not been scored yet — but `reviewCount` / `lastReviewAt` describe
+    // the user's REVIEW HISTORY (`users/{uid}/resumeReviews`), which survives
+    // the replace. Before this fix the fresh ResumeMetadata reset both to
+    // 0/null, so the dashboard/portfolio counters lied until the next review.
     final updated = current.copyWith(
       resume: ResumeMetadata(
         downloadUrl: result.downloadUrl,
@@ -74,6 +80,8 @@ class ResumeService {
         updatedAt: result.lastUpdated,
         version: (current.resume?.version ?? 0) + 1,
         latestATSScore: null,
+        reviewCount: current.resume?.reviewCount ?? 0,
+        lastReviewAt: current.resume?.lastReviewAt,
         parserVersion: null,
       ),
     );
@@ -143,10 +151,7 @@ class ResumeService {
   ///
   /// Returns null when no resume exists. Throws on storage failures so the
   /// caller can surface a meaningful error.
-  Future<Uint8List?> downloadResume(
-    String uid, {
-    String? storagePath,
-  }) async {
+  Future<Uint8List?> downloadResume(String uid, {String? storagePath}) async {
     final path = storagePath ?? _storageService.resumePath(uid);
     try {
       final data = await _storageService.downloadBytes(path);

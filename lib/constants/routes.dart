@@ -56,3 +56,6 @@ const experienceManagerRoute = '/portfolio/experience';
 const achievementsManagerRoute = '/portfolio/achievements';
 const resumeUploadRoute = '/portfolio/resume-upload';
 const portfolioReadOnlyRoute = '/portfolio/readonly';
+
+// v8.7: Alumni Group Chat route
+const alumniGroupChatRoute = '/alumni-group-chat';

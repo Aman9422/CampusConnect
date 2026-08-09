@@ -3,6 +3,7 @@ import 'package:campusconnect/models/mentorship_request.dart'; // v7.3
 import 'package:campusconnect/enums/user_role.dart';
 import 'package:campusconnect/firebase_options.dart';
 import 'package:campusconnect/providers/ai_usage_provider.dart';
+import 'package:campusconnect/providers/alumni_group_chat_provider.dart'; // v8.7
 import 'package:campusconnect/providers/layout_provider.dart';
 import 'package:campusconnect/providers/portfolio_provider.dart'; // v8.4
 import 'package:campusconnect/providers/notifications_provider.dart';
@@ -10,10 +11,10 @@ import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
 import 'package:campusconnect/providers/resume_review_provider.dart';
 import 'package:campusconnect/providers/role_provider.dart';
-import 'package:campusconnect/providers/theme_provider.dart';// v7.2: Multi-role ecosystem providers
+import 'package:campusconnect/providers/theme_provider.dart'; // v7.2: Multi-role ecosystem providers
 import 'package:campusconnect/providers/alumni_directory_provider.dart';
 import 'package:campusconnect/providers/mentorship_provider.dart';
-import 'package:campusconnect/providers/opportunity_provider.dart';// v7.3: Chat provider
+import 'package:campusconnect/providers/opportunity_provider.dart'; // v7.3: Chat provider
 import 'package:campusconnect/providers/chat_provider.dart';
 import 'package:campusconnect/providers/teacher_analytics_provider.dart'; // v7.3
 import 'package:campusconnect/providers/activity_feed_provider.dart'; // v7.3: Activity feed
@@ -66,6 +67,8 @@ import 'package:campusconnect/views/teacher/student_analytics_view.dart';
 // v7.3: Chat views
 import 'package:campusconnect/views/chats/chats_list_view.dart';
 import 'package:campusconnect/views/chats/chat_view.dart';
+// v8.7: Alumni Group Chat view
+import 'package:campusconnect/views/chats/alumni_group_chat_view.dart';
 // v7.3: Extracted feature views (Phase 1 NotesView decomposition)
 import 'package:campusconnect/views/notes/notes_list_view.dart';
 import 'package:campusconnect/views/notes/upload_notes_view.dart';
@@ -157,6 +160,10 @@ class MyApp extends StatelessWidget {
             service: TeacherAnalyticsService.instance(),
           ),
         ),
+        // v8.7: Alumni Group Chat provider (stream subscription managed
+        // internally; initialized for every signed-in user, read only by
+        // Alumni per Firestore rules)
+        ChangeNotifierProvider(create: (_) => AlumniGroupChatProvider()),
         // v7.4: AI recommendation and engagement providers
         ChangeNotifierProvider(
           create: (_) =>
@@ -229,7 +236,8 @@ class MyApp extends StatelessWidget {
                 );
               }
               // v7.3: Handle chat route with chatId argument
-              if (settings.name == chatRoute || settings.name == chatDetailRoute) {
+              if (settings.name == chatRoute ||
+                  settings.name == chatDetailRoute) {
                 final args = settings.arguments;
                 final chatId = args is String ? args : null;
                 if (chatId == null || chatId.isEmpty) {
@@ -306,23 +314,184 @@ class MyApp extends StatelessWidget {
               // v7.6: Password reset route
               passwordResetRoute: (context) => const PasswordResetView(),
               // v8.4: Student resume portfolio routes
-              studentPortfolioRoute: (context) =>
-                  const StudentPortfolioScreen(),
-              editPortfolioRoute: (context) => const EditPortfolioScreen(),
-              projectsManagerRoute: (context) =>
-                  const ProjectsManagerScreen(),
-              certificationsManagerRoute: (context) =>
-                  const CertificationsManagerScreen(),
-              experienceManagerRoute: (context) =>
-                  const ExperienceManagerScreen(),
-              achievementsManagerRoute: (context) =>
-                  const AchievementsManagerScreen(),
-              resumeUploadRoute: (context) => const ResumeUploadScreen(),
+              // v8.7: Editing routes are role-gated — Alumni may not enter the
+              // Student Portfolio editing workflow (Task §1/§5/§14). The
+              // read-only route stays open so Alumni can still VIEW a
+              // student's portfolio (Task §13).
+              studentPortfolioRoute: (context) => _guardStudentPortfolio(
+                context,
+                const StudentPortfolioScreen(),
+              ),
+              editPortfolioRoute: (context) =>
+                  _guardStudentPortfolio(context, const EditPortfolioScreen()),
+              projectsManagerRoute: (context) => _guardStudentPortfolio(
+                context,
+                const ProjectsManagerScreen(),
+              ),
+              certificationsManagerRoute: (context) => _guardStudentPortfolio(
+                context,
+                const CertificationsManagerScreen(),
+              ),
+              experienceManagerRoute: (context) => _guardStudentPortfolio(
+                context,
+                const ExperienceManagerScreen(),
+              ),
+              achievementsManagerRoute: (context) => _guardStudentPortfolio(
+                context,
+                const AchievementsManagerScreen(),
+              ),
+              resumeUploadRoute: (context) =>
+                  _guardStudentPortfolio(context, const ResumeUploadScreen()),
               portfolioReadOnlyRoute: (context) =>
                   const PortfolioReadOnlyView(),
+              // v8.7: Alumni Group Chat route — Alumni-only. Non-Alumni
+              // (Students/Teachers) get a denied screen instead of the chat;
+              // Firestore rules enforce identity + role server-side too.
+              alumniGroupChatRoute: (context) =>
+                  _guardAlumniGroupChat(context, const AlumniGroupChatView()),
             },
           );
         },
+      ),
+    );
+  }
+}
+
+/// v8.7: Role-gates the Student Portfolio editing workflow.
+///
+/// Portfolio is a Student career-development feature. Alumni may not enter
+/// the editable portfolio screens (Task §1/§5/§14) — if an Alumni route is
+/// manually accessed, show a safe blocked message instead of the editing UI.
+/// Students and Teachers continue to reach the screens unchanged. The
+/// read-only student portfolio route (`portfolioReadOnlyRoute`) is NOT gated
+/// so Alumni can still view a Student's portfolio (Task §13).
+Widget _guardStudentPortfolio(BuildContext context, Widget child) {
+  final role = context.watch<RoleProvider>().userRole;
+  if (role == UserRole.alumni) {
+    return const _StudentPortfolioBlockedView();
+  }
+  return child;
+}
+
+/// v8.7: Role-gates the Alumni Group Chat — Alumni-only (Task §6/§8).
+///
+/// Students, Teachers and roles not yet resolved are shown a safe blocked
+/// message instead of entering the chat. Firestore rules provide the same
+/// Alumni-only enforcement server-side (`alumni_group_messages`), so a
+/// malicious client bypassing this guard still cannot read or write.
+Widget _guardAlumniGroupChat(BuildContext context, Widget child) {
+  final role = context.watch<RoleProvider>().userRole;
+  if (role != UserRole.alumni) {
+    return const _AlumniGroupChatDeniedView();
+  }
+  return child;
+}
+
+/// Denied state for non-Alumni reaching the Alumni Group Chat route.
+class _AlumniGroupChatDeniedView extends StatelessWidget {
+  const _AlumniGroupChatDeniedView();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Alumni Community'),
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+        elevation: 0,
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(AppTheme.space24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.lock_outline, size: 64, color: AppTheme.primaryBlue),
+              const SizedBox(height: AppTheme.space16),
+              Text(
+                'Alumni Only',
+                style: AppTheme.titleMedium.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? Colors.white
+                      : AppTheme.gray900,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: AppTheme.space12),
+              Text(
+                'The Alumni Community is available to verified Alumni only.',
+                style: AppTheme.bodyMedium.copyWith(
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? AppTheme.gray400
+                      : AppTheme.gray600,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Simple blocked-state for Alumni attempting to open the Student Portfolio
+/// editing workflow (Task §5: "If a Portfolio route is manually accessed by
+/// an Alumni, handle it safely").
+class _StudentPortfolioBlockedView extends StatelessWidget {
+  const _StudentPortfolioBlockedView();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('My Portfolio'),
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+        elevation: 0,
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(AppTheme.space24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.workspace_premium_outlined,
+                size: 64,
+                color: AppTheme.primaryBlue,
+              ),
+              const SizedBox(height: AppTheme.space16),
+              Text(
+                'Portfolios are for Students',
+                style: AppTheme.titleMedium.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? Colors.white
+                      : AppTheme.gray900,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: AppTheme.space12),
+              Text(
+                'As an Alumni you can keep a lightweight profile, get an '
+                'optional AI Resume Review, and join the Alumni Community.',
+                style: AppTheme.bodyMedium.copyWith(
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? AppTheme.gray400
+                      : AppTheme.gray600,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: AppTheme.space24),
+              ElevatedButton.icon(
+                onPressed: () =>
+                    Navigator.of(context).pushNamed(alumniGroupChatRoute),
+                icon: const Icon(Icons.forum_outlined),
+                label: const Text('Open Alumni Community'),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -417,6 +586,8 @@ class _AuthGuardState extends State<AuthGuard> {
                     final chatProvider = context.read<ChatProvider>(); // v7.3
                     final aiChatProvider = context
                         .read<AIChatProvider>(); // v7.4
+                    final alumniGroupChatProvider = context
+                        .read<AlumniGroupChatProvider>(); // v8.7
 
                     placementsProvider.initWithUser(user.id);
                     aiProvider.initWithUser(user.id);
@@ -425,6 +596,7 @@ class _AuthGuardState extends State<AuthGuard> {
                     rp.initWithUser(user.id); // v7.1
                     chatProvider.initWithUser(user.id); // v7.3
                     aiChatProvider.initWithUser(user.id); // v7.4
+                    alumniGroupChatProvider.initWithUser(user.id); // v8.7
                     // v7.2: Initialize ecosystem providers after role is loaded
                     // This will be done in a separate callback below
                     profileProvider.initWithUser(
@@ -541,6 +713,8 @@ class _AuthGuardState extends State<AuthGuard> {
               context.read<AIChatProvider>().reset();
               // v8.4: Reset portfolio provider
               context.read<PortfolioProvider>().reset();
+              // v8.7: Reset alumni group chat provider
+              context.read<AlumniGroupChatProvider>().reset();
             });
           }
 

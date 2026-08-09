@@ -1,16 +1,23 @@
 import 'package:campusconnect/constants/routes.dart';
 import 'package:campusconnect/enums/user_role.dart';
 import 'package:campusconnect/models/student_profile.dart';
+import 'package:campusconnect/providers/activity_feed_provider.dart'; // v8.6
+import 'package:campusconnect/providers/ai_chat_provider.dart';
+import 'package:campusconnect/providers/alumni_group_chat_provider.dart'; // v8.7
 import 'package:campusconnect/providers/ai_usage_provider.dart';
+import 'package:campusconnect/providers/alumni_directory_provider.dart'; // v8.6
+import 'package:campusconnect/providers/chat_provider.dart'; // v8.6
+import 'package:campusconnect/providers/engagement_provider.dart';
+import 'package:campusconnect/providers/mentorship_provider.dart'; // v8.6
 import 'package:campusconnect/providers/notifications_provider.dart';
+import 'package:campusconnect/providers/opportunity_provider.dart'; // v8.6
 import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/providers/portfolio_provider.dart'; // v8.4
 import 'package:campusconnect/providers/profile_provider.dart';
 import 'package:campusconnect/providers/recommendation_provider.dart';
 import 'package:campusconnect/providers/resume_review_provider.dart';
 import 'package:campusconnect/providers/role_provider.dart';
-import 'package:campusconnect/providers/engagement_provider.dart';
-import 'package:campusconnect/providers/ai_chat_provider.dart';
+import 'package:campusconnect/providers/teacher_analytics_provider.dart'; // v8.6
 import 'package:campusconnect/services/auth/auth_service.dart';
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/views/profile/alumni_profile_sections.dart';
@@ -493,6 +500,10 @@ class ProfileView extends StatelessWidget {
             ),
             const SizedBox(height: AppTheme.space24),
 
+            // v8.7: Alumni "My Portfolio" entry REMOVED — Portfolio is a
+            // Student career-development feature. Alumni use a lightweight
+            // profile + optional text-based Resume Review + Alumni Community
+            // Chat (docs/Task.md §1/§5/§11).
             // Edit Profile Button
             _ProfileMenuCard(
               icon: Icons.edit_outlined,
@@ -564,7 +575,23 @@ class ProfileView extends StatelessWidget {
       context.read<RecommendationProvider>().reset(); // v7.4
       context.read<EngagementProvider>().reset(); // v7.4
       context.read<AIChatProvider>().reset(); // v7.4
+      // v8.6 (MED 10): reset the same streaming providers as the dashboard
+      // logout — previously these survived AuthGuard's fallback, which is
+      // fragile if that safety net ever changes.
+      context
+          .read<ChatProvider>()
+          .reset(); // Has active Firestore stream subscriptions
+      context
+          .read<ActivityFeedProvider>()
+          .reset(); // Has active Firestore stream
+      context.read<MentorshipProvider>().reset(); // Has active Firestore stream
+      context
+          .read<OpportunityProvider>()
+          .reset(); // Has active Firestore stream
+      context.read<AlumniDirectoryProvider>().reset(); // v8.6
+      context.read<TeacherAnalyticsProvider>().reset(); // v8.6
       context.read<PortfolioProvider>().reset(); // v8.4
+      context.read<AlumniGroupChatProvider>().reset(); // v8.7
       try {
         await AuthService.firebase().logOut();
       } catch (_) {

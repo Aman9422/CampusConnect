@@ -1,6 +1,5 @@
 import 'package:campusconnect/models/opportunity.dart';
 import 'package:campusconnect/models/student_profile.dart';
-import 'package:campusconnect/models/app_notification.dart'; // v7.3
 import 'package:campusconnect/services/firestore/profile_service.dart'; // v7.4
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
@@ -67,41 +66,13 @@ class OpportunityService {
 
       await docRef.set(opportunity.toFirestore());
 
-      // v7.3: Notify all students of new job opportunity
-      try {
-        final usersSnapshot = await _firestore
-            .collection('users')
-            .where('role', isEqualTo: 'student')
-            .get();
-
-        if (usersSnapshot.docs.isNotEmpty) {
-          final batch = _firestore.batch();
-
-          for (final userDoc in usersSnapshot.docs) {
-            final notification = AppNotification.newJobPost(
-              opportunityId: docRef.id,
-              title: title,
-              company: company,
-            );
-
-            final notifRef = _firestore
-                .collection('users')
-                .doc(userDoc.id)
-                .collection('notifications')
-                .doc();
-
-            batch.set(notifRef, notification.toFirestore());
-          }
-
-          await batch.commit();
-          debugPrint(
-            'Notified ${usersSnapshot.docs.length} students of new job post',
-          );
-        }
-      } catch (e) {
-        debugPrint('Error creating job post notifications: $e');
-        // Don't fail job posting if notifications fail
-      }
+      // v8.6 (HIGH 1): student notification on a new job post is delivered by
+      // the server-side `onOpportunityPostedNotifyStudents` trigger (Admin SDK
+      // bypasses the owner-write-only notifications rule). The previous
+      // client-side cross-user batch always failed with PERMISSION_DENIED
+      // (Bug 5 pattern v8.4.3 missed here) and exceeded the 500-write batch
+      // cap past 500 students — removed so the log noise disappears and no
+      // duplicate is created.
 
       // v7.4: Keep optional public alumni profile projection in sync
       if (alumniProfile.isPublicProfile &&

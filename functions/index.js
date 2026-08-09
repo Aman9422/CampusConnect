@@ -840,19 +840,23 @@ exports.reviewResume = onCall(
         console.log(`Resume length: ${trimmedResume.length} characters`);
         console.log(`Target role: ${targetRole || "General"}`);
 
-        // Check monthly usage limit BEFORE incrementing
-        const currentUsage = await getResumeUsage(userId);
-
-        if (currentUsage.monthlyCount >= RESUME_MONTHLY_LIMIT) {
+        // v8.6 (MED 8): quota check + increment are now ONE transaction
+        // (`consumeResumeQuota`) so two concurrent calls cannot both pass
+        // the limit and exceed 5 monthly reviews. `getResumeUsage` is kept
+        // for the read-only `checkUsage` path only.
+        let usageData;
+        try {
+          usageData = await consumeResumeQuota(userId);
+        } catch (quotaError) {
+          if (quotaError instanceof admin.functions.https.HttpsError) {
+            throw quotaError;
+          }
+          console.error("quota error in reviewResume:", quotaError);
           throw new admin.functions.https.HttpsError(
-              "resource-exhausted",
-              `Monthly review limit reached (${RESUME_MONTHLY_LIMIT} reviews/month). Resets next month.`,
-              {usage: currentUsage}
+              "internal",
+              "Could not verify your review quota. Please try again."
           );
         }
-
-        // Increment usage count (only after quota check passes)
-        const usageData = await trackResumeUsage(userId);
 
         // Generate AI review (Real AI via Groq/HuggingFace).
         let reviewResult;
@@ -865,7 +869,19 @@ exports.reviewResume = onCall(
           reviewResult = aiResult.review;
           console.log(`Resume review from provider: ${aiResult.providerUsed}`);
         } catch (aiError) {
+          // v8.6 (HIGH 3): the AI provider failed — the user gets NO review
+          // but already paid a credit. Roll it back so the quota is only
+          // consumed for completed reviews.
           console.error("AI provider error in reviewResume:", aiError);
+          try {
+            await rollbackResumeUsage(userId);
+            console.log("reviewResume: rolled back quota after AI failure");
+          } catch (rollbackError) {
+            console.error(
+                "reviewResume: rollback of consumed quota failed:",
+                rollbackError
+            );
+          }
           throw new admin.functions.https.HttpsError(
               "internal",
               "AI analysis failed. Please try again later."
@@ -978,11 +994,16 @@ async function resumeTextFromStorage(uid, storagePath) {
     );
   }
 
-  // No text below an absolute minimum means the PDF is image-only/scanned.
+  // v8.6 (LOW): a PDF with SOME text but under the minimum is a genuine short
+  // resume, not an image — give it an accurate message instead of the
+  // image-based mislabel. Only a completely empty extraction is treated as
+  // scanned/image-only.
   if (text.length < RESUME_MIN_LENGTH) {
     throw new admin.functions.https.HttpsError(
         "invalid-argument",
-        "This resume appears to be image-based and could not be read automatically. Please upload a text-based PDF."
+        text.length > 0
+            ? `This resume is too short (${text.length} characters). Please upload a resume with at least ${RESUME_MIN_LENGTH} characters of text.`
+            : "This resume appears to be image-based and could not be read automatically. Please upload a text-based PDF."
     );
   }
 
@@ -1117,6 +1138,142 @@ async function getResumeUsage(userId) {
       monthlyCount: 0,
       monthlyLimit: RESUME_MONTHLY_LIMIT,
     };
+  }
+}
+
+/**
+ * v8.6 (MED 8): atomically check the monthly limit AND increment the quota.
+ *
+ * The old flow (`getResumeUsage` outside a transaction, then
+ * `trackResumeUsage` inside one) was not atomic together: two concurrent
+ * calls could both read `monthlyCount = 4`, both pass the check, and both
+ * increment → 6+ reviews in a month. This helper performs check-then-increment
+ * in a SINGLE transaction.
+ *
+ * @param {string} userId - User's Firebase Auth ID
+ * @returns {Promise<object>} Usage data (post-increment)
+ * @throws {HttpsError#resource-exhausted} when the monthly limit is reached
+ */
+async function consumeResumeQuota(userId) {
+  const usageRef = admin.firestore()
+      .collection("resume_usage")
+      .doc(userId);
+
+  const now = new Date();
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+
+  try {
+    return await admin.firestore().runTransaction(async (transaction) => {
+      const usageDoc = await transaction.get(usageRef);
+      const timestamp = admin.firestore.Timestamp.now();
+
+      if (!usageDoc.exists) {
+        // First review this month — create the usage doc, already consumed.
+        const firstUsage = {
+          monthlyCount: 1,
+          monthlyLimit: RESUME_MONTHLY_LIMIT,
+          lastReviewAt: timestamp,
+          lastResetMonth: currentMonth,
+        };
+        transaction.set(usageRef, firstUsage);
+        return {
+          monthlyCount: 1,
+          monthlyLimit: RESUME_MONTHLY_LIMIT,
+          lastResetMonth: currentMonth,
+        };
+      }
+
+      const data = usageDoc.data();
+      const lastResetMonth = data.lastResetMonth || "";
+
+      // New month → reset the counter to 1 (this call is the first review).
+      if (lastResetMonth !== currentMonth) {
+        const resetData = {
+          monthlyCount: 1,
+          monthlyLimit: RESUME_MONTHLY_LIMIT,
+          lastReviewAt: timestamp,
+          lastResetMonth: currentMonth,
+        };
+        transaction.update(usageRef, resetData);
+        return {
+          monthlyCount: 1,
+          monthlyLimit: RESUME_MONTHLY_LIMIT,
+          lastResetMonth: currentMonth,
+        };
+      }
+
+      // Same month → enforce the limit inside the transaction (atomic).
+      const monthlyCount = data.monthlyCount || 0;
+      if (monthlyCount >= RESUME_MONTHLY_LIMIT) {
+        throw new admin.functions.https.HttpsError(
+            "resource-exhausted",
+            `Monthly review limit reached (${RESUME_MONTHLY_LIMIT} reviews/month). Resets next month.`,
+            {
+              usage: {
+                monthlyCount: monthlyCount,
+                monthlyLimit: RESUME_MONTHLY_LIMIT,
+                lastResetMonth: currentMonth,
+              },
+            }
+        );
+      }
+
+      const updatedData = {
+        monthlyCount: monthlyCount + 1,
+        monthlyLimit: RESUME_MONTHLY_LIMIT,
+        lastReviewAt: timestamp,
+        lastResetMonth: currentMonth,
+      };
+      transaction.update(usageRef, updatedData);
+      return {
+        monthlyCount: updatedData.monthlyCount,
+        monthlyLimit: RESUME_MONTHLY_LIMIT,
+        lastResetMonth: currentMonth,
+      };
+    });
+  } catch (error) {
+    console.error("Error consuming resume quote:", error);
+    throw error;
+  }
+}
+
+/**
+ * v8.6 (HIGH 3): compensate a consumed quota when the AI review call failed.
+ *
+ * `reviewResume` consumes the quota BEFORE the AI provider call so the limit
+ * is enforced atomically. If the provider then fails, the user has paid a
+ * credit without receiving a review — decrement it so credits are only spent
+ * on completed reviews. Does not throw (best-effort rollback).
+ *
+ * @param {string} userId - User's Firebase Auth ID
+ * @returns {Promise<void>}
+ */
+async function rollbackResumeUsage(userId) {
+  const usageRef = admin.firestore()
+      .collection("resume_usage")
+      .doc(userId);
+
+  const now = new Date();
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+
+  try {
+    await admin.firestore().runTransaction(async (transaction) => {
+      const usageDoc = await transaction.get(usageRef);
+      if (!usageDoc.exists) return;
+
+      const data = usageDoc.data();
+      const lastResetMonth = data.lastResetMonth || "";
+      if (lastResetMonth !== currentMonth) return; // already reset — nothing to roll back
+
+      const monthlyCount = data.monthlyCount || 0;
+      if (monthlyCount <= 0) return;
+
+      transaction.update(usageRef, {
+        monthlyCount: monthlyCount - 1,
+      });
+    });
+  } catch (rollbackError) {
+    console.error("Error rolling back resume usage:", rollbackError);
   }
 }
 
@@ -1387,13 +1544,29 @@ exports.onProfileUpdatedRefreshAI = onDocumentWritten(
       // write-amplification co-trigger).
       if (isPortfolioOnlyChange(before, after)) return;
 
+      // v8.6 (MED 6): `before.updatedAt !== after.updatedAt` compared two
+      // distinct Timestamp OBJECT references and was ALWAYS true, so every
+      // non-portfolio `users/{uid}` write by a completed student spun the
+      // recommendation + engagement recompute. Compare by value instead.
+      const updatedAtChanged = () => {
+        if (!before.updatedAt || !after.updatedAt) {
+          return before.updatedAt !== after.updatedAt;
+        }
+        const beforeMillis = typeof before.updatedAt.toMillis === "function"
+            ? before.updatedAt.toMillis()
+            : Date.parse(before.updatedAt);
+        const afterMillis = typeof after.updatedAt.toMillis === "function"
+            ? after.updatedAt.toMillis()
+            : Date.parse(after.updatedAt);
+        return beforeMillis !== afterMillis;
+      };
       const changed =
         !before ||
         JSON.stringify(before.skills || []) !== JSON.stringify(after.skills || []) ||
         before.careerInterest !== after.careerInterest ||
         before.department !== after.department ||
         before.graduationYear !== after.graduationYear ||
-        before.updatedAt !== after.updatedAt;
+        updatedAtChanged();
 
       if (!changed) return;
 
@@ -1421,28 +1594,53 @@ exports.onResumeReviewCreatedRefreshMatches = onDocumentCreated(
         const userDoc = await admin.firestore().collection("users").doc(userId).get();
         if (!userDoc.exists) return;
         const userData = userDoc.data();
-        if (userData.role !== "student") return;
+        // v8.5.2 (A2): ATS → portfolio merge now runs for ANY role with a
+        // portfolio. Students AND Alumni share `users/{uid}/portfolio.resume`
+        // as the single source of truth for the resume (Task §7). Previously
+        // this trigger early-returned for non-students, so Alumni reviews
+        // never persisted latestATSScore / reviewCount / lastReviewAt /
+        // updatedAt into their portfolio.
+        const isStudent = userData.role === "student";
+
+        // v8.6 (LOW): phantom-portfolio guard — only merge the ATS stats into
+        // an EXISTING `portfolio.resume`. A user who reviewed a resume without
+        // ever uploading one (e.g. manual-paste on an account that has no
+        // portfolio resume) must not get a synthetic `portfolio` /
+        // `portfolio.resume` map created for them — that phantom data polluted
+        // read-only views and dashboard cards.
+        const hasPortfolioResume = !!(userData.portfolio && userData.portfolio.resume);
 
         // v8.4.2 (S6a/P1): mirror the latest ATS score + review stats into the
         // portfolio resume metadata so dashboard / portfolio / read-only
         // "Latest ATS", Resume Age and `atsScoreAtApplication` actually have
         // data. The AI review system writes to `resumeReviews/*`; this is the
         // bridge into `users/{uid}/portfolio.resume`.
-        const atsScore = Number.isInteger(resumeData.atsScore)
-            ? resumeData.atsScore
-            : null;
-        const portfolioResumeMerge = {
-          "portfolio.resume.reviewCount": admin.firestore.FieldValue.increment(1),
-          "portfolio.resume.lastReviewAt": admin.firestore.Timestamp.now(),
-          "portfolio.resume.updatedAt": admin.firestore.Timestamp.now(),
-        };
-        if (atsScore !== null) {
-          portfolioResumeMerge["portfolio.resume.latestATSScore"] = atsScore;
+        if (hasPortfolioResume) {
+          const atsScore = Number.isInteger(resumeData.atsScore)
+              ? resumeData.atsScore
+              : null;
+          const portfolioResumeMerge = {
+            "portfolio.resume.reviewCount": admin.firestore.FieldValue.increment(1),
+            "portfolio.resume.lastReviewAt": admin.firestore.Timestamp.now(),
+            "portfolio.resume.updatedAt": admin.firestore.Timestamp.now(),
+          };
+          if (atsScore !== null) {
+            portfolioResumeMerge["portfolio.resume.latestATSScore"] = atsScore;
+          }
+          await admin.firestore().collection("users").doc(userId)
+              .set(portfolioResumeMerge, {merge: true});
         }
-        await admin.firestore().collection("users").doc(userId)
-            .set(portfolioResumeMerge, {merge: true});
 
-        await refreshRecommendationsForStudent(userId, userData, {resumeData});
+        // Student-only AI enrichment — recommendations are scoped to students
+        // (mentor/job matching). Kept gated so Alumni reviews do not spin the
+        // student recommendation pipeline.
+        if (isStudent) {
+          await refreshRecommendationsForStudent(userId, userData, {resumeData});
+        }
+
+        // Activity log + engagement summary are role-agnostic (the Alumni
+        // dashboard's Recent Activity + Impact Strip read these), so they run
+        // for every review author.
         await logUserActivity(userId, "resumeReviewed", 5, {
           reviewId: event.params.reviewId,
           atsScore: resumeData.atsScore || 0,
@@ -1782,6 +1980,55 @@ exports.recomputeEngagementScores = onSchedule(
     }
 );
 
+/**
+ * v8.6 (MED 7): client entry point that rebuilds the user's recommendations
+ * through the SERVER engine.
+ *
+ * Single-writer contract: `refreshRecommendationsForStudent` (also invoked by
+ * the profile-update and resume-review triggers) is the ONLY component that
+ * writes `users/{uid}/recommendations/*` and `recommendations_meta/summary`.
+ * The Flutter app previously ran a second, competing scoring model; it now
+ * calls this callable with an empty payload (the authenticated uid comes from
+ * Firebase Auth — never the body) and simply reads the Firestore stream.
+ */
+exports.refreshRecommendations = onCall(
+    {maxInstances: 10, timeoutSeconds: 60},
+    async (request) => {
+      const userId = request.auth?.uid;
+      if (!userId) {
+        throw new admin.functions.https.HttpsError(
+            "unauthenticated",
+            "You must be logged in to refresh recommendations."
+        );
+      }
+
+      try {
+        const userDoc = await admin.firestore()
+            .collection("users")
+            .doc(userId)
+            .get();
+        if (!userDoc.exists) {
+          throw new admin.functions.https.HttpsError(
+              "not-found",
+              "User profile not found."
+          );
+        }
+
+        await refreshRecommendationsForStudent(userId, userDoc.data());
+        return {success: true};
+      } catch (error) {
+        if (error instanceof admin.functions.https.HttpsError) {
+          throw error;
+        }
+        console.error("refreshRecommendations error:", error);
+        throw new admin.functions.https.HttpsError(
+            "internal",
+            "Could not refresh recommendations. Please try again later."
+        );
+      }
+    }
+);
+
 async function refreshRecommendationsForStudent(userId, userData, options = {}) {
   const studentSkills = normalizeTokens(userData.skills || []);
   const careerSignals = normalizeTokens([
@@ -2015,10 +2262,22 @@ async function recomputeEngagementSummary(userId, userData) {
       Math.round(profileStrength * 0.6 + Math.min(40, activityPoints * 0.4) + Math.min(20, dailyStreak * 2.5))
   );
 
+  // v8.7.1: role-aware activity badge. Alumni see "Active Alumni" — "Active
+  // Student" is a Student-flavored title and looked wrong on the Alumni
+  // dashboard (user report). Mirrors the client rule exactly so the badge
+  // never flickers between writers (same class as the v8.6 threshold fix).
+  const activeTitle = userData.role === "alumni" ? "Active Alumni" : "Active Student";
+  const activeDescription = userData.role === "alumni"
+      ? "Stay active and engaged in the alumni community"
+      : "Earn 50 engagement points";
+
   const badges = [
-    buildBadge("profile_pro", "profilePro", "Profile Pro", "Complete profile for stronger matches", profileStrength, 100),
+    // v8.6 (LOW): threshold aligned with the client badge logic (earned at
+    // profile strength >= 85) — previously the server required 100 while the
+    // client showed the badge at 85, so the badge flickered between sources.
+    buildBadge("profile_pro", "profilePro", "Profile Pro", "Complete profile for stronger matches", profileStrength, 85),
     buildBadge("consistency_champion", "consistencyChampion", "Consistency Champion", "Stay active 7 days in a row", dailyStreak, 7),
-    buildBadge("active_student", "activeStudent", "Active Student", "Earn 50 engagement points", activityPoints, 50),
+    buildBadge("active_student", "activeStudent", activeTitle, activeDescription, activityPoints, 50),
     buildBadge("networking_pro", "networkingPro", "Networking Pro", "Build strong networking activity", activityPoints, 100),
   ];
 

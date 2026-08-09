@@ -1,6 +1,7 @@
 import 'package:campusconnect/constants/routes.dart';
 import 'package:campusconnect/providers/activity_feed_provider.dart';
 import 'package:campusconnect/providers/ai_chat_provider.dart';
+import 'package:campusconnect/providers/alumni_group_chat_provider.dart'; // v8.7
 import 'package:campusconnect/providers/ai_usage_provider.dart';
 import 'package:campusconnect/providers/alumni_directory_provider.dart';
 import 'package:campusconnect/providers/chat_provider.dart';
@@ -312,6 +313,7 @@ class _TeacherDashboardTabState extends State<_TeacherDashboardTab> {
     // v8.4: Portfolio provider also holds per-user state — reset for
     // consistency with the student dashboard logout path (issue M12).
     context.read<PortfolioProvider>().reset();
+    context.read<AlumniGroupChatProvider>().reset(); // v8.7
   }
 
   Future<bool> _showLogOutDialog(BuildContext context) async {
