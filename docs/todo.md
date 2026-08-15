@@ -1,79 +1,154 @@
-# CampusConnect v8.7 — Alumni Experience Simplification & Alumni Group Chat
+# CampusConnect v8.8 — Todo List
 
-> Portfolio is a Student career-development feature. Alumni use a lightweight profile + optional text-based Resume Review + Alumni Community Chat.
+## Phase 0 — AI Architecture Audit (read-only)
+- [x] Audit complete — `project_info__20.md`: primary Groq `llama-3.1-8b-instant`; no automatic fallback; active store `users/{uid}/ai_interactions` + legacy `ai_conversations`; no retention; no deletion
 
-## Task Status
+## Phase 1 — Primary AI Model / Provider Migration
+- [x] Approved v8.8 config confirmed: **Groq `gpt-oss-20b`** primary
+- [x] Verify endpoint, auth, request format, JSON mode, limits, timeout, rate-limit, error shape
+- [x] Update model constant/env config; keep `callAIProvider` signatures unchanged
 
-- [x] **Phase 0: Audit & Planning**
-  - [x] Inspect routing, providers, services, Firestore schema/rules, Cloud Functions, and user role model
-  - [x] Document current v8.6 architecture and decide integration points (see `project_info__19.md`)
+## Phase 2 — Hugging Face Fallback Migration
+- [x] Approved v8.8 fallback confirmed: **Hugging Face Inference Providers `gpt-oss-20b`** (router.huggingface.co OpenAI-compatible)
+- [x] Update `HF_MODEL`; preserve Bearer auth, timeouts, 429/503, response parsing
+- [x] Add REAL fallback chain in `callAIProvider` (primary → HF) for chat + resume review + deep analysis
 
-- [x] **Phase 1: Role Separation (UI/access)**
-  - [x] Hide/remove Portfolio navigation & workflow from all Alumni surfaces (Dashboard, Profile, nav, quick actions, resume cards)
-  - [x] Guard portfolio routes for Alumni (safe redirect / blocked message)
-  - [x] Confirm Student Portfolio remains fully intact
+## Phase 3 — Environment & Secret Audit
+- [x] `.env.example` created documenting `AI_PROVIDER`, `GROQ_API_KEY`, `HUGGINGFACE_API_KEY`, model env vars, retention config
+- [x] Model identifiers env-configurable (`GROQ_MODEL` / `HF_MODEL`) with current values as defaults
+- [x] No API keys in logs/source/docs; valid keys not rotated
+- [x] AI/provider documentation updated
 
-- [x] **Phase 2: Alumni Text-Based Resume Reviewer**
-  - [x] Alumni Resume Review screen shows text-input only (hide uploaded-resume card / upload CTA for Alumni)
-  - [x] Wire Alumni text reviews into the existing Resume Review pipeline (no second AI/ATS engine)
-  - [x] Store Alumni review history under their own UID; reuse existing quota
-  - [x] Keep Student uploaded-PDF reviewer unchanged
+## Phase 4 — AI Response Formatting Cleanup
+- [x] Server-side chat response normalization (`generateChatResponse`) — single layer; resume JSON unaffected
+- [x] `CHAT_SYSTEM_PROMPT` formatting constraints updated
+- [x] Client rendering decision: plain-sanitized-text (no new markdown dependency) — implemented
+- [x] Legitimate `*` preserved; no raw JSON unless intended
 
-- [x] **Phase 3: Alumni Group Chat**
-  - [x] Create AlumniGroupChatService (Firestore `alumni_group_messages/{messageId}`)
-  - [x] Create AlumniGroupChatProvider (real-time stream, send, loading/error states)
-  - [x] Create AlumniGroupChatView (Material 3 chat UI: message list, timestamps, sender name, input bar, empty/loading/error states, auto-scroll)
-  - [x] Add route (`alumniGroupChatRoute`) and navigation entry point on Alumni Dashboard
-  - [x] Update Firestore rules (read/create Alumni-only, sender UID = request.auth.uid, update/delete own messages only)
-  - [x] Add Firestore index only if required for chat query — **not required** (single-field `orderBy('createdAt')`, no composite)
+## Phase 5 — AI Chat Deletion
+- [x] `firestore.rules`: `users/{uid}/ai_interactions` add `allow delete: if isOwner(userId)`
+- [x] `deleteAIHistory` callable (`request.auth.uid` only)
+- [x] `AIChatProvider.deleteHistory()` — clear memory + reload
+- [x] `AIChatView` delete action + confirmation dialog; immediate UI removal
 
-- [x] **Phase 4: Alumni Dashboard / Profile updates**
-  - [x] Update Alumni Dashboard primary actions (Alumni Community, Resume Review, Profile)
-  - [x] Keep Alumni Profile lightweight; no portfolio requirements
+## Phase 6 — Automatic AI Conversation Cleanup
+- [x] New `onSchedule` cleanup function (daily), configurable retention (`AI_RETENTION_DAYS`, conservative default 90)
+- [x] Batched/chunked deletes (≤490/batch), idempotent, only expired `ai_interactions` + `ai_conversations`
+- [x] Aggregate logs only (no prompt/response content); handle partial failures
 
-- [ ] **Phase 5: Docs, Version & Validation**
-  - [x] Update pubspec version to v8.7 per convention (`8.6.0+89` → `8.7.0+90`)
-  - [x] Update `docs/todo.md`, `docs/issues.md`
-  - [x] Add tests for Alumni behavior (portfolio access, text review, group chat security/state)
-  - [x] Update `docs/v8_workspace_tracker.md`, `docs/confirmation.md`
-  - [x] Run `flutter analyze`, `flutter test`, `node --check functions/index.js`, `dart format` on changed files
-  - [ ] Manual testing matrix verification (Student, Alumni, Security) — requires on-device verification, pending
+## Phase 7 — Firestore Security Audit
+- [x] Owner-scoped reads/deletes; no cross-user access; unauthenticated denied; quota `write:false` intact
 
-## Detailed Rollout Log
+## Phase 8 — AI Quota Preservation
+- [x] `consumeResumeQuota` / `rollbackResumeUsage` / `getResumeUsage` unchanged; tests pass
+- [x] Fallback does not double-charge quota (consume once, application-level)
 
-### Phase 1 — Role Separation (UI/access)
+## Phase 9 — Provider Fallback Behavior
+- [x] Fallback chain: primary → failure → HF → normalized response (no duplicate pipeline)
+- [x] Friendly app-level errors; technical diagnostics server-side only
+- [x] `askAI` error path returns friendly message (existing behavior preserved)
 
-- **Alumni Dashboard** (`lib/views/dashboards/alumni_dashboard_view.dart`): removed the v8.5.2 `ResumeSummaryCard` + `PortfolioProvider` watch/refresh. Replaced with an **Alumni Community** primary card (→ `alumniGroupChatRoute`) and a "Community" quick action. Dashboard no longer implies Alumni must build a portfolio (Task §10).
-- **Alumni Profile** (`lib/views/profile/profile_view.dart`): removed the v8.5.2 (A3) Alumni "My Portfolio" tile. Only Edit Profile remains (Task §11). The Student/Teacher branch keeps its student-only "My Portfolio" tile unchanged.
-- **Resume Review UI** (`lib/views/resume_review_view.dart`): Alumni see only **Target Role (Optional)** + **Resume Text**; the uploaded-resume card (Review/Open/Replace + upload CTA) is gated `if (!isAlumni)` (Task §2/§5). Students keep the full uploaded-PDF integration.
-- **Portfolio route guards** (`lib/main.dart`): `_guardStudentPortfolio` wraps the 7 editing routes (`studentPortfolioRoute`, `editPortfolioRoute`, managers, `resumeUploadRoute`). Alumni get a safe blocked view ("Portfolios are for Students" + CTA to Alumni Community). `portfolioReadOnlyRoute` remains open for read-only Alumni → Student viewing (Task §13).
+## Phase 10 — Tests
+- [x] Provider: config, HF fallback, missing key, failure, timeout, rate limit, malformed/normalized response
+- [x] Formatting: markdown cleanup, bullets, headings, raw JSON, legitimate `*` preserved
+- [x] Deletion: own-only, cross-user denied, unauthenticated denied, provider state cleared
+- [x] Retention: expired eligible, recent preserved, unrelated untouched, batching safe
+- [x] Security: UID ownership, quota immutability, owner-scoped reads
 
-### Phase 2 — Alumni Text Resume Reviewer
+## Phase 11 — Validation
+- [x] `flutter analyze` → 0 errors / 0 warnings (68 pre-existing info lints, none in changed files)
+- [x] `flutter test` → all 167 pass (124 existing + 43 new)
+- [x] `node --check functions/index.js` (+ all AI modules → pass)
+- [x] `dart format` → clean on all changed files
+- [x] No API keys committed; no obsolete model references
 
-- Alumni paste resume text (≥100, ≤5000 chars — existing `ResumeReviewService` validation) → `submitReview(resumeText:)` → the SAME `reviewResume` callable (Task §3). **No second AI/ATS engine, no second storage system.**
-- Quota (`resume_usage/{uid}`, atomic `consumeResumeQuota`) and history (`users/{uid}/resumeReviews`) are UID-scoped and reused unchanged (Task §4/§18).
-- Cloud Function analytics already tags text reviews `source: "pasted"` vs uploaded `"uploaded"` (Task §19) — no function change needed.
+## Phase 12 — Manual Testing
+- [x] Deployment confirmed (2026-08-15: functions + firestore:rules, 17/17)
+- [ ] Alumni: text resume review, ATS unchanged, no portfolio reintroduced
+- [ ] Resume Reviewer: PDF + ATS + history + quota + structured output
+- [ ] Security: cross-user isolation, no client quota manipulation, no keys in client/logs
 
-### Phase 3 — Alumni Group Chat
+## Phase 13 — Documentation & Version
+- [x] `pubspec.yaml` → 8.8.0+91
+- [x] `docs/todo.md`, `docs/issues.md`, `docs/confirmation.md`, `docs/v8_workspace_tracker.md`, `.env.example`, provider docs
+- [x] Record: models, providers, env vars, retention policy, deletion, formatting strategy, security, validation
 
-- `lib/models/alumni_group_message.dart` — message model (`senderId`, `senderName`, `senderPhotoUrl?`, `message`, `createdAt`, `editedAt?`, `isDeleted?`).
-- `lib/services/firestore/alumni_group_chat_service.dart` — real-time stream `orderBy('createdAt')` (client-side soft-delete filter avoids a composite index — Task §16), `sendMessage` with `FieldValue.serverTimestamp()`, `deleteMessage`.
-- `lib/providers/alumni_group_chat_provider.dart` — ChatProvider lifecycle discipline: `initWithUser` / `reset` / `_isDisposed` guards, stream subscription cancelled on reset/dispose, `isSending`/`error`/`clearError`.
-- `lib/views/chats/alumni_group_chat_view.dart` — Material 3 chat: sender name + timestamp, own-message bubbles right-aligned, date separators, empty/loading/error/sending states, **auto-scroll only when the message count grows** (not on keystrokes).
-- `lib/constants/routes.dart` — `alumniGroupChatRoute`.
-- `lib/main.dart` — provider registered in `MultiProvider`, initialized in AuthGuard post-frame, **reset at all 5 logout sites** (AuthGuard fallback, Alumni dashboard, Profile view, Student dashboard, Teacher dashboard), route wired with `_guardAlumniGroupChat` (non-Alumni → denied view).
-- `firestore.rules` — `alumni_group_messages` block: read Alumni-only; create Alumni-only with `senderId == request.auth.uid`; update/delete own messages only. Students/Teachers/unauthenticated denied (Task §8).
-- No Firestore index added — the single-field `orderBy('createdAt')` query is served by the automatic single-field index (Task §16).
+## Post-Release Audit (user-requested, 2026-08-15)
+- [x] Live provider check: both keys + `openai/gpt-oss-20b` verified against Groq + HF (HTTP 200, model echoed)
+- [x] Key-leak audit: `functions/.env` untracked by git; `.env` gitignored; no key material in logs/scripts
+- [x] Obsolete-model sweep: old names only in historical docs (changelogs/audits); zero in active code
+- [x] Rules/quota/cleanup review: no weakening, no double-charge, no composite indexes needed
+- [x] Audit findings recorded in `docs/issues.md` (incl. HIGH: Node 20 decommission 2026-10-30)
 
-### Phase 4 — Alumni Dashboard / Profile
+## v8.8.2 — Log Audit Fixes (project_info__22 / project_info__23 — pid 24538 session, 2026-08-15)
 
-- Dashboard primary actions: **Alumni Community**, **Resume Review**, Mentorship, Directory (quick actions) + Alumni Community card at the top.
-- Profile stays lightweight — no Portfolio editing requirements (Task §11).
+### A. HIGH — Quota-leak guard for `reviewResume` (crash-safe reservation)
+- [x] `consumeResumeQuota` records a per-request reservation (`pendingRequestId` / `pendingSince`)
+- [x] Success path clears the reservation; AI-failure rollback also clears it
+- [x] Daily compensation sweep returns credits for stale (>24h) un-cleared reservations
+- [x] Node syntax check + quota reservation contract tests
 
-### Phase 5 — Docs, Version & Validation
+### B. MEDIUM — Gate Alumni Group Chat stream on the alumni role
+- [x] `AlumniGroupChatProvider` no longer subscribes for students/teachers (role-gated init + `setRoleForStream`; `initWithUser` stores the user only)
+- [x] `AuthGuard` activates the stream only once the role is known (`setRoleForStream(roleProvider.role)`)
+- [x] Role-gate mirror tests (alumni subscribes; student/teacher/null do not)
 
-- `pubspec.yaml`: `8.6.0+89` → `8.7.0+90`.
-- `docs/issues.md`: v8.7 section added (role separation, text reviewer, group chat, security, deployment status).
-- Tests added: `test/alumni_group_chat_test.dart` (17), `test/alumni_resume_text_review_test.dart` (13), `test/alumni_portfolio_access_test.dart` (8).
-- Validation: `flutter analyze` **0 errors / 0 warnings** (68 pre-existing info lints); `flutter test` **121/121 passed** (83 pre-existing + 38 new); `node --check functions/index.js` pass; `dart format` clean on all changed files.
-- Pending: manual matrix (on-device) + `firebase deploy --only firestore:rules` to release the `alumni_group_messages` rules.
+### C. MEDIUM — Startup jank reduction
+- [x] Remove blocking `LocalPreferencesService.init()` from `main()` pre-`runApp` (Theme/Layout providers resolve async, defaults render first)
+- [x] `flutter analyze` clean on changed files (verified 2026-08-15: 0 errors / 0 warnings)
+- [x] Note: full `flutter run --profile` profiling remains a documented follow-up
+
+### D. LOW — Storage upload state warning (benign artifact)
+- [x] Investigated: upload completed (`INTERNAL_STATE_SUCCESS`); the cancel is a post-success navigation/retry artifact — no data loss, no code change
+
+### E. LOW/MEDIUM — Retry-storm throttling for quota-burning calls
+- [x] Distinct typed exceptions for server-unavailable / network failures in `ResumeReviewService` (`ResumeReviewUnavailableException` / `ResumeReviewNetworkException`)
+- [x] Consecutive-failure cooldown in `ResumeReviewProvider.submitReview` (blocks repeat calls, clears on success / connectivity restore, surfaces blocked reason via `isRetryBlocked` / `submitBlockedReason`)
+- [x] Throttle logic mirrored in contract tests (`test/resume_retry_throttle_test.dart`)
+
+### v8.8.2 Validation
+- [x] `flutter analyze` → 0 errors / 0 warnings (68 pre-existing info lints, none in changed files)
+- [x] `flutter test` → full suite green — 213 pass (verified 2026-08-15)
+- [x] `node --check functions/index.js` → pass (all AI modules included)
+- [x] `dart format` → clean on all changed files (resume_review_provider.dart formatted)
+- [x] `docs/todo.md` updated after every sub-task (this run)
+
+## v8.8.3 — project_info__23 Follow-up (audit addendum, 2026-08-15)
+
+> `project_info__23.md` retracts HIGH-2 (`.env.example` is by design — a one-time setup
+> template; the live `functions/.env` is the source of truth) and carries over the
+> remaining HIGH + MED findings from `project_info__22.md`. This section tracks their
+> resolution. The plan section is written FIRST; each sub-task is checked off as it is
+> implemented, followed by the final validation block.
+
+### Plan (updated as sub-tasks complete — 2026-08-15)
+- [x] HIGH-1 — `askAI` callable: add `timeoutSeconds: 120` (Groq 30 s → HF 60 s fallback chain needs up to 90 s; default 60 s kills the chat fallback mid-flight)
+- [x] HIGH-3 — `functions/package.json` `engines.node` → `"22"` (Node 20 decommissioned 2026-10-30; must redeploy before then)
+- [x] HIGH-4 — VERIFIED (no code change): `deleteAIHistory` queries legacy `ai_conversations` by `userId` (owner-scoped); `cleanupExpiredAIConversations` by `timestamp` — both exactly match the fields `askAI` writes
+- [x] HIGH-2 — RETRACTED (by design): `.env.example` intentionally not retained; optional note added to `docs/confirmation.md` Phase 3
+- [x] MED-1 — `AIUsageProvider` connectivity subscription leak: retain subscription, cancel on `reset()`/`dispose()` (M5 pattern)
+- [x] MED-2 — `AIUsageProvider.init()` hardcoded stub → read real trial/usage (Firestore `users/{uid}` + `ai_usage/{uid}`)
+- [x] MED-3 — `AIChatProvider.sendMessage` surfaces the mapped friendly error text (bubble + `_error`) instead of the canned message
+- [x] MED-4 — Firestore `chats` rule: participants may read/create; update limited to last-message/unread metadata; delete/rewrite denied (admin-only)
+- [x] MED-5 — Firestore `users/{uid}/activities` create restricted to the sole legit client write (resumeReviewed / 5 pts / own UID); arbitrary points/events denied
+- [x] MED-8 — `AIChatProvider.deleteHistory()` callable call gains `.timeout(...)`; `deleteAIHistory` server gains `timeoutSeconds: 120`
+- [x] MED-6 — Duplicate profile routes: deprecate `/profile-view`; point `/profile/` at the extracted `ProfileView`; update dashboard navigators; remove legacy shim
+- [x] Security mirror tests for MED-4/MED-5 (rules contract, `AlumniGroupChat`-style — `test/security_rules_mirror_test.dart`)
+
+### v8.8.3 Validation
+- [x] `flutter analyze` → 0 errors / 0 warnings (68 pre-existing info lints, none in changed files)
+- [x] `flutter test` → full suite green — 213 pass (verified 2026-08-15; exceeds the 191 expected by MED-7)
+- [x] `node --check functions/index.js` → pass (all AI modules included)
+- [x] `dart format` → clean on all changed files (verified 2026-08-15)
+- [x] `docs/todo.md` updated after every sub-task (this run)
+
+### v8.8.3 Deployment (manual — requires Firebase credentials)
+- [ ] `firebase deploy --only "functions,firestore:rules" --non-interactive` (HIGH-1 + HIGH-3 + rules fixes; MUST complete before 2026-10-30)
+
+## Final Deliverable
+
+- [x] Report: files changed, providers/models, env changes, deletion impl, retention, formatting, security, tests, analyze/test/check results, manual tests (pending device), deployment (confirmed 2026-08-15), limitations
+
+**v8.8.0+91 status: IMPLEMENTED + VALIDATED + DEPLOYED**
+**v8.8.2 status: IMPLEMENTED + VALIDATED (2026-08-15 — 213 tests, analyze clean, format clean)**
+**v8.8.3 status: IMPLEMENTED + VALIDATED (2026-08-15) — deployment pending (MUST complete before 2026-10-30)**

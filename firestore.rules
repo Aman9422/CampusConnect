@@ -103,9 +103,15 @@ service cloud.firestore {
       }
 
       // v7.4: AI interaction history (career assistant)
+      // v8.8 (P5): owner deletes allowed — the user can clear their own AI
+      // chat history (AIChatProvider.deleteHistory → Firestore delete).
+      // Identity is `request.auth.uid` (isOwner), so another user's
+      // ai_interactions can never be deleted. update stays false — history
+      // is append-only; edits go through the delete+resave path.
       match /ai_interactions/{interactionId} {
         allow read, create: if isOwner(userId);
-        allow update, delete: if false;
+        allow delete: if isOwner(userId);
+        allow update: if false;
       }
 
       // v7.4: Recommendation feed (Cloud Functions managed)
@@ -128,8 +134,20 @@ service cloud.firestore {
       }
 
       // v7.4: User activity log
+      // v8.8.3 (MED-5): create is OWNER-ONLY AND restricts the payload to the
+      // sole legitimate client write — the Resume Reviewer logs a
+      // `resumeReviewed` activity worth exactly 5 points (ResumeReviewProvider
+      // on success). A client forging arbitrary `points` or event types
+      // (e.g. 99999 points, or many `chatMessageSent` events) can no longer
+      // self-award the Active Student / Networking Pro badges. The server's
+      // own `logUserActivity` uses the Admin SDK and bypasses rules, so the
+      // engagement/recommendation pipeline is unaffected.
       match /activities/{activityId} {
-        allow read, create: if isOwner(userId);
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) &&
+          request.resource.data.userId == request.auth.uid &&
+          request.resource.data.eventType == 'resumeReviewed' &&
+          request.resource.data.points == 5;
         allow update, delete: if false;
       }
       
@@ -297,10 +315,27 @@ service cloud.firestore {
     // ===============================================
 
     // Chat conversations - only participants can access
+    // v8.8.3 (MED-4): a participant may READ the chat and UPDATE only the
+    // last-message/unread metadata (`lastMessage`, `lastMessageSenderId`,
+    // `lastMessageAt`, `unreadCount`) that `ChatService.sendMessage` /
+    // `markAsRead` write. Full-document rewrite (participants/mentorshipId
+    // tampering) and DELETE are denied to clients — deleting a chat or
+    // rewriting its identity fields requires the Admin SDK (ChatService
+    // `deleteChat`, which has no UI caller, uses the server path only).
     match /chats/{chatId} {
-      // Participants can read/write their chats
-      allow read, write: if isAuthenticated() &&
-                          request.auth.uid in resource.data.participantIds;
+      // Participants can read their chats
+      allow read: if isAuthenticated() &&
+                   request.auth.uid in resource.data.participantIds;
+
+      // Participants may update ONLY messaging metadata — not identity.
+      allow update: if isAuthenticated() &&
+                    request.auth.uid in resource.data.participantIds &&
+                    (request.resource.data.diff(resource.data).affectedKeys()
+                        .hasOnly(['lastMessage', 'lastMessageSenderId',
+                                  'lastMessageAt', 'unreadCount']));
+
+      // No client delete — chat removal is Admin SDK only.
+      allow delete: if false;
 
       // For creating chats, check if user is in the participant list
       allow create: if isAuthenticated() &&

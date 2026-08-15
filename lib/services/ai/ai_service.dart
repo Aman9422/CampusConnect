@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:campusconnect/models/ai_interaction.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 
@@ -125,9 +127,18 @@ class AIService {
 
       // v8.4.2 (S6b/P3): callable call — uid comes from Firebase Auth context
       // on the server; the client no longer transmits `userId`.
+      //
+      // v8.8.1 (regression fix): call WITHOUT the generic type parameter and
+      // deep-convert the result. The callable SDK decodes nested JSON objects
+      // as `Map<Object?, Object?>`; `result.data as Map<String, dynamic>`
+      // (or a `.call<Map<String, dynamic>>` downcast) then throws
+      // `_Map<Object?, Object?> is not a subtype of type Map<String, dynamic>`
+      // for the nested `trial`/`usage` objects — which surfaced as "I could
+      // not process that right now." in every chat message. Same pattern as
+      // `ResumeReviewService.reviewResume`.
       final callable = _functions.httpsCallable('askAI');
       final result = await callable
-          .call<Map<String, dynamic>>({'message': trimmedMessage})
+          .call({'message': trimmedMessage})
           .timeout(
             const Duration(seconds: 30),
             onTimeout: () {
@@ -135,7 +146,10 @@ class AIService {
             },
           );
 
-      return AIResponse.fromJson(result.data);
+      final data = Map<String, dynamic>.from(
+        jsonDecode(jsonEncode(result.data)) as Map,
+      );
+      return AIResponse.fromJson(data);
     } on FirebaseFunctionsException catch (e) {
       throw Exception(_mapFunctionError(e));
     } catch (e) {

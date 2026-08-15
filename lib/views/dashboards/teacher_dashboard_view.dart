@@ -21,7 +21,8 @@ import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/views/dashboards/widgets/teacher_dashboard_sections.dart';
 import 'package:campusconnect/views/dashboards/widgets/teacher_ai_insights_tab.dart';
 import 'package:campusconnect/views/placements/placements_list_view.dart';
-import 'package:campusconnect/views/profile/profile_view.dart' as extracted_profile;
+import 'package:campusconnect/views/profile/profile_view.dart'
+    as extracted_profile;
 import 'package:campusconnect/views/shared/main_navigation_view.dart';
 import 'package:campusconnect/views/teacher/student_analytics_view.dart';
 import 'package:campusconnect/views/widgets/chat_badge.dart';
@@ -123,7 +124,8 @@ class _TeacherDashboardTabState extends State<_TeacherDashboardTab> {
     final analytics = context.read<TeacherAnalyticsProvider>();
     // Retry if we got zero students on the first load — indicates Firestore
     // connection wasn't fully established yet (common on first login).
-    final isEmpty = (analytics.pipelineTotalStudents == 0) &&
+    final isEmpty =
+        (analytics.pipelineTotalStudents == 0) &&
         (analytics.studentData == null || analytics.studentData!.isEmpty) &&
         !analytics.isLoading;
     if (isEmpty) {
@@ -226,7 +228,11 @@ class _TeacherDashboardTabState extends State<_TeacherDashboardTab> {
       ),
       child: Row(
         children: [
-          Icon(Icons.school, color: isDark ? Colors.white : AppTheme.gray900, size: 24),
+          Icon(
+            Icons.school,
+            color: isDark ? Colors.white : AppTheme.gray900,
+            size: 24,
+          ),
           const SizedBox(width: AppTheme.space8),
           Text(
             'Dashboard',
@@ -243,11 +249,14 @@ class _TeacherDashboardTabState extends State<_TeacherDashboardTab> {
           const SizedBox(width: AppTheme.space4),
           ChatBadge(iconColor: isDark ? AppTheme.gray400 : null),
           PopupMenuButton<String>(
-            icon: Icon(Icons.more_vert, color: isDark ? AppTheme.gray400 : AppTheme.gray700),
+            icon: Icon(
+              Icons.more_vert,
+              color: isDark ? AppTheme.gray400 : AppTheme.gray700,
+            ),
             onSelected: (value) async {
               switch (value) {
                 case 'profile':
-                  Navigator.pushNamed(context, profileViewRoute);
+                  Navigator.pushNamed(context, profileRoute);
                   break;
                 case 'settings':
                   Navigator.pushNamed(context, settingsRoute);
@@ -267,8 +276,15 @@ class _TeacherDashboardTabState extends State<_TeacherDashboardTab> {
               PopupMenuItem(
                 value: 'profile',
                 child: ListTile(
-                  leading: Icon(Icons.person_outline, size: 20, color: isDark ? AppTheme.gray400 : null),
-                  title: Text('Profile', style: TextStyle(color: isDark ? Colors.white : null)),
+                  leading: Icon(
+                    Icons.person_outline,
+                    size: 20,
+                    color: isDark ? AppTheme.gray400 : null,
+                  ),
+                  title: Text(
+                    'Profile',
+                    style: TextStyle(color: isDark ? Colors.white : null),
+                  ),
                   dense: true,
                   contentPadding: EdgeInsets.zero,
                 ),
@@ -276,17 +292,21 @@ class _TeacherDashboardTabState extends State<_TeacherDashboardTab> {
               PopupMenuItem(
                 value: 'settings',
                 child: ListTile(
-                  leading: Icon(Icons.settings_outlined, size: 20, color: isDark ? AppTheme.gray400 : null),
-                  title: Text('Settings', style: TextStyle(color: isDark ? Colors.white : null)),
+                  leading: Icon(
+                    Icons.settings_outlined,
+                    size: 20,
+                    color: isDark ? AppTheme.gray400 : null,
+                  ),
+                  title: Text(
+                    'Settings',
+                    style: TextStyle(color: isDark ? Colors.white : null),
+                  ),
                   dense: true,
                   contentPadding: EdgeInsets.zero,
                 ),
               ),
               const PopupMenuDivider(),
-              const PopupMenuItem(
-                value: 'logout',
-                child: Text('Log out'),
-              ),
+              const PopupMenuItem(value: 'logout', child: Text('Log out')),
             ],
           ),
         ],
@@ -329,8 +349,13 @@ class _TeacherDashboardTabState extends State<_TeacherDashboardTab> {
               ),
               ElevatedButton(
                 onPressed: () => Navigator.of(context).pop(true),
-                style: ElevatedButton.styleFrom(backgroundColor: AppTheme.error),
-                child: const Text('Sign Out', style: TextStyle(color: Colors.white)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.error,
+                ),
+                child: const Text(
+                  'Sign Out',
+                  style: TextStyle(color: Colors.white),
+                ),
               ),
             ],
           ),

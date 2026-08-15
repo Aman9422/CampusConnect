@@ -38,6 +38,23 @@ class AlumniGroupChatRuleMirror {
   }) => isAuthenticated && role == 'alumni' && resourceSenderId == authUid;
 }
 
+/// v8.8.2 (B): mirrors the role-gated stream subscription in
+/// `AlumniGroupChatProvider.setRoleForStream` — an Alumni subscribes; a
+/// Student/Teacher/unresolved role never subscribes (log audit finding B:
+/// the guaranteed per-session PERMISSION_DENIED stream error for students).
+class AlumniGroupChatProviderGate {
+  const AlumniGroupChatProviderGate._();
+
+  /// The Firestore stream is subscribed ONLY for alumni. Every other role
+  /// (student, teacher, unresolved null) yields no subscription.
+  static bool shouldSubscribe(String? role) => role == 'alumni';
+
+  /// `canAccess`: the Alumni Community is reachable only when the resolved
+  /// role is alumni AND a user is signed in.
+  static bool canAccessAlumniChat({required bool isAuthenticated, String? role}) =>
+      isAuthenticated && role == 'alumni';
+}
+
 /// Message field contract (Task §7) enforced by the model + service.
 class AlumniGroupMessageContract {
   const AlumniGroupMessageContract._();
@@ -212,6 +229,48 @@ void main() {
           role: 'teacher',
           resourceSenderId: 'TEACHER_1',
           authUid: 'TEACHER_1',
+        ),
+        isFalse,
+      );
+    });
+  });
+
+  group('AlumniGroupChatProviderGate (v8.8.2 role-gated stream)', () {
+    test('alumni subscribe to the real-time stream', () {
+      expect(AlumniGroupChatProviderGate.shouldSubscribe('alumni'), isTrue);
+    });
+
+    test('students NEVER subscribe (no PERMISSION_DENIED stream error)', () {
+      expect(AlumniGroupChatProviderGate.shouldSubscribe('student'), isFalse);
+    });
+
+    test('teachers NEVER subscribe', () {
+      expect(AlumniGroupChatProviderGate.shouldSubscribe('teacher'), isFalse);
+    });
+
+    test('unresolved role (null) does NOT subscribe', () {
+      expect(AlumniGroupChatProviderGate.shouldSubscribe(null), isFalse);
+    });
+
+    test('canAccess requires BOTH an authenticated user AND alumni role', () {
+      expect(
+        AlumniGroupChatProviderGate.canAccessAlumniChat(
+          isAuthenticated: true,
+          role: 'alumni',
+        ),
+        isTrue,
+      );
+      expect(
+        AlumniGroupChatProviderGate.canAccessAlumniChat(
+          isAuthenticated: true,
+          role: 'student',
+        ),
+        isFalse,
+      );
+      expect(
+        AlumniGroupChatProviderGate.canAccessAlumniChat(
+          isAuthenticated: false,
+          role: 'alumni',
         ),
         isFalse,
       );

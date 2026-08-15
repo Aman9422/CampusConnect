@@ -53,6 +53,18 @@ class _AIChatViewState extends State<AIChatView> {
             color: isDark ? Colors.white : AppTheme.gray900,
           ),
         ),
+        // v8.8 (P5): Delete AI chat history action.
+        actions: [
+          if (aiChatProvider.messages.isNotEmpty)
+            IconButton(
+              tooltip: 'Delete chat history',
+              icon: Icon(
+                Icons.delete_outline,
+                color: isDark ? Colors.white : AppTheme.gray900,
+              ),
+              onPressed: _handleDeleteHistory,
+            ),
+        ],
       ),
       body: Column(
         children: [
@@ -391,6 +403,68 @@ class _AIChatViewState extends State<AIChatView> {
         ],
       ),
     );
+  }
+
+  /// v8.8 (P5): Delete the user's AI chat history.
+  ///
+  /// Destructive — requires explicit confirmation. Uses the auth UID via
+  /// `AIChatProvider.deleteHistory` (server enforces ownership through
+  /// `request.auth.uid`). Clears the in-memory chat only AFTER the server
+  /// confirms, so the UI shows no stale messages.
+  Future<void> _handleDeleteHistory() async {
+    final aiChatProvider = context.read<AIChatProvider>();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete chat history?'),
+        content: const Text(
+          'This permanently deletes your entire AI chat history. '
+          'This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(dialogContext).colorScheme.error,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    if (aiChatProvider.isSending) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please wait for the current message to finish.'),
+        ),
+      );
+      return;
+    }
+
+    final success = await aiChatProvider.deleteHistory();
+    if (!mounted) return;
+
+    if (success) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Chat history deleted.')));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not delete your chat history. Please try again later.',
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _handleSendMessage(String text) async {

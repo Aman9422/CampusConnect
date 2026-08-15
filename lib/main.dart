@@ -34,7 +34,6 @@ import 'package:campusconnect/services/firestore/engagement_service.dart'; // v7
 // v7.3: Chat service
 import 'package:campusconnect/services/firestore/chat_service.dart';
 import 'package:campusconnect/services/firestore/teacher_analytics_service.dart'; // v7.3
-import 'package:campusconnect/services/local_preferences_service.dart';
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/views/dashboards/alumni_dashboard_view.dart';
 import 'package:campusconnect/views/dashboards/student_dashboard_view.dart';
@@ -45,7 +44,6 @@ import 'package:campusconnect/views/login_view.dart';
 // import 'package:campusconnect/views/notes_view.dart';
 import 'package:campusconnect/views/notifications_view.dart';
 import 'package:campusconnect/views/profile_setup_view.dart';
-import 'package:campusconnect/views/profile_view.dart';
 import 'package:campusconnect/views/register_view.dart';
 import 'package:campusconnect/views/resume_review_detail_view.dart'; // v6.8
 import 'package:campusconnect/views/resume_review_history_view.dart'; // v6.8
@@ -96,8 +94,12 @@ import 'package:provider/provider.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  // v6.6: Initialize local preferences service
-  await LocalPreferencesService.instance().init();
+  // v8.8.2 (C, MEDIUM): removed the blocking `LocalPreferencesService.init()`
+  // from the startup path. Theme/Layout providers self-initialize lazily via
+  // their own `init()` (which awaits `_prefs.init()` internally), so the
+  // first frame renders with defaults instead of stalling the main thread
+  // (~171 skipped frames / 1.27s `Davey!` in the pid 24538 log). The prefs
+  // resolve a few frames later and the UI converges to the stored theme.
   runApp(const MyApp());
 }
 
@@ -271,7 +273,12 @@ class MyApp extends StatelessWidget {
               // Legacy route deprecated - routes to StudentDashboardView for compatibility
               notesRoute: (context) => const StudentDashboardView(),
               verifyEmailRoute: (context) => const VerifyEmailView(),
-              profileRoute: (context) => const ProfileView(),
+              // v8.8.3 (MED-6): `/profile/` now maps to the extracted
+              // ProfileView (role-aware alumni/student/teacher layout) — the
+              // legacy v2 shim was dead code and `/profile-view` was its
+              // duplicate. `profileViewRoute` is removed below; the alumni and
+              // teacher dashboards already navigate to `/profile/`.
+              profileRoute: (context) => const extracted_profile.ProfileView(),
               editProfileRoute: (context) => const EditProfileView(),
               profileSetupRoute: (context) => const ProfileSetupView(),
               notificationsRoute: (context) => const NotificationsView(),
@@ -309,8 +316,6 @@ class MyApp extends StatelessWidget {
               uploadNotesRoute: (context) => const UploadNotesView(),
               placementsListRoute: (context) => const PlacementsListView(),
               aiChatRoute: (context) => const AIChatView(),
-              profileViewRoute: (context) =>
-                  const extracted_profile.ProfileView(),
               // v7.6: Password reset route
               passwordResetRoute: (context) => const PasswordResetView(),
               // v8.4: Student resume portfolio routes
@@ -637,6 +642,13 @@ class _AuthGuardState extends State<AuthGuard> {
                         .read<EngagementProvider>();
                     final portfolioProvider = context
                         .read<PortfolioProvider>(); // v8.4
+                    // v8.8.2 (B): the alumni group-chat stream is activated
+                    // ONLY once the role is resolved — a non-alumni user
+                    // (student/teacher) never subscribes, so no guaranteed
+                    // PERMISSION_DENIED stream error appears every session.
+                    final alumniGroupChatProvider = context
+                        .read<AlumniGroupChatProvider>(); // v8.8.2
+                    alumniGroupChatProvider.setRoleForStream(roleProvider.role);
 
                     final roleString = roleProvider.role?.name ?? 'student';
 

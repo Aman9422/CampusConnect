@@ -17,7 +17,6 @@ const notesListRoute = '/notes-list';
 const uploadNotesRoute = '/upload-notes';
 const placementsListRoute = '/placements-list';
 const aiChatRoute = '/ai-chat';
-const profileViewRoute = '/profile-view';
 
 // v7.1: Role-based dashboard routes
 const studentDashboardRoute = '/student-dashboard';

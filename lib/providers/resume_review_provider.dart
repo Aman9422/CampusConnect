@@ -69,6 +69,31 @@ class ResumeReviewProvider with ChangeNotifier {
   bool _isInitialized = false;
   bool get isInitialized => _isInitialized;
 
+  // v8.8.2 (E): consecutive transient-failure cooldown. After N consecutive
+  // server-unavailable/network failures (which the `connectivity_plus` guard
+  // can't see — e.g. DNS-level loss), submissions pause for [retryCooldown]
+  // so retry storms do not burn monthly quota on a dead backend.
+  static const int maxConsecutiveTransientFailures = 2;
+  static const Duration retryCooldown = Duration(seconds: 30);
+
+  int _consecutiveTransientFailures = 0;
+  DateTime? _retryBlockedUntil;
+
+  int get consecutiveTransientFailures => _consecutiveTransientFailures;
+
+  /// True while repeated transient failures are on cooldown.
+  bool get isRetryBlocked {
+    final blockedUntil = _retryBlockedUntil;
+    if (blockedUntil == null) return false;
+    return DateTime.now().isBefore(blockedUntil);
+  }
+
+  /// Remaining cooldown (zero when not blocked).
+  Duration get retryCooldownRemaining {
+    if (!isRetryBlocked) return Duration.zero;
+    return _retryBlockedUntil!.difference(DateTime.now());
+  }
+
   // v8.6 (HIGH 2): flag to stop operations/listeners after logout/dispose.
   bool _isDisposed = false;
 
@@ -105,11 +130,21 @@ class ResumeReviewProvider with ChangeNotifier {
 
   /// Can user submit a new review?
   bool get canSubmitReview =>
-      _isOnline && !_isLoading && !_usage.hasReachedLimit && userId != null;
+      _isOnline &&
+      !_isLoading &&
+      !_usage.hasReachedLimit &&
+      !isRetryBlocked && // v8.8.2 (E): paused after repeated transient failures
+      userId != null;
 
   /// User-friendly message for why they can't submit
   String? get submitBlockedReason {
     if (!_isOnline) return "You're offline. Please reconnect.";
+    if (isRetryBlocked) {
+      // v8.8.2 (E): repeated server/network failures — pause retries so the
+      // monthly quota is not burnt on a dead backend.
+      final seconds = retryCooldownRemaining.inSeconds.clamp(1, 9999);
+      return 'Too many recent failures. Try again in $seconds seconds.';
+    }
     if (_usage.hasReachedLimit) {
       return 'Monthly limit reached (${_usage.monthlyLimit} reviews/month). '
           'Resets next month.';
@@ -209,6 +244,11 @@ class ResumeReviewProvider with ChangeNotifier {
     _isDisposed = true;
     _cancelConnectivityMonitoring();
 
+    // v8.8.2 (E): clear the retry cooldown on logout so a fresh login starts
+    // clean (the new session's own failures re-arm it).
+    _consecutiveTransientFailures = 0;
+    _retryBlockedUntil = null;
+
     notifyListeners();
   }
 
@@ -226,6 +266,13 @@ class ResumeReviewProvider with ChangeNotifier {
       _isOnline = !result.contains(ConnectivityResult.none);
 
       if (wasOnline != _isOnline) {
+        // v8.8.2 (E): when the connectivity guard finally reports a restore,
+        // clear the transient-failure cooldown so the user can retry
+        // immediately.
+        if (_isOnline) {
+          _consecutiveTransientFailures = 0;
+          _retryBlockedUntil = null;
+        }
         debugPrint(
           'ResumeReviewProvider: Network ${_isOnline ? "online" : "offline"}',
         );
@@ -292,6 +339,18 @@ class ResumeReviewProvider with ChangeNotifier {
       return false;
     }
 
+    // v8.8.2 (E): repeated transient failures put submissions on a short
+    // cooldown so a dead backend cannot burn monthly quota on retry storms
+    // (connectivity_plus can't detect DNS-level loss — the pid 24538 case).
+    if (isRetryBlocked) {
+      _error =
+          'Too many recent failures. Please wait '
+          '${retryCooldownRemaining.inSeconds.clamp(1, 9999)} seconds '
+          'and try again.';
+      notifyListeners();
+      return false;
+    }
+
     if (_usage.hasReachedLimit) {
       _error =
           'You have reached your monthly review limit '
@@ -324,6 +383,11 @@ class ResumeReviewProvider with ChangeNotifier {
       _usage = response.usage;
       _error = null;
 
+      // v8.8.2 (E): a successful review clears the transient-failure streak /
+      // cooldown — the backend is healthy again.
+      _consecutiveTransientFailures = 0;
+      _retryBlockedUntil = null;
+
       debugPrint(
         'ResumeReviewProvider: Review complete. ATS Score: ${response.review.atsScore}',
       );
@@ -349,7 +413,22 @@ class ResumeReviewProvider with ChangeNotifier {
 
       notifyListeners();
       return true;
+    } on ResumeReviewUnavailableException catch (e) {
+      // v8.8.2 (E): transient server failure — count it toward the cooldown
+      // so a dead backend cannot burn the monthly quota on retry storms.
+      _registerTransientFailure();
+      _error = e.message;
+      notifyListeners();
+      return false;
+    } on ResumeReviewNetworkException catch (e) {
+      // v8.8.2 (E): client-side network failure (DNS-level loss the
+      // connectivity guard can't see) — same cooldown treatment.
+      _registerTransientFailure();
+      _error = e.message;
+      notifyListeners();
+      return false;
     } on ResumeReviewQuotaException catch (e) {
+      // v8.8.2 (E): quota rejections are NOT transient — do not count them.
       _error = e.message;
       if (e.usage != null) {
         _usage = e.usage!;
@@ -357,6 +436,8 @@ class ResumeReviewProvider with ChangeNotifier {
       notifyListeners();
       return false;
     } on ResumeReviewException catch (e) {
+      // Non-transient application error (validation etc.) — leave cooldown
+      // state untouched and just surface the message.
       _error = e.message;
       notifyListeners();
       return false;
@@ -368,6 +449,17 @@ class ResumeReviewProvider with ChangeNotifier {
     } finally {
       _isLoading = false;
       notifyListeners();
+    }
+  }
+
+  /// v8.8.2 (E): record a consecutive transient failure and arm the retry
+  /// cooldown once the threshold is reached.
+  void _registerTransientFailure() {
+    _consecutiveTransientFailures++;
+    if (_consecutiveTransientFailures >= maxConsecutiveTransientFailures) {
+      _retryBlockedUntil = DateTime.now().add(retryCooldown);
+      _consecutiveTransientFailures =
+          0; // Re-arm after cooldown with fresh count.
     }
   }
 

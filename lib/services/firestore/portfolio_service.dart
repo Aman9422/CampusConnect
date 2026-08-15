@@ -115,12 +115,23 @@ class PortfolioService {
     final data = doc.data() as Map<String, dynamic>?;
     final portfolioData = _extractPortfolioMap(data);
     if (portfolioData == null) {
+      // v8.8.3 (audit-discovered noise): only Students maintain a portfolio.
+      // Alumni/Teachers legitimately have no `portfolio` key — a missing key
+      // for them is the EXPECTED state, not the "console has data, app shows
+      // empty" symptom the MB13 diagnostic was built to catch. Gate the
+      // diagnostic on the student role so alumni/teacher sessions stop
+      // logging a confusing "portfolio key is MISSING" line on every cold
+      // start. Students keep the diagnostic — it remains the key debug
+      // signal for student portfolio read failures.
+      final isStudent = data?['role'] == 'student';
       final rawPortfolio = data?['portfolio'];
-      debugPrint(
-        'PortfolioService.getPortfolio: doc USERS/$uid EXISTS but '
-        'portfolio key is ${rawPortfolio == null ? 'MISSING' : 'not a map'}. '
-        'Doc keys present: ${data?.keys ?? const []}',
-      );
+      if (isStudent) {
+        debugPrint(
+          'PortfolioService.getPortfolio: doc USERS/$uid EXISTS but '
+          'portfolio key is ${rawPortfolio == null ? 'MISSING' : 'not a map'}. '
+          'Doc keys present: ${data?.keys ?? const []}',
+        );
+      }
       return PortfolioModel.empty();
     }
 

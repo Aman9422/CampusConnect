@@ -1,5 +1,4 @@
 import 'package:campusconnect/constants/routes.dart';
-import 'package:campusconnect/models/recommendation.dart';
 import 'package:campusconnect/models/student_profile.dart';
 import 'package:campusconnect/providers/activity_feed_provider.dart';
 import 'package:campusconnect/providers/ai_chat_provider.dart';
@@ -35,7 +34,7 @@ import 'package:provider/provider.dart';
 /// AlumniDashboardView — v7.5: Professional tabbed dashboard for alumni.
 ///
 /// 5 tabs:
-/// 0. Dashboard — clean professional overview with activity feed, key metrics, AI picks
+/// 0. Dashboard — clean professional overview with activity feed, key metrics
 /// 1. Mentorship — reuse MentorshipRequestsView
 /// 2. Opportunities — reuse OpportunitiesView
 /// 3. AI Chat — reuse AIChatView
@@ -82,8 +81,8 @@ class AlumniDashboardView extends StatelessWidget {
   }
 }
 
-/// Dashboard tab body — clean, professional layout with compact metrics, activity,
-/// AI picks, and quick actions. No overlapping or redundant sections.
+/// Dashboard tab body — clean, professional layout with compact metrics,
+/// activity, and quick actions. No overlapping or redundant sections.
 class _AlumniDashboardTab extends StatefulWidget {
   const _AlumniDashboardTab();
 
@@ -106,7 +105,6 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
     final opportunities = context.watch<OpportunityProvider>();
     final activityFeed = context.watch<ActivityFeedProvider>();
     context.watch<ChatProvider>();
-    final recommendation = context.watch<RecommendationProvider>();
 
     return Scaffold(
       backgroundColor: isDark
@@ -147,11 +145,7 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
               ),
               const SizedBox(height: AppTheme.space24),
 
-              // 3. AI Smart Picks
-              _buildAIPicksSection(context, recommendation, isDark),
-              const SizedBox(height: AppTheme.space24),
-
-              // 4. Quick Actions
+              // 3. Quick Actions
               _buildQuickActions(context, isDark),
               const SizedBox(height: AppTheme.space24),
 
@@ -194,7 +188,7 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
           onSelected: (value) async {
             switch (value) {
               case 'profile':
-                Navigator.pushNamed(context, profileViewRoute);
+                Navigator.pushNamed(context, profileRoute);
                 break;
               case 'settings':
                 Navigator.pushNamed(context, settingsRoute);
@@ -486,197 +480,6 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
         ],
       ),
     );
-  }
-
-  // ──────────────────────────────────────────────
-  // 3. AI Smart Picks
-  // ──────────────────────────────────────────────
-  Widget _buildAIPicksSection(
-    BuildContext context,
-    RecommendationProvider recommendation,
-    bool isDark,
-  ) {
-    final picks = recommendation.recommendations.take(3).toList();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Text(
-              'AI Smart Picks',
-              style: AppTheme.bodyLarge.copyWith(
-                fontWeight: FontWeight.w600,
-                color: isDark ? Colors.white : AppTheme.gray900,
-              ),
-            ),
-            const SizedBox(width: AppTheme.space8),
-            Icon(Icons.auto_awesome, size: 16, color: AppTheme.secondaryIndigo),
-          ],
-        ),
-        const SizedBox(height: AppTheme.space12),
-        if (recommendation.isLoading && recommendation.recommendations.isEmpty)
-          const Center(
-            child: SizedBox(
-              width: 24,
-              height: 24,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-          )
-        else if (picks.isEmpty)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(AppTheme.space16),
-            decoration: BoxDecoration(
-              color: isDark ? AppTheme.darkSurface : AppTheme.surface,
-              borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
-              border: Border.all(
-                color: isDark ? AppTheme.gray700 : AppTheme.gray200,
-              ),
-            ),
-            child: Text(
-              'Complete your profile and stay active to unlock personalized recommendations.',
-              style: AppTheme.bodySmall.copyWith(
-                color: isDark ? AppTheme.gray400 : AppTheme.gray600,
-              ),
-            ),
-          )
-        else
-          Container(
-            decoration: BoxDecoration(
-              color: isDark ? AppTheme.darkSurface : AppTheme.surface,
-              borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
-              border: Border.all(
-                color: isDark ? AppTheme.gray700 : AppTheme.gray200,
-              ),
-            ),
-            child: Column(
-              children: picks
-                  .map((r) => _recommendationCard(context, r, isDark))
-                  .toList(),
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _recommendationCard(
-    BuildContext context,
-    Recommendation recommendation,
-    bool isDark,
-  ) {
-    final scoreColor = recommendation.score >= 75
-        ? AppTheme.success
-        : AppTheme.primaryBlue;
-
-    return InkWell(
-      onTap: () async {
-        await context.read<RecommendationProvider>().markInteracted(
-          recommendation.id,
-        );
-        if (!context.mounted) return;
-        switch (recommendation.type) {
-          case RecommendationType.mentor:
-          case RecommendationType.mentorship:
-            Navigator.pushNamed(context, mentorshipRequestsRoute);
-            break;
-          case RecommendationType.job:
-            Navigator.pushNamed(context, opportunitiesRoute);
-            break;
-          case RecommendationType.chat:
-            Navigator.pushNamed(context, aiChatRoute);
-            break;
-          case RecommendationType.skill:
-            Navigator.pushNamed(context, profileSetupRoute);
-            break;
-        }
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppTheme.space16,
-          vertical: 14,
-        ),
-        decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(
-              color: isDark ? AppTheme.gray700 : AppTheme.gray200,
-            ),
-          ),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: scoreColor.withValues(alpha: isDark ? 0.2 : 0.1),
-                borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
-              ),
-              child: Icon(
-                _recommendationIcon(recommendation.type),
-                color: scoreColor,
-                size: 18,
-              ),
-            ),
-            const SizedBox(width: AppTheme.space12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    recommendation.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: AppTheme.bodyMedium.copyWith(
-                      fontWeight: FontWeight.w600,
-                      color: isDark ? Colors.white : AppTheme.gray900,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    recommendation.description,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: AppTheme.bodySmall.copyWith(
-                      color: isDark ? AppTheme.gray400 : AppTheme.gray600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: AppTheme.space8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: scoreColor.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(AppTheme.radiusFull),
-              ),
-              child: Text(
-                '${recommendation.score.round()}%',
-                style: AppTheme.caption.copyWith(
-                  color: scoreColor,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  IconData _recommendationIcon(RecommendationType type) {
-    switch (type) {
-      case RecommendationType.mentor:
-      case RecommendationType.mentorship:
-        return Icons.groups_rounded;
-      case RecommendationType.job:
-        return Icons.work_outline_rounded;
-      case RecommendationType.chat:
-        return Icons.chat_bubble_outline_rounded;
-      case RecommendationType.skill:
-        return Icons.lightbulb_outline_rounded;
-    }
   }
 
   // ──────────────────────────────────────────────

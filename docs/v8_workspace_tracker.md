@@ -1,7 +1,114 @@
 # CampusConnect — Workspace Tracker
 
-## Status: IMPLEMENTATION COMPLETE — ✅ DEPLOYED (2026-08-09, v8.7: `firestore.rules` for `alumni_group_messages`)
-## Version: CampusConnect v8.7.0+90 — Alumni Experience Simplification & Alumni Group Chat (2026-08-09)
+## Status: IMPLEMENTATION COMPLETE + AUTOMATED VALIDATION PASSED — ✅ DEPLOYED (2026-08-15, v8.8: functions + firestore.rules)
+## Version: CampusConnect v8.8.0+91 — AI Provider Migration, Response Quality & Chat Lifecycle Hardening (2026-08-15)
+
+---
+
+## v8.8 — AI Provider Migration, Response Quality & Chat Lifecycle Hardening
+
+> Source: `docs/Task.md` (v8.8 goal) · Executed via `docs/todo.md` (Phase 0–13) · Audit: `project_info__20.md` (AI architecture) · Issues log: `docs/issues.md` (v8.8 section) · Confirmation: `docs/confirmation.md` (v8.8 banner)
+
+### Objective
+
+Harden the AI layer and improve the AI chat UX: migrate the primary provider/model, update the HuggingFace fallback, audit AI secrets/env, fix raw Markdown artifacts in chat responses, add user-controlled AI chat deletion, add automatic retention cleanup, and preserve the existing AI/quota/security architecture (no second pipeline).
+
+### What Shipped
+
+| # | Item | Deliverable |
+|---|------|-------------|
+| P1 | **Primary provider migration** | Groq model `llama-3.1-8b-instant` → **`openai/gpt-oss-20b`** (`functions/ai/groqProvider.js`). Env-configurable via `GROQ_MODEL`. JSON mode (`response_format`) preserved; 30 s timeout, 429/5xx/malformed handling preserved; endpoint/auth unchanged. |
+| P2 | **HF fallback migration** | `meta-llama/Llama-3.1-8B-Instruct` → **`openai/gpt-oss-20b`** via Inference Providers (`functions/ai/huggingfaceProvider.js`). Env-configurable via `HF_MODEL`. Bearer auth, 60 s timeout, 429/503 preserved. JSON mode added for resume-review/analysis parity. |
+| P3 | **Automatic fallback chain** | `callAIProvider` now retries HuggingFace on any primary failure (missing key, timeout, 429, 5xx, malformed response) for chat + resume review + deep analysis. Single-provider `AI_PROVIDER=huggingface` mode preserved. No second pipeline. |
+| P4 | **Chat response formatting** | `normalizeChatText` in `functions/ai/aiProvider.js` — strips `**`/`*`/`__` emphasis only when wrapping a word, converts `###` headings to plain lines, `-`/`*` bullets to `•`, keeps fenced-code inner text, unescapes literal `\n`, preserves legitimate `*` (`C++`, `a*b`, `5 * 4`). Applied ONLY in `generateChatResponse`; resume/deep-analysis JSON untouched. `CHAT_SYSTEM_PROMPT` tightened. |
+| P5 | **AI chat deletion** | `deleteAIHistory` callable — auth-uid owner-scoped (`request.auth.uid`, never client userId), deletes `users/{uid}/ai_interactions` + legacy `ai_conversations`, batched ≤400. `AIChatProvider.deleteHistory()` clears memory + reloads. `AIChatView` AppBar delete action + confirmation dialog. `firestore.rules`: `ai_interactions` gained `allow delete: if isOwner(userId)` (update stays false — no rule weakening). |
+| P6 | **Retention cleanup** | `cleanupExpiredAIConversations` daily `onSchedule` (03:00 UTC). `AI_RETENTION_DAYS` env (validated positive int, conservative default 90). Batched/idempotent deletes of ONLY expired `ai_interactions` (collectionGroup) + `ai_conversations`; recent chats never touched; aggregate-only logs. |
+| P7 | **Env/secret audit** | `functions/.env.example` documents `AI_PROVIDER`, `GROQ_API_KEY`, `HUGGINGFACE_API_KEY`, `GROQ_MODEL`, `HF_MODEL`, `AI_RETENTION_DAYS`. No keys in source/logs/docs; valid keys not rotated. |
+| P8 | **Quota preserved** | v8.6 `consumeResumeQuota`/`rollbackResumeUsage`/`getResumeUsage` untouched. Quota is application-level — provider fallback does not double-charge (one credit per logical request). |
+| P9 | **Tests** | 3 new files, 43 tests: `test/ai_provider_fallback_test.dart` (13), `test/ai_response_formatting_test.dart` (17), `test/ai_chat_deletion_test.dart` (13) — provider/fallback, formatting/markdown-preservation, deletion/retention/security-batching contracts. |
+| P10 | **Version + docs** | `pubspec.yaml` `8.7.0+90` → `8.8.0+91`. `docs/todo.md`, `docs/issues.md`, `docs/confirmation.md`, `docs/v8_workspace_tracker.md` updated. |
+
+### Validation (Phase 11)
+
+- `flutter analyze` → **0 errors / 0 warnings** (68 pre-existing info lints, none in v8.8 files)
+- `flutter test` → **167/167 passed** (124 existing + 43 new v8.8)
+- `node --check functions/index.js` + all `functions/ai/*.js` → pass
+- `dart format` → clean on all changed files
+- No API keys committed; no obsolete model references remain (`llama-3.1-8b-instant`, `meta-llama/Llama-3.1-8B-Instruct` searched)
+
+### Deployment Status
+
+✅ **DEPLOYED 2026-08-15** — `firebase deploy --only "functions,firestore:rules" --non-interactive` **SUCCESS**. All 17 functions updated (incl. **created**: `deleteAIHistory`, `cleanupExpiredAIConversations`); `firestore.rules` compiled + released (owner delete on `users/{uid}/ai_interactions`). `functions/.env` keys verified present before deploy; env vars loaded into the deployed functions. Remaining: on-device manual matrix (Phase 12, `docs/todo.md`).
+
+---
+
+## v8.8.2 — Log Audit Fixes (project_info__22 / project_info__23 — pid 24538 session, 2026-08-15)
+
+> Source: `project_info__22.md` / `project_info__23.md` (2026-08-15 log audit) · Fixes tracked in `docs/todo.md` (v8.8.2 section) · Status: **IMPLEMENTED + VALIDATED (2026-08-15)**
+
+### Objective
+
+Resolve the HIGH/MED/LOW findings from the pid 24538 log audit: a crash-safe quota-reservation guard for `reviewResume`, Alumni Group Chat stream role-gating, startup jank reduction, a storage-upload diagnostic disposition, and retry-storm throttling for quota-burning calls.
+
+### What Shipped
+
+| # | Item | Fix |
+|---|------|-----|
+| A | **HIGH — Quota-leak guard for `reviewResume`** | `consumeResumeQuota` now stamps a per-request reservation (`pendingRequestId` / `pendingSince`) on `resume_usage/{uid}`. Success clears it (`clearResumeReservation`); AI-failure rollback clears it atomically (`rollbackResumeUsage`); new daily `compensateStaleResumeQuota` sweep (04:00 UTC) refunds stale (>24h) un-cleared reservations left by function crashes/500s — no permanent charge for undelivered reviews, no double-refund, never clears below 0. |
+| B | **MEDIUM — Gate Alumni Group Chat stream on the alumni role** | `AlumniGroupChatProvider` no longer subscribes for students/teachers: `initWithUser` stores the user only; `setRoleForStream(role)` subscribes only when the role resolves to Alumni; `AuthGuard` activates the stream after the role loads (`setRoleForStream(roleProvider.role)`). Eliminates the guaranteed PERMISSION_DENIED stream error every non-alumni session. |
+| C | **MEDIUM — Startup jank reduction** | Removed the blocking `LocalPreferencesService.init()` from `main()` pre-`runApp`. Theme/Layout providers resolve async and render defaults first (~171 skipped frames / 1.27s saved). Full `flutter run --profile` profiling remains a documented follow-up. |
+| D | **LOW — Storage upload state warning** | Investigated — benign artifact: upload completed (`INTERNAL_STATE_SUCCESS`); the cancel is a post-success navigation/retry artifact. No data loss, no code change. |
+| E | **LOW/MEDIUM — Retry-storm throttling** | `ResumeReviewService` throws typed `ResumeReviewUnavailableException` / `ResumeReviewNetworkException` (server-unavailable / network). `ResumeReviewProvider.submitReview` counts consecutive transient failures and arms a 30s cooldown (`isRetryBlocked` / `submitBlockedReason`), so a dead backend cannot burn the monthly quota on retry storms; clears on success / connectivity restore. Mirrored in `test/resume_retry_throttle_test.dart`. |
+
+### Files Changed
+
+`functions/index.js` (quota reservation + `compensateStaleResumeQuota` sweep), `lib/providers/alumni_group_chat_provider.dart`, `lib/main.dart`, `lib/providers/resume_review_provider.dart`, `lib/services/ai/resume_review_service.dart`, `test/resume_retry_throttle_test.dart` (new), `test/alumni_group_chat_test.dart` (role-gate stream tests), `docs/todo.md`, `docs/issues.md`.
+
+### Validation
+
+- `flutter analyze` → **0 errors / 0 warnings** (68 pre-existing info lints, none in changed files)
+- `flutter test` → **213/213 passed** (verified 2026-08-15)
+- `node --check functions/index.js` + all `functions/ai/*.js` → pass
+- `dart format` → clean on all changed files (`lib/providers/resume_review_provider.dart` reformatted this run)
+
+---
+
+## v8.8.3 — project_info__23 Follow-up (audit addendum, 2026-08-15)
+
+> `project_info__23.md` retracts HIGH-2 (`.env.example` is by design — a one-time setup template; the live `functions/.env` is the source of truth) and carries over the remaining HIGH + MED findings from `project_info__22.md`. Status: **IMPLEMENTED + VALIDATED (2026-08-15) — deployment pending (before 2026-10-30)**.
+
+### What Shipped
+
+| # | Item | Fix |
+|---|------|-----|
+| HIGH-1 | **`askAI` timeout** | `askAI` callable → `{maxInstances: 10, timeoutSeconds: 120}`. The Groq(30s)→HF(60s) fallback chain needs up to 90s; the default 60s callable timeout killed the chat fallback mid-flight. |
+| HIGH-3 | **Node runtime** | `functions/package.json` `engines.node` → `"22"` (Node 20 decommissioned 2026-10-30). ⏳ **Redeploy required before 2026-10-30.** |
+| HIGH-4 | **Field contract VERIFIED** | `deleteAIHistory` queries legacy `ai_conversations` by `userId` (owner-scoped); `cleanupExpiredAIConversations` by `timestamp` — both exactly match the fields `askAI` writes. No code change. |
+| HIGH-2 | **RETRACTED (by design)** | `.env.example` intentionally not retained (owner clarification); optional note added to `docs/confirmation.md` Phase 3. Non-issue. |
+| MED-1 | **`AIUsageProvider` connectivity leak** | Retained `_connectivitySubscription`; cancelled in `reset()`/`dispose()` (M5 pattern). |
+| MED-2 | **`AIUsageProvider.init()` hardcoded stub** | Reads real trial/usage — `users/{uid}` (`aiTrialStartedAt`/`aiTrialExpiresAt`) + `ai_usage/{uid}` (`dailyCount`) — with tolerant timestamp parsing; failures fall back to neutral defaults. |
+| MED-3 | **Chat error surfacing** | `AIChatProvider.sendMessage` shows the mapped friendly error text (bubble + `_error`) via `ErrorMessages.getUserFriendlyMessage(e)` instead of a canned message. |
+| MED-4 | **`chats` rule** | Participants may read/create; update limited to `lastMessage`/`lastMessageSenderId`/`lastMessageAt`/`unreadCount`; delete/rewrite denied (Admin SDK only). |
+| MED-5 | **`activities` rule** | `users/{uid}/activities` create restricted to owner + `eventType == 'resumeReviewed'` + `points == 5` + own UID; arbitrary points/events denied; update/delete denied. Server's `logUserActivity` (Admin SDK) unaffected. |
+| MED-6 | **Duplicate profile routes** | `/profile-view` removed (only comment mentions remain); `/profile/` → extracted `ProfileView`; alumni/teacher dashboard navigators already used it; legacy shim deleted. |
+| MED-7 | **Stale todo checkboxes (closed this run)** | v8.8.2/8.8.3 validation blocks in `docs/todo.md` verified and checked — expected 191 tests was conservative; actual **213**. Workspace tracker updated alongside. |
+| MED-8 | **`deleteAIHistory` timeouts** | Client `AIChatProvider.deleteHistory()` call gains `.timeout(Duration(seconds: 120))`; server `deleteAIHistory` gains `timeoutSeconds: 120`. |
+| — | **Security mirror tests** | `test/security_rules_mirror_test.dart` (new) — MED-4/MED-5 rules contracts mirrored as pure Dart tests (chat read/update/delete, activities create/points/UID, read-owner). |
+
+### Files Changed
+
+`functions/index.js` (askAI + deleteAIHistory timeouts), `functions/package.json` (engines.node 22), `lib/providers/ai_usage_provider.dart`, `lib/providers/ai_chat_provider.dart`, `lib/main.dart` (MED-6 route), `firestore.rules` (MED-4/MED-5), `lib/constants/routes.dart`, `lib/views/dashboards/alumni_dashboard_view.dart`, `lib/views/dashboards/teacher_dashboard_view.dart`, `lib/views/profile/profile_view.dart`, `test/security_rules_mirror_test.dart` (new), `docs/todo.md`, `docs/confirmation.md`.
+
+### Validation
+
+- `flutter analyze` → **0 errors / 0 warnings** (68 pre-existing info lints, none in changed files)
+- `flutter test` → **213/213 passed** (verified 2026-08-15; exceeds the 191 expected by MED-7)
+- `node --check functions/index.js` + all `functions/ai/*.js` → pass
+- `dart format` → clean on all changed files
+
+### Deployment Status
+
+⏳ **PENDING — must complete before 2026-10-30.** `firebase deploy --only "functions,firestore:rules" --non-interactive` is required to ship HIGH-1 (120s `askAI` timeout), HIGH-3 (Node 22 runtime engine), and the MED-4/MED-5 `firestore.rules` fixes. The live runtime still runs Node 20 with the 60s default `askAI` timeout until this deploy.
 
 ---
 

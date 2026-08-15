@@ -127,11 +127,14 @@ class ResumeReviewService {
           );
         case 'internal':
         case 'unavailable':
-          throw ResumeReviewException(
+          // v8.8.2 (E): typed as a transient server failure so the provider
+          // can treat repeated occurrences as "likely offline" and pause
+          // retries (protects the monthly quota from retry storms).
+          throw ResumeReviewUnavailableException(
             'Server error. Please try again later.',
           );
         case 'deadline-exceeded':
-          throw ResumeReviewException(
+          throw ResumeReviewUnavailableException(
             'Request timed out. Please try again.',
           );
         default:
@@ -145,7 +148,9 @@ class ResumeReviewService {
       debugPrint('ResumeReviewService error: $e');
       if (e.toString().contains('SocketException') ||
           e.toString().contains('network')) {
-        throw ResumeReviewException(
+        // v8.8.2 (E): typed as a network failure — the provider counts these
+        // toward the transient-failure cooldown.
+        throw ResumeReviewNetworkException(
           'No internet connection. Please check your network.',
         );
       }
@@ -232,4 +237,17 @@ class ResumeReviewQuotaException extends ResumeReviewException {
   final ResumeReviewUsage? usage;
 
   ResumeReviewQuotaException(super.message, {this.usage});
+}
+
+/// v8.8.2 (E): transient server-side failure (`internal` / `unavailable` /
+/// `deadline-exceeded`). The provider counts repeated instances toward the
+/// retry cooldown so a dead backend does not burn monthly quota.
+class ResumeReviewUnavailableException extends ResumeReviewException {
+  ResumeReviewUnavailableException(super.message);
+}
+
+/// v8.8.2 (E): client-side network failure (socket / DNS-level). Counts toward
+/// the same transient-failure cooldown.
+class ResumeReviewNetworkException extends ResumeReviewException {
+  ResumeReviewNetworkException(super.message);
 }
