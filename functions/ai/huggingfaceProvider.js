@@ -9,10 +9,12 @@
  *   HUGGINGFACE_API_KEY - Required fine-grained token from
  *     https://huggingface.co/settings/tokens
  *     (needs "Make calls to Inference Providers" permission)
+ *   HF_MODEL           - Optional model override (default "openai/gpt-oss-20b")
  *
- * Model: meta-llama/Llama-3.1-8B-Instruct
- *   - Supported by 8+ inference providers (free tier available)
- *   - OpenAI-compatible chat completions format
+ * Model: openai/gpt-oss-20b (v8.8 fallback — same model as the Groq primary,
+ * so provider failover is seamless: identical capabilities + output style).
+ * - Supported on Inference Providers via the OpenAI-compatible router
+ * - Supports structured outputs (response_format)
  */
 
 const https = require("https");
@@ -22,10 +24,10 @@ const HF_API_URL = "https://router.huggingface.co/v1/chat/completions";
 
 /**
  * Model to use via HuggingFace Inference Providers.
- * meta-llama/Llama-3.1-8B-Instruct has wide provider support:
- * Cerebras, SambaNova, Novita, Nscale, OVHcloud, Scaleway, Nebius AI, Featherless AI
+ * v8.8: migrated from meta-llama/Llama-3.1-8B-Instruct to openai/gpt-oss-20b.
+ * Overridable via HF_MODEL for future migrations without a code deploy.
  */
-const HF_MODEL = "meta-llama/Llama-3.1-8B-Instruct";
+const HF_MODEL = process.env.HF_MODEL || "openai/gpt-oss-20b";
 
 /** Maximum tokens for the response */
 const MAX_TOKENS = 2048;
@@ -47,6 +49,7 @@ const TEMPERATURE = 0.3;
  * @throws {Error} If API call fails or key is missing
  */
 async function callHuggingFaceAPI(systemPrompt, userPrompt, options = {}) {
+  const useJsonMode = options.jsonMode !== false; // default true
   const apiKey = process.env.HUGGINGFACE_API_KEY;
 
   if (!apiKey) {
@@ -58,8 +61,7 @@ async function callHuggingFaceAPI(systemPrompt, userPrompt, options = {}) {
     );
   }
 
-  // OpenAI-compatible chat completions format
-  const requestBody = JSON.stringify({
+  const body = {
     model: HF_MODEL,
     messages: [
       { role: "system", content: systemPrompt },
@@ -68,7 +70,16 @@ async function callHuggingFaceAPI(systemPrompt, userPrompt, options = {}) {
     max_tokens: MAX_TOKENS,
     temperature: TEMPERATURE,
     stream: false,
-  });
+  };
+
+  // v8.8: the router supports OpenAI-style structured outputs
+  // (response_format) for gpt-oss models — mirror the Groq JSON mode so the
+  // fallback produces equally reliable JSON for resume-review/analysis.
+  if (useJsonMode) {
+    body.response_format = { type: "json_object" };
+  }
+
+  const requestBody = JSON.stringify(body);
 
   console.log(
     `HuggingFace: Calling ${HF_MODEL} via Inference Providers (max_tokens: ${MAX_TOKENS})`

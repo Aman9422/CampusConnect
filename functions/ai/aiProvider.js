@@ -10,13 +10,20 @@
  *   generateResumeReviewAI(resumeText, targetRole, experienceLevel) - Resume review (JSON)
  *
  * Providers:
- *   groq       - Groq LPU Cloud with LLaMA 3.1 8B Instant (fast, free tier)
- *   huggingface - HuggingFace Inference Providers with LLaMA 3.1 8B Instruct (multi-provider)
+ *   groq       - Groq LPU Cloud with openai/gpt-oss-20b (v8.8 primary)
+ *   huggingface - HuggingFace Inference Providers with openai/gpt-oss-20b (v8.8 fallback)
+ *
+ * Fallback (v8.8): when the configured primary provider fails/times out, the
+ * request automatically retries against HuggingFace Inference Providers so
+ * chat, resume review and deep analysis all stay available. No duplicate
+ * pipeline — one router, one normalized response.
  *
  * Environment:
  *   AI_PROVIDER = "groq" | "huggingface" (default: "groq")
  *   GROQ_API_KEY = Groq API key from https://console.groq.com
  *   HUGGINGFACE_API_KEY = HuggingFace token from https://huggingface.co/settings/tokens
+ *   GROQ_MODEL = Optional Groq model override (default "openai/gpt-oss-20b")
+ *   HF_MODEL   = Optional HuggingFace model override (default "openai/gpt-oss-20b")
  */
 
 const { callGroqAPI } = require("./groqProvider");
@@ -72,7 +79,8 @@ Guidelines:
 - If the user greets you, introduce yourself briefly and ask how you can help.
 - If you don't know something specific, be honest and suggest where to find the answer.
 - Stay focused on education, career, and professional development topics.
-- Format responses with line breaks and bullet points for readability.
+- Format responses as plain text with line breaks. Use "• " at the start of bullet lines — never use asterisks (*), hashes (#), backticks, or Markdown symbols.
+- Do NOT use Markdown: no **bold**, no *italics*, no ### headings, no code fences. Just readable plain paragraphs and bullets.
 - Do NOT return JSON. Respond in natural conversational text.`;
 
 /**
@@ -157,6 +165,16 @@ Return ONLY a valid JSON object with: atsScore, strengths, missingKeywords, form
 /**
  * Route an AI call to the configured provider.
  *
+ * v8.8 (Phase 9): contains the PRIMARY → HuggingFace fallback chain. When the
+ * configured primary provider fails (missing key, network, timeout, rate
+ * limit, 5xx, malformed response), the request is retried once against
+ * HuggingFace Inference Providers so chat, resume review and deep analysis
+ * all stay available. The provider reported to the caller is the one that
+ * actually produced the response (`providerUsed`).
+ *
+ * NOTE: if the admin configured `huggingface` as AI_PROVIDER (single-provider
+ * mode), there is nothing to fall back to — the HF error surfaces directly.
+ *
  * @param {string} systemPrompt - System-level instructions
  * @param {string} userPrompt - User message
  * @param {object} [options] - Options passed to the provider
@@ -168,24 +186,31 @@ async function callAIProvider(systemPrompt, userPrompt, options = {}) {
 
   console.log(`AI Provider: Using "${provider}" (jsonMode: ${options.jsonMode !== false})`);
 
-  let rawResponse;
-
-  switch (provider) {
-    case "groq":
-      rawResponse = await callGroqAPI(systemPrompt, userPrompt, options);
-      break;
-
-    case "huggingface":
-      rawResponse = await callHuggingFaceAPI(systemPrompt, userPrompt, options);
-      break;
-
-    default:
-      throw new Error(
-        `Unknown AI provider: "${provider}". Supported: groq, huggingface`
-      );
+  // Single-provider mode (huggingface or unknown): no fallback available.
+  if (provider === "huggingface") {
+    const rawResponse = await callHuggingFaceAPI(systemPrompt, userPrompt, options);
+    return { content: rawResponse, provider };
   }
 
-  return { content: rawResponse, provider };
+  // Groq primary (the v8.8 default) with HuggingFace fallback.
+  try {
+    const rawResponse = await callGroqAPI(systemPrompt, userPrompt, options);
+    return { content: rawResponse, provider: "groq" };
+  } catch (primaryError) {
+    console.error(
+      `AI Provider: Groq failed — falling back to HuggingFace. Reason: ${primaryError.message}`
+    );
+    // No fallback when the fallback's own key is missing is handled by the
+    // provider itself — surface a clear deployment error, never a key leak.
+    if (!process.env.HUGGINGFACE_API_KEY) {
+      throw new Error(
+        "AI providers unavailable: Groq failed and HUGGINGFACE_API_KEY is not configured " +
+        `(primary error: ${primaryError.message})`
+      );
+    }
+    const rawResponse = await callHuggingFaceAPI(systemPrompt, userPrompt, options);
+    return { content: rawResponse, provider: "huggingface" };
+  }
 }
 
 // ============================================================
@@ -214,8 +239,83 @@ async function generateAIResponse(resumeText, targetRole) {
 }
 
 /**
+ * Normalize raw chat text for the Flutter chat UI (v8.8 Phase 4).
+ *
+ * Turns accidental raw Markdown into readable plain text WITHOUT blindly
+ * stripping characters that can legitimately appear in content (e.g. "C++",
+ * "2*3=6", footnotes). Order matters:
+ *
+ *   1. Unescape literal \n / \t sequences some providers emit.
+ *   2. Strip fenced code blocks (```...```) — their inner content is kept
+ *      as plain text (code is displayed as-is when appropriate).
+ *   3. Strip inline code backticks (`x`) — content is kept.
+ *   4. Strip emphasis markers (**, *, __) only when they wrap a word/phrase
+ *      and are NOT numeric/operator usages like "C++" or "a*b".
+ *   5. Convert ATX headings (###, ##, #) to plain lines, collapsing the
+ *      leading "#"s. Bold "### Heading" artifacts become "Heading ".
+ *   6. Normalize Markdown-style bullet lines ("- item", "* item") and
+ *      numbered lists ("1. item") to "• " bullets.
+ *   7. Trim trailing whitespace per line and collapse >2 blank lines.
+ *
+ * The chat system prompt already forbids Markdown, so this is a defensive
+ * cleanup pass, not a renderer. Resume-review/deep-analysis JSON parsing is
+ * untouched — this function is applied ONLY to chat responses.
+ *
+ * @param {string} text - Raw chat response from the AI provider
+ * @returns {string} Cleaned plain text
+ */
+function normalizeChatText(text) {
+  if (!text || typeof text !== "string") return "";
+
+  let output = text
+    // 1. Literal escape sequences from some providers.
+    .replace(/\\n/g, "\n")
+    .replace(/\\t/g, "    ")
+    // 2. Fenced code blocks — keep inner content as plain text.
+    .replace(/```(?:[a-zA-Z0-9_+-]*)\s*\n?([\s\S]*?)\n?\s*```/g, "$1")
+    // Strip inline code backticks.
+    .replace(/`([^`\n]+)`/g, "$1");
+
+  // 3. Emphasis: **bold** / __bold__ → content; *italic* / _italic_ →
+  // content, but only when the markers wrap at least one word character and
+  // are not part of a longer token (protects "C++", "a*b", "2*3").
+  output = output.replace(
+    /(\*\*|__)(?=\S)(.+?)(?<=\S)\1/g,
+    "$2"
+  );
+  output = output.replace(
+    /(?<![A-Za-z0-9*_])(\*|_)(?=\S)([A-Za-z][^*\n]*?)(?<=\S)\1(?![A-Za-z0-9*_])/g,
+    "$2"
+  );
+
+  // 4. Headings: "### Heading" / "## Heading" / "# Heading" → plain line.
+  output = output.replace(/^\s{0,3}(#{1,6})\s+(.+)$/gm, "$2");
+
+  // 5. List bullets: "- item", "* item", "+ item" → "• item".
+  output = output.replace(/^\s{0,3}[-*+]\s+/gm, "• ");
+
+  // 6. Numbered lists: keep the numbering but normalize to "1. " spacing.
+  output = output.replace(/^\s{0,3}(\d+)[.)]\s+/gm, "$1. ");
+
+  // 7. Line cleanup.
+  output = output
+    .split("\n")
+    .map((line) => line.replace(/\s+$/g, ""))
+    .join("\n")
+    // Collapse 3+ blank lines into 2.
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  return output;
+}
+
+/**
  * Generate AI chat response for the campus assistant.
  * Returns plain text (not JSON).
+ *
+ * v8.8 (Phase 4): the raw provider text passes through [normalizeChatText]
+ * so the Flutter chat UI never sees raw Markdown artifacts (`*`, `**`,
+ * `###`, fences, escaped `\n`). JSON-based resume paths are unaffected.
  *
  * @param {string} message - User's chat message
  * @returns {Promise<{response: string, providerUsed: string}>}
@@ -228,7 +328,7 @@ async function generateChatResponse(message) {
   );
 
   return {
-    response: content.trim(),
+    response: normalizeChatText(content),
     providerUsed: provider,
   };
 }
@@ -363,6 +463,7 @@ module.exports = {
   generateAIResponse,
   generateChatResponse,
   generateResumeReviewAI,
+  normalizeChatText,
   SYSTEM_PROMPT,
   CHAT_SYSTEM_PROMPT,
   RESUME_REVIEW_SYSTEM_PROMPT,

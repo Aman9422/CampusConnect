@@ -6,8 +6,10 @@
  *
  * Environment:
  *   GROQ_API_KEY - Required API key from https://console.groq.com
+ *   GROQ_MODEL   - Optional model override (default "openai/gpt-oss-20b")
  *
- * Model: llama-3.1-8b-instant (fast, free-tier friendly)
+ * Model: openai/gpt-oss-20b (v8.8 primary — OpenAI GPT-OSS 20B, fast,
+ * strong reasoning, 131k context, supports structured outputs)
  */
 
 const https = require("https");
@@ -15,8 +17,12 @@ const https = require("https");
 /** Groq API endpoint */
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 
-/** Model to use - LLaMA 3.1 8B for speed + quality balance */
-const GROQ_MODEL = "llama-3.1-8b-instant";
+/**
+ * Model to use. v8.8: migrated from llama-3.1-8b-instant to
+ * openai/gpt-oss-20b. Overridable via GROQ_MODEL for future migrations
+ * without a code deploy.
+ */
+const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-20b";
 
 /** Maximum tokens for the response */
 const MAX_TOKENS = 2048;
