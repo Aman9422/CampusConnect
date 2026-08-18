@@ -46,6 +46,9 @@ const chatsListRoute = '/chats';
 const chatRoute = '/chat';
 const chatDetailRoute = '/chat-detail';
 
+// v9.0: AI Career Coach — full analysis screen (dashboard shows top 2–3)
+const careerCoachRoute = '/career-coach';
+
 // v8.4: Student Resume Portfolio routes
 const studentPortfolioRoute = '/student-portfolio';
 const editPortfolioRoute = '/edit-portfolio';

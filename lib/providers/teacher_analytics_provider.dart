@@ -28,6 +28,9 @@ class TeacherAnalyticsProvider extends ChangeNotifier {
   PlacementPipelineData? _pipelineData;
   Map<String, dynamic>? _engagementAggregates;
 
+  // v8.9 (Phase 8): recommendation intelligence aggregates
+  Map<String, dynamic>? _recommendationAggregates;
+
   // Getters
   Map<String, dynamic>? get stats => _stats;
   List<Map<String, dynamic>>? get studentData => _studentData;
@@ -40,23 +43,52 @@ class TeacherAnalyticsProvider extends ChangeNotifier {
   PlacementPipelineData? get pipelineData => _pipelineData;
 
   Map<String, dynamic>? get engagementAggregates => _engagementAggregates;
+
+  /// v8.9 (Phase 8): recommendation aggregate getters.
+  Map<String, dynamic>? get recommendationAggregates =>
+      _recommendationAggregates;
+  List<Map<String, dynamic>> get careerGoalDistribution =>
+      (_recommendationAggregates?['careerGoals'] as List<dynamic>? ?? [])
+          .whereType<Map<String, dynamic>>()
+          .toList();
+  List<Map<String, dynamic>> get targetRoleDistribution =>
+      (_recommendationAggregates?['targetRoles'] as List<dynamic>? ?? [])
+          .whereType<Map<String, dynamic>>()
+          .toList();
+  List<Map<String, dynamic>> get recommendationSkillGaps =>
+      (_recommendationAggregates?['topSkillGaps'] as List<dynamic>? ?? [])
+          .whereType<Map<String, dynamic>>()
+          .toList();
+  Map<String, int> get placementTierDistribution =>
+      (_recommendationAggregates?['placementTiers'] as Map<String, dynamic>? ??
+              <String, dynamic>{})
+          .map((k, v) => MapEntry(k, (v as num?)?.toInt() ?? 0));
+  int get strongMatchStudents =>
+      (_recommendationAggregates?['strongMatchStudents'] as int? ?? 0);
+  int get significantGapStudents =>
+      (_recommendationAggregates?['significantGapStudents'] as int? ?? 0);
+
   bool get isLoading => _isLoading;
   String? get error => _error;
 
   /// v8.2: Engagement aggregate getters
-  int get avgEngagement => (_engagementAggregates?['avgEngagement'] as num? ?? 0).round();
-  int get avgProfileStrength => (_engagementAggregates?['avgProfileStrength'] as num? ?? 0).round();
+  int get avgEngagement =>
+      (_engagementAggregates?['avgEngagement'] as num? ?? 0).round();
+  int get avgProfileStrength =>
+      (_engagementAggregates?['avgProfileStrength'] as num? ?? 0).round();
   int get activeAlumni => (_engagementAggregates?['activeAlumni'] as int? ?? 0);
-  int get engagementStudentCount => (_engagementAggregates?['studentCount'] as int? ?? 0);
+  int get engagementStudentCount =>
+      (_engagementAggregates?['studentCount'] as int? ?? 0);
 
   /// v8.2.3: Pipeline getters — backward-compatible, all return unique student counts.
   PlacementPipelineData? get pipelineCounts => _pipelineData;
   int get pipelineEligible => _pipelineData?.eligibleStudents ?? 0;
   int get pipelineApplied => _pipelineData?.appliedStudents ?? 0;
   int get pipelineTotalStudents => _pipelineData?.eligibleStudents ?? 0;
-  int get pipelineTotalPlacements => 0; // Dead getter — placement count comes from PlacementsProvider
-  @Deprecated('Use pipelineData instead') List<int> get allStageValues =>
-      _pipelineData?.allStageValues ?? [];
+  int get pipelineTotalPlacements =>
+      0; // Dead getter — placement count comes from PlacementsProvider
+  @Deprecated('Use pipelineData instead')
+  List<int> get allStageValues => _pipelineData?.allStageValues ?? [];
 
   /// Load all analytics data
   Future<void> loadAnalytics() async {
@@ -77,6 +109,8 @@ class TeacherAnalyticsProvider extends ChangeNotifier {
         _analyticsService.getDepartmentAnalytics(),
         _analyticsService.getApplicationPipelineCounts(),
         _analyticsService.getEngagementAggregates(),
+        // v8.9 (Phase 8): recommendation intelligence aggregates.
+        _analyticsService.getRecommendationAggregates(),
       ]);
 
       if (_isDisposed) return; // Safety check
@@ -89,6 +123,7 @@ class TeacherAnalyticsProvider extends ChangeNotifier {
       _departmentAnalytics = results[5] as List<Map<String, dynamic>>;
       _pipelineData = results[6] as PlacementPipelineData;
       _engagementAggregates = results[7] as Map<String, dynamic>;
+      _recommendationAggregates = results[8] as Map<String, dynamic>;
       _error = null;
 
       debugPrint(
@@ -97,7 +132,7 @@ class TeacherAnalyticsProvider extends ChangeNotifier {
         '${_studentData?.length ?? 0} students, '
         '${_departmentAnalytics?.length ?? 0} depts, '
         '${_pipelineData?.eligibleStudents ?? 0} pipeline eligible, '
-        '${_engagementAggregates?['studentCount'] ?? 0} engagement summaries'
+        '${_engagementAggregates?['studentCount'] ?? 0} engagement summaries',
       );
     } catch (e) {
       if (_isDisposed) return; // Safety check
@@ -236,6 +271,7 @@ class TeacherAnalyticsProvider extends ChangeNotifier {
     _departmentAnalytics = null;
     _pipelineData = null;
     _engagementAggregates = null;
+    _recommendationAggregates = null;
     _isLoading = false;
     _error = null;
 

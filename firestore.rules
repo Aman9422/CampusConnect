@@ -160,7 +160,16 @@ service cloud.firestore {
         allow create: if isOwner(userId);
         allow update, delete: if isOwner(userId);
       }
-      
+
+      // v9.0: Career Coach analysis (Cloud Functions managed)
+      // Owner can read; write is server-only (Admin SDK) to enforce the
+      // single-writer + quota contract. Prevents clients from bypassing
+      // the AI + quota system by writing directly to the summary doc.
+      match /career_coach/{docId} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+
       // All other subcollections under users/{uid}
       match /{subcollection=**} {
         allow read, write: if isOwner(userId);
@@ -229,6 +238,14 @@ service cloud.firestore {
     // RESUME USAGE (Cloud Functions managed)
     // ===============================================
     match /resume_usage/{userId} {
+      allow read: if isOwner(userId);
+      allow write: if false; // Only Cloud Functions can write
+    }
+
+    // ===============================================
+    // v9.0: CAREER COACH USAGE (Cloud Functions managed)
+    // ===============================================
+    match /career_coach_usage/{userId} {
       allow read: if isOwner(userId);
       allow write: if false; // Only Cloud Functions can write
     }
@@ -357,6 +374,19 @@ service cloud.firestore {
     // for aggregate analytics (stats, skill gaps, trends).
     // ===============================================
     match /{path=**}/resumeReviews/{reviewId} {
+      allow read: if isTeacher();
+    }
+
+    // ===============================================
+    // v8.9 (Phase 8/14): TEACHER ANALYTICS — collectionGroup for
+    // recommendations. Teachers may read students' RECOMMENDATION docs for
+    // aggregate intelligence (career goals, target roles, skill gaps,
+    // placement match distribution). Recommendation docs contain only the
+    // engine fields — role/targetRole, skills, reason, scores — never
+    // private resume text or full student profiles. Students remain the
+    // only writers (write:false everywhere) and owners retain read.
+    // ===============================================
+    match /{path=**}/recommendations/{recommendationId} {
       allow read: if isTeacher();
     }
 

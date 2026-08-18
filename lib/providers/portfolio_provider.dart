@@ -47,6 +47,33 @@ import 'package:flutter/foundation.dart';
 ///
 /// v8.4.1 behaviour preserved: resume upload/delete delegate to
 /// [ResumeService] (per-section diff), `initWithUser` is uid-guarded.
+///
+/// v8.9.2 (project_info__25/26): the shared divergence rule used by both the
+/// stream listener and [PortfolioProvider.refresh] — the live Firestore
+/// document is genuinely EMPTY while memory holds data the server never
+/// confirmed this session (wiped doc / never-persisted writes), and no
+/// automatic restore is already in flight. Two trustworthy divergence cases:
+///   1. The server CONFIRMED portfolio content earlier in this session and a
+///      later read reports empty (doc wiped mid-session).
+///   2. Memory was RESTORED FROM THE LOCAL CACHE at startup (last-known-good,
+///      v8.4.3 MB2) and the server read reports empty (doc was already wiped
+///      before this session / the writes never landed). The v8.4.4
+///      stale-guards protect against an empty event racing a JUST-MADE local
+///      write — and the write-in-flight guard already handles that case — so
+///      a cold-start cache restore + empty server read is NOT a stale replay;
+///      it is the user's "80% strength but no recommendations" report.
+/// The rule is a pure top-level function so this state — where the UI holds
+/// data the server cannot see — is unit-testable without Firebase.
+@visibleForTesting
+bool shouldTriggerPortfolioRestore({
+  required bool serverHadContent,
+  required bool restoreAlreadyAttempted,
+  required bool restoredFromCache,
+}) {
+  if (restoreAlreadyAttempted) return false;
+  return serverHadContent || restoredFromCache;
+}
+
 class PortfolioProvider extends ChangeNotifier {
   final PortfolioService _portfolioService;
   final ResumeService _resumeService;
@@ -78,6 +105,59 @@ class PortfolioProvider extends ChangeNotifier {
   String? _lastUid;
   StreamSubscription<PortfolioModel>? _streamSubscription;
 
+  // v8.9.2 (project_info__25/26): has the live Firestore document EVER
+  // reported non-empty portfolio content for this session? The stale-guards
+  // (v8.4.4) are designed to ignore empty server reads so a local cache
+  // replay can never wipe a just-uploaded resume — but that same protection
+  // silently hides a genuinely-empty Firestore doc (the "80% strength, no
+  // recommendations" report: data ONLY in SharedPreferences/cache, doc wiped
+  // by a non-merge set). This flag distinguishes "empty event is a stale
+  // replay" from "the server really has nothing", and [isServerSynced] lets
+  // the UI reconcile instead of lying.
+  bool _serverNonEmpty = false;
+
+  // v8.9.2: a user-facing notice when the in-memory/cached portfolio no
+  // longer matches the server document (memory has data, server is empty).
+  // Consumed by the dashboard/portfolio banner; cleared after a successful
+  // restore or once the stream re-converges.
+  String? _restoreMessage;
+
+  // v8.9.2: self-heal is attempted at most once per divergence so a failing
+  // write cannot spin an infinite write/stream/retry loop. Reset on success
+  // and on a fresh initWithUser.
+  bool _restoreAttempted = false;
+
+  // v9.0 (BUG-3 fix): when `hasFlattenedPortfolioShape` detects root-level
+  // `portfolio.*` keys instead of a nested `portfolio` map, the next
+  // `savePortfolio` call must use a FULL (non-diff) write — passing
+  // `previous: null` — so the flattened keys are overwritten with the
+  // canonical nested shape. Without this, the diff-based save detects no
+  // changes (the read un-flattens the data, so incoming == prior) and
+  // writes nothing, leaving the document flattened permanently.
+  bool _forceFullSave = false;
+
+  // v8.9.2 (audit, project_info__25/26): true when the in-memory portfolio
+  // was RESTORED FROM THE LOCAL CACHE at startup (last-known-good, v8.4.3
+  // MB2) — not read from the live server and not written by this session.
+  // This makes a subsequent EMPTY server read trustworthy divergence instead
+  // of a stale replay: the v8.4.4 stale-guards protect against an empty event
+  // racing a JUST-MADE local write (which the write-in-flight guard already
+  // handles), and no write happens at cold start — so a cache-restored
+  // portfolio + empty server doc is a genuinely wiped document (the "80%
+  // strength but no recommendations" user report) and the self-heal fires.
+  bool _restoredFromCache = false;
+
+  static const String restoreMessageDefault =
+      'Your portfolio is saved on this device but was lost from the server. '
+      'It is being restored automatically.';
+
+  /// v8.9.2: shown when the one-shot automatic restore could not complete
+  /// (offline / permission). The user can push the data back by saving from
+  /// Edit Portfolio or pulling to refresh once connectivity returns.
+  static const String restoreMessageFailed =
+      'Your portfolio couldn\'t be restored automatically. '
+      'Open Edit Portfolio and tap Save again to push it to the server.';
+
   // Getters
   PortfolioModel? get portfolio => _portfolio;
   bool get isLoading => _isLoading;
@@ -86,6 +166,21 @@ class PortfolioProvider extends ChangeNotifier {
   bool get isUploadingResume => _isUploadingResume;
   String? get error => _error;
   bool get hasPortfolio => _portfolio != null;
+
+  /// v8.9.2: non-null while the app holds portfolio data the server no
+  /// longer has (wiped document). The UI surfaces this as a banner so the
+  /// "80% strength but no recommendations" state is never silently
+  /// shown as healthy again.
+  String? get restoreMessage => _restoreMessage;
+
+  /// v8.9.2: true when the live server document carries portfolio content
+  /// (OR there is nothing in memory to be out of sync — a fresh user). False
+  /// when we hold non-empty portfolio data in memory/cache but the server
+  /// document is empty (wiped doc / failed persistence). The UI surfaces a
+  /// "changes not saved to the server" banner when this is false so the
+  /// user's 80%-strength-but-no-data state is never silent again.
+  bool get isServerSynced =>
+      _serverNonEmpty || _portfolio == null || _portfolio!.isEmpty;
 
   /// The uid of the user whose portfolio is currently loaded.
   String? get currentUserId => _lastUid;
@@ -109,6 +204,13 @@ class PortfolioProvider extends ChangeNotifier {
     _lastUid = userId;
     _isLoading = true;
     _error = null;
+    // v8.9.2: fresh session — re-evaluate server state from scratch. The
+    // flags are reset here (NOT on re-init short-circuit above) so a
+    // re-login of the same user re-runs the divergence check + self-heal.
+    _serverNonEmpty = false;
+    _restoreMessage = null;
+    _restoreAttempted = false;
+    _restoredFromCache = false;
     notifyListeners();
 
     try {
@@ -118,7 +220,23 @@ class PortfolioProvider extends ChangeNotifier {
         if (_isDisposed) return;
         if (cached != null && !cached.isEmpty) {
           _portfolio ??= cached;
+          // v8.9.2: remember the source. A cache-restored portfolio is the
+          // last-known-good (v8.4.3 MB2) — an empty server read afterwards is
+          // a wipe, not a stale replay.
+          _restoredFromCache = true;
         }
+      }
+
+      // v9.0 (BUG-3): detect flattened portfolio shape so the next save
+      // can reconstitute the canonical nested map.
+      _forceFullSave = await _portfolioService.hasFlattenedPortfolioShape(
+        userId,
+      );
+      if (_forceFullSave) {
+        debugPrint(
+          'PortfolioProvider: detected flattened portfolio shape for $userId — '
+          'next save will use full (non-diff) write to reconstitute nested map.',
+        );
       }
 
       // Subscribe to the live stream — replaces the one-shot get().
@@ -132,6 +250,13 @@ class PortfolioProvider extends ChangeNotifier {
           final fresh = await _portfolioService.getPortfolio(userId);
           if (_isDisposed) return;
           _portfolio = fresh;
+          // v8.9.2: the one-shot read is the ground truth for the server
+          // side. When memory is still empty (no cache) the flag is set
+          // straight from this read so the very first UI render shows the
+          // correct sync state.
+          if (!fresh.isEmpty) {
+            _serverNonEmpty = true;
+          }
           await _cacheService.cache(userId, fresh);
         } catch (e) {
           // v8.4.8 (MB12): a failed one-shot read must surface the error.
@@ -183,46 +308,109 @@ class PortfolioProvider extends ChangeNotifier {
   /// it made the dashboard placeholder show "No Resume" despite a successful
   /// upload and a resume present in Firestore.
   void _listenToPortfolio(String userId) {
-    _streamSubscription = _portfolioService.portfolioStream(userId).listen(
-      (fresh) async {
-        if (_isDisposed || _lastUid != userId) return;
+    _streamSubscription = _portfolioService
+        .portfolioStream(userId)
+        .listen(
+          (fresh) async {
+            if (_isDisposed || _lastUid != userId) return;
 
-        // 1) A local write is in flight — the in-memory result is the
-        //    authoritative value until the server confirms; the confirmed
-        //    event arrives after and is applied below.
-        if (_isUploadingResume || _isSaving) return;
+            // 1) A local write is in flight — the in-memory result is the
+            //    authoritative value until the server confirms; the confirmed
+            //    event arrives after and is applied below.
+            if (_isUploadingResume || _isSaving) return;
 
-        final current = _portfolio;
+            final current = _portfolio;
 
-        // 2) Never let an empty stream event wipe a portfolio we already
-        //    hold. `PortfolioModel.empty()` means "snapshot had no
-        //    portfolio key" — the signature of a stale pre-write replay or a
-        //    first-time-user snapshot. A real clear goes through
-        //    deleteResume/reset, which set `_portfolio` themselves.
-        if (fresh.isEmpty && current != null && !current.isEmpty) return;
+            // 2) Never let an empty stream event wipe a portfolio we already
+            //    hold. `PortfolioModel.empty()` means "snapshot had no
+            //    portfolio key" — the signature of a stale pre-write replay or
+            //    a first-time-user snapshot. A real clear goes through
+            //    deleteResume/reset, which set `_portfolio` themselves.
+            if (fresh.isEmpty && current != null && !current.isEmpty) {
+              // v8.9.2 (project_info__25/26): distinguish a stale replay from
+              // a genuinely empty server doc. Divergence = the server
+              // CONFIRMED content earlier and now reads empty, OR memory was
+              // restored from the cache at startup and the server reads
+              // empty (the "80% strength but no recommendations" report —
+              // the doc was wiped / writes never landed). On divergence,
+              // surface a restore banner and self-heal by writing the local
+              // portfolio back through a full (non-diff) save. A first empty
+              // event with no cache restore and no prior confirmation stays
+              // a silent stale-replay guard (v8.4.4 behaviour preserved).
+              if (shouldTriggerPortfolioRestore(
+                    serverHadContent: _serverNonEmpty,
+                    restoreAlreadyAttempted: _restoreAttempted,
+                    restoredFromCache: _restoredFromCache,
+                  ) &&
+                  !_isUploadingResume &&
+                  !_isSaving) {
+                _restoreAttempted = true;
+                _restoreMessage = restoreMessageDefault;
+                notifyListeners();
+                unawaited(_attemptRestore(userId));
+              }
+              return;
+            }
 
-        // 3) Never let a stream event drop the resume while memory still has
-        //    one — covers a stale non-empty snapshot (portfolio sections
-        //    without the just-uploaded resume) racing the upload.
-        if (current?.resume?.hasResume == true &&
-            fresh.resume?.hasResume != true) {
-          return;
-        }
+            // 3) Never let a stream event drop the resume while memory still
+            //    has one — covers a stale non-empty snapshot (portfolio
+            //    sections without the just-uploaded resume) racing the upload.
+            if (current?.resume?.hasResume == true &&
+                fresh.resume?.hasResume != true) {
+              return;
+            }
 
-        _portfolio = fresh;
-        _error = null;
-        notifyListeners();
-        // Best-effort local snapshot — never blocks the UI.
-        unawaited(_cacheService.cache(userId, fresh));
-      },
-      onError: (Object e) {
-        if (_isDisposed || _lastUid != userId) return;
-        // MB2: keep last-known-good; only surface the error, never clear data.
-        _error = 'Portfolio updates are temporarily unavailable';
-        debugPrint('PortfolioProvider stream error: $e');
-        notifyListeners();
-      },
-    );
+            // v8.9.2: any applied non-empty event is server truth — clears a
+            // prior divergence notice.
+            if (!fresh.isEmpty) {
+              _serverNonEmpty = true;
+              _restoreMessage = null;
+              _restoreAttempted = false;
+            }
+
+            _portfolio = fresh;
+            _error = null;
+            notifyListeners();
+            // Best-effort local snapshot — never blocks the UI.
+            unawaited(_cacheService.cache(userId, fresh));
+          },
+          onError: (Object e) {
+            if (_isDisposed || _lastUid != userId) return;
+            // MB2: keep last-known-good; only surface the error, never clear
+            // data.
+            _error = 'Portfolio updates are temporarily unavailable';
+            debugPrint('PortfolioProvider stream error: $e');
+            notifyListeners();
+          },
+        );
+  }
+
+  /// v8.9.2: push the device's portfolio back to Firestore when the server
+  /// document lost it (wiped doc). Writes EVERY section (no diff — the
+  /// `previous` arg is omitted) so an empty server doc is fully rebuilt.
+  /// Bounded by [saveTimeout]; a failure surfaces [restoreMessageFailed] but
+  /// never clears in-memory data.
+  Future<void> _attemptRestore(String userId) async {
+    if (_isDisposed || _lastUid != userId) return;
+    final toRestore = _portfolio;
+    if (toRestore == null || toRestore.isEmpty) return;
+
+    try {
+      await _portfolioService
+          .savePortfolio(userId, toRestore)
+          .timeout(saveTimeout);
+      if (_isDisposed || _lastUid != userId) return;
+      _serverNonEmpty = true;
+      _restoreMessage = null;
+      _restoreAttempted = false;
+      debugPrint('PortfolioProvider: restored portfolio to server for $userId');
+      notifyListeners();
+    } catch (e) {
+      if (_isDisposed || _lastUid != userId) return;
+      _restoreMessage = restoreMessageFailed;
+      debugPrint('PortfolioProvider restore error: $e');
+      notifyListeners();
+    }
   }
 
   void _cancelStream() {
@@ -246,12 +434,35 @@ class PortfolioProvider extends ChangeNotifier {
     try {
       // H4 (F5): pass the current in-memory portfolio as `previous` so the
       // service only writes the sections that actually changed.
+      // v9.0 (BUG-3 fix): when a flattened shape was detected at init time,
+      // force a full (non-diff) write by passing `previous: null`. This
+      // writes every section as `portfolio.{key}` with merge semantics,
+      // overwriting the flattened root-level keys with the canonical nested
+      // map. After the first successful save, clear the flag.
+      final PortfolioModel? previousForSave =
+          _forceFullSave ? null : _portfolio;
+      if (_forceFullSave) {
+        debugPrint(
+          'PortfolioProvider: forcing full save (non-diff) for $uid to '
+          'reconstitute flattened portfolio shape.',
+        );
+      }
       await _portfolioService
-          .savePortfolio(uid, updatedPortfolio, previous: _portfolio)
+          .savePortfolio(uid, updatedPortfolio, previous: previousForSave)
           .timeout(saveTimeout);
+      if (_isDisposed) return false;
+      _forceFullSave = false; // flattened shape healed
       if (_isDisposed) return false;
       _portfolio = updatedPortfolio;
       _error = null;
+      // v8.9.2: a successful write means the server document now carries
+      // portfolio content — the divergence (if any) is healed.
+      if (!updatedPortfolio.isEmpty) {
+        _serverNonEmpty = true;
+        _restoreMessage = null;
+        _restoreAttempted = false;
+        _restoredFromCache = false;
+      }
       // MB2: keep the local cache converged with what the user just saved.
       await _cacheService.cache(uid, updatedPortfolio);
       return true;
@@ -300,6 +511,14 @@ class PortfolioProvider extends ChangeNotifier {
       );
       // Commit to memory first — the data is already on the server.
       _portfolio = updated;
+      // v8.9.2: a successful upload persists `portfolio.resume` on the
+      // server — the divergence (if any) is healed.
+      if (!updated.isEmpty) {
+        _serverNonEmpty = true;
+        _restoreMessage = null;
+        _restoreAttempted = false;
+        _restoredFromCache = false;
+      }
       await _cacheService.cache(userId, updated);
       if (_isDisposed) return false;
       _error = null;
@@ -392,13 +611,38 @@ class PortfolioProvider extends ChangeNotifier {
       //    (`getPortfolio` returns empty when the doc or `portfolio` key is
       //    missing — a signature of a stale cache replay or a first-time
       //    user, not of data deletion).
-      if (fresh.isEmpty && current != null && !current.isEmpty) return;
+      if (fresh.isEmpty && current != null && !current.isEmpty) {
+        // v8.9.2 (project_info__25/26): same divergence detection as the
+        // stream listener — memory holds data, the server document is empty
+        // (wiped doc). Surface the notice and self-heal by pushing the
+        // local portfolio back through a full (non-diff) save.
+        if (shouldTriggerPortfolioRestore(
+          serverHadContent: _serverNonEmpty,
+          restoreAlreadyAttempted: _restoreAttempted,
+          restoredFromCache: _restoredFromCache,
+        )) {
+          _restoreAttempted = true;
+          _restoreMessage = restoreMessageDefault;
+          notifyListeners();
+          unawaited(_attemptRestore(uid));
+        }
+        return;
+      }
 
       // 3) Never let a refresh drop the resume while memory still has one —
       //    covers a stale non-empty snapshot (sections without the
       //    just-uploaded resume) racing the upload.
-      if (current?.resume?.hasResume == true && fresh.resume?.hasResume != true) {
+      if (current?.resume?.hasResume == true &&
+          fresh.resume?.hasResume != true) {
         return;
+      }
+
+      // v8.9.2: an applied non-empty read is server truth — clears a prior
+      // divergence notice.
+      if (!fresh.isEmpty) {
+        _serverNonEmpty = true;
+        _restoreMessage = null;
+        _restoreAttempted = false;
       }
 
       _portfolio = fresh;
@@ -432,6 +676,11 @@ class PortfolioProvider extends ChangeNotifier {
     _isUploadingResume = false;
     _error = null;
     _lastUid = null;
+    // v8.9.2: clear the divergence/sync state — nothing is loaded anymore.
+    _serverNonEmpty = false;
+    _restoreMessage = null;
+    _restoreAttempted = false;
+    _restoredFromCache = false;
     notifyListeners();
   }
 

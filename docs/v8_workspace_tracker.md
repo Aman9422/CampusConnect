@@ -1,7 +1,93 @@
 # CampusConnect — Workspace Tracker
 
-## Status: IMPLEMENTATION COMPLETE + AUTOMATED VALIDATION PASSED — ✅ DEPLOYED (2026-08-15, v8.8: functions + firestore.rules)
-## Version: CampusConnect v8.8.0+91 — AI Provider Migration, Response Quality & Chat Lifecycle Hardening (2026-08-15)
+## Status: IMPLEMENTATION COMPLETE + AUTOMATED VALIDATION PASSED — ✅ DEPLOYED (2026-08-16, v8.9.1: functions)
+## Version: CampusConnect v8.9.1+93 — Portfolio-First Recommendation Fix (2026-08-16)
+
+---
+
+## v8.9.1 — Portfolio-First Recommendation Fix
+
+> Source: `docs/issues.md` user report ("still showing same SOC TCS and Software Engineer…") · Executed in this pass · Confirmation: `docs/confirmation.md` (v8.9.1 banner) · Tests: `test/placement_match_test.dart`
+
+### Objective
+
+Kill the recommendation noise the user kept seeing and implement the requested portfolio-first flow:
+1. "Complete your portfolio first" before any personalized recommendation.
+2. Use portfolio data + the required career interest to recommend what the student actually needs.
+3. Explain where domain knowledge comes from (profile intent + portfolio evidence).
+
+### Root Cause
+
+The v8.9 relevance gate + no-signal guard ONLY covered the `placement` emitter. `buildRoleRecommendations`, `buildLegacyRecommendations` (job/mentor) and the skill-gap path bypassed it: a student with only the REQUIRED `careerInterest` field still got "Career match: Software Engineer" role cards, legacy job cards, and eligible-but-irrelevant placement rows (SOC/TCS).
+
+### What Shipped
+
+| # | Item | Deliverable |
+|---|------|-------------|
+| P1 | **`hasMeaningfulPortfolioContent` gate** | `extractUserSignals` now derives a single evidence flag: demonstrated skills ∪ project technologies ∪ ATS-scored resume. Stated intent (career interest / preferred roles) is explicitly EXCLUDED from the gate. |
+| P2 | **Portfolio-first gating across all emitters** | `buildPlacementRecommendations`, `buildRoleRecommendations`, and `buildLegacyRecommendations` (mentor+job) early-return when the flag is false. Skill-gap rows are naturally empty (they derive from role/placement rows). |
+| P3 | **Single portfolio gate card** | `buildPortfolioGateRecommendations` emits exactly one `portfolio` card ("Complete your portfolio first", `source: portfolio_gate`, routes to `studentPortfolioRoute`) — no role/job/mentor/placement noise. The generic AI-chat nudge stays. |
+| P4 | **Relevance gate (placement)** | Eligible placement with zero skill overlap AND zero career alignment is skipped (the SOC-at-TCS case) — retained from v8.9.1 work, now mirrored in tests. |
+| P5 | **Tests** | `test/placement_match_test.dart`: portfolio-first gate mirrored; TCS-SOC regression; intent-only student gets NO placements; evidence-student still unlocks matching. |
+| P6 | **Validation** | `node --check` all functions clean · `flutter analyze` 0 errors/0 warnings (76 info, below 77 baseline) · `flutter test` **294/294**. |
+| P7 | **Version + docs** | `pubspec.yaml` → `8.9.1+93`; `docs/todo.md`, `docs/issues.md`, `docs/think.md`, `docs/confirmation.md`, `docs/v8_workspace_tracker.md` updated. |
+| P8 | **Deploy** | `firebase deploy --only functions --non-interactive` — portfolio-first contract live in production. |
+
+### Domain-Knowledge Source (documented for the user)
+
+- **Profile (stated intent):** root `skills`, `careerInterest`, `department`, `graduationYear`, `academic`.
+- **Portfolio (demonstrated evidence):** `users/{uid}/portfolio` — skills, projects+tech, certifications, experience, languages, `preferences.preferredRoles`/`careerObjective`, `resume.latestATSScore`.
+- Career Interest is REQUIRED at profile setup (`ProfileSetupView` validator) and now at edit (`EditProfileView`); it seeds ranking alignment once portfolio evidence unlocks recommendations.
+
+---
+
+## v8.9 — Recommendation & Teacher Profile Baseline Audit
+
+> Source: `docs/Task.md` (v8.9 goal) · Executed via `docs/todo.md` (Phase 0–18) · Baseline audit: `project_info__24_v8.9 — Recommendation & Teacher Profile Baseline Audit.md` · Issues log: `docs/issues.md` (v8.9 section) · Confirmation: `docs/confirmation.md` (v8.9 banner)
+
+### Objective
+
+Build the next CampusConnect intelligence layer on the v8.8 architecture — extending, not replacing, the v8.6 single-writer recommendation system. Deliver: a unified student career profile, an AI-powered recommendation engine (roles + placements + skill gaps) with explainable scoring, teacher-facing recommendation insights, and a true Teacher-appropriate Profile (fixing the Phase 13.5 baseline bug where the Teacher Dashboard/Profile reused the Student Profile experience).
+
+### What Shipped
+
+| # | Item | Deliverable |
+|---|------|-------------|
+| P1 | **Unified Student Career Profile** | `lib/models/recommendations/career_profile_input.dart` + `lib/services/recommendations/career_profile_builder.dart` — normalizes profile + portfolio (skills, languages, projects+tech, certifications, experience, career preferences/objective, ATS score, resume age, review count) into `CareerProfileInput`. Fully derived — no duplicate permanent collections; missing fields tolerated (incomplete portfolios still get recommendations). 9 unit tests. |
+| P2 | **Recommendation engine (server)** | `functions/recommendations/career_roles.js` (8-role taxonomy), `functions/recommendations/engine.js` (career-role matching, placement matching, skill-gap detection) consumed by `refreshRecommendationsForStudent` — single-writer architecture preserved. |
+| P3 | **AI enrichment** | `functions/recommendations/ai_explanations.js` — `generateRecommendationExplanations` via existing `callAIProvider` (Groq→HF, JSON mode) + `validateRecommendationPayload` sanitizer + deterministic fallback. `callAIProvider` was missing from `aiProvider.js` module.exports — exported. Recommendation AI uses the provider directly; `resume_usage` quota untouched. Callable timeout 60→120s. |
+| P4 | **Career-role matching** | Weighted fit (required 3 / nice-to-have 1.5) + keyword intent bonus (≤12), ≥30 threshold, top 2; emits `targetRole` + explainable `reason` + supporting signals. |
+| P5 | **Placement intelligence** | Deterministic mandatory eligibility (CGPA/program/year/branch/active/applied/deadline — server-only, never AI-overridable) + Strong / Potential / Skill-Gap tiers; mandatory-ineligible never recommended; placement application + resume snapshot behavior untouched. |
+| P6 | **Skill-gap intelligence** | Aggregated missing/weak/partial/strong from role + placement signals; actionable `suggestedAction` (e.g. "Complete a Docker project…"); never invents skills. |
+| P7 | **Ranking** | Deterministic weighted ranking (eligibility → skill overlap → preference → ATS → projects → experience → role relevance); AI only for semantic relevance/explanation. |
+| P8 | **Teacher recommendation insights** | `TeacherAnalyticsService.getRecommendationAggregates` via `collectionGroup("recommendations")` — career goals, target roles, common skill gaps, placement-tier distribution, strong-match/gap student counts. `firestore.rules` teacher collectionGroup read (aggregate fields only — no resume text). Wired into `TeacherAnalyticsProvider` (index 8, reset, typed getters). |
+| P9 | **Data model** | `Recommendation` Dart model extended tolerantly (`source`, `targetRole`, `opportunityId`, `skillsMatched`, `skillsMissing`, `reason`, `isRead`, `isDismissed`, `aiExplanation`, `suggestedAction`, `matchTierLabel`) — legacy docs safe; server `toFirestore` omits nulls; no student-profile duplication. |
+| P10 | **Refresh strategy** | `isPortfolioOnlyChange` → `isPortfolioMetadataOnlyChange` (skips only `metadata.updatedAt` flutter) + `portfolioContentChanged` refresh signal: meaningful content edits (skills/projects/preferences/resume ATS) now refresh; MB5 write-amplification fix preserved. Resume-review trigger feeds `missingKeywords` (ATS weakness → improvement). |
+| P11 | **AI integration** | Existing `callAIProvider` only; structured output + sanitize/validate before store; deterministic eligibility never AI-overridden. |
+| P12 | **Student UI** | "Recommended for You" on the student dashboard — role/placement/skill cards, "Why am I seeing this?" (`aiExplanation`/`reason` + `suggestedAction`), match-tier + matched/missing skill chips, per-type routing, loading/empty/error/refresh states, dismiss/read via `markInteracted`. Material 3; cards capped at 4. |
+| P13 | **Teacher Intelligence UI** | "Recommendation Insights" section in the existing AI Insights tab — career-goal/role/skill-gap ranked bars, placement tier chips, strong-match/gap counts, empty state. Not a second management system. |
+| P13.5 | **Teacher Profile & role-specific UX** | `lib/views/profile/teacher_profile_view.dart` (Teacher-appropriate: Name, Email, Department, Designation, Institution, Account, App Info, Logout — NO Student Portfolio/Resume/ATS/Career-Preferences/Projects/Placement/Recommendation controls). Teacher Dashboard tab 4 + popup profile action → `TeacherProfileView`. `EditProfileView` teacher branch (name/phone/bio/department/designation, no CGPA). `/profile/` role-dispatched via `_RoleAwareProfileView`: Student→ProfileView, Alumni→ProfileView alumni branch, Teacher→TeacherProfileView. Ownership: teacher edits own `users/{uid}` only (owner-guarded rules, role immutability preserved). Logout resets full provider set incl. analytics + portfolio — no stale Student state. |
+| P14 | **Security** | Student ownership preserved (owner read, write:false); teacher collectionGroup read aggregate-only; callable auth; no AI bypass of Firestore/server auth; eligibility deterministic server-side. |
+| P15 | **Tests** | 79 new tests across 9 files — engine/role/placement/skill-gap mirrors, AI sanitizer, teacher insights/privacy, teacher profile/routing, security, ranking, career-profile builder. Pure-Dart mirrors; no API keys. |
+| P16 | **Validation** | `flutter analyze` 0 errors / 0 warnings (77 pre-existing info lints, none in v8.9 files) · `flutter test` 290/290 · `node --check` pass (index.js + recommendations/*.js + aiProvider.js) · `dart format` clean. |
+| P17 | **Manual matrix** | ⏳ pending on-device (Phase 17 in `docs/todo.md`). |
+| P18 | **Version + docs** | `pubspec.yaml` `8.8.0+91` → `8.9.0+92`; `docs/todo.md`, `docs/issues.md`, `docs/confirmation.md`, `docs/v8_workspace_tracker.md` updated; architecture baseline `project_info__24_v8.9…` written. |
+
+### Single-Writer Contract (preserved)
+
+`refreshRecommendations` callable → `refreshRecommendationsForStudent` → engine → AI enrichment → `users/{uid}/recommendations/*`. The competing client-side engine removed in v8.6 is NOT restored; client `RecommendationService` delegates; `RecommendationProvider` reads the stream + `markInteracted` only. No second resume/portfolio storage system (`resumes/{uid}/latest.pdf`, `users/{uid}/portfolio` untouched), no second AI client.
+
+### Validation (Phase 16)
+
+- `flutter analyze` → **0 errors / 0 warnings** (77 pre-existing info lints, none in v8.9 files)
+- `flutter test` → **290/290 passed** (211 existing + 79 new v8.9)
+- `node --check functions/index.js` + `functions/recommendations/*.js` + `functions/ai/aiProvider.js` → pass
+- `dart format` → clean on all changed files
+- No API keys exposed; no duplicate recommendation writers; no unrelated regressions
+
+### Deployment Status
+
+✅ **DEPLOYED 2026-08-16** — `firebase deploy --only "functions,firestore:rules" --non-interactive` **SUCCESS**. `firestore.rules` compiled + released (teacher `recommendations` collectionGroup read live); all **18 functions updated on Node.js 22** (2nd Gen) including `refreshRecommendations` (new engine), `askAI` (120s timeout), the Phase 10 trigger extensions (`portfolioContentChanged`), and the carried-over v8.8.3 items (Node 22 runtime engine, MED-4/MED-5 rules). `.env` keys loaded. Remaining: on-device manual matrix (Phase 17, `docs/todo.md`).
 
 ---
 

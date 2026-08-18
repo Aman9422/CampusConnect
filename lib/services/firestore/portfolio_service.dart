@@ -202,6 +202,33 @@ class PortfolioService {
     return a == b;
   }
 
+  /// Check whether the raw Firestore document for [uid] has a flattened
+  /// portfolio shape (root-level `portfolio.*` keys instead of a nested
+  /// `portfolio` map). When true, the next `savePortfolio` call should use
+  /// a full (non-diff) write to reconstitute the canonical nested shape.
+  ///
+  /// v9.0 (BUG-3 fix): detects the flattened shape so the provider can
+  /// force a full save that overwrites the flat keys with the nested map.
+  Future<bool> hasFlattenedPortfolioShape(String uid) async {
+    try {
+      final doc = await _usersCollection.doc(uid).get();
+      if (!doc.exists) return false;
+      final data = doc.data() as Map<String, dynamic>?;
+      if (data == null) return false;
+
+      // If there's already a proper nested `portfolio` map, it's not flattened.
+      if (data['portfolio'] is Map<String, dynamic>) return false;
+
+      // Check for root-level keys starting with `portfolio.` (flattened shape).
+      return data.keys.any(
+        (key) => key.startsWith('portfolio.') && key.length > 10,
+      );
+    } catch (e) {
+      debugPrint('PortfolioService.hasFlattenedPortfolioShape error: $e');
+      return false;
+    }
+  }
+
   /// Stream portfolio changes in real time (owner is the only writer).
   ///
   /// v8.4.9 (MB17): uses the same tolerant [_extractPortfolioMap] as

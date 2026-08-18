@@ -8,6 +8,11 @@ import 'package:campusconnect/models/student_profile.dart';
 /// This is the MANDATORY layer that runs BEFORE any AI scoring.
 ///
 /// Rules are deterministic and must always work without AI.
+///
+/// ARCH-3: These rules are mirrored server-side in
+/// `functions/recommendations/engine.js` → `checkMandatoryEligibility()`.
+/// Both implementations MUST stay in sync. See `docs/eligibility_rules.md`
+/// for the canonical rule set and sync policy.
 class EligibilityEngine {
   /// Check eligibility for a single placement
   static PlacementEligibility checkEligibility({

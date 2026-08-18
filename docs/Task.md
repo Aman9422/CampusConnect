@@ -1,537 +1,458 @@
-# CampusConnect v8.8 — AI Provider Migration, Response Quality & Chat Lifecycle Hardening
+# AI Career Coach — Replace Static Skill-Gap Engine with AI-Powered Career Guidance
 
-## Objective
-
-Continue from the completed **v8.7 — Alumni Experience Simplification & Alumni Group Chat** release.
-
-v8.8 focuses on hardening the AI layer and improving the user experience around AI conversations.
-
-The goal is to:
-
-1. Migrate the primary AI model/provider to the new approved model configuration.
-2. Update Hugging Face as the fallback provider/model.
-3. Audit and update all AI-related environment variables and API keys.
-4. Fix AI responses containing unwanted Markdown artifacts such as `*`, `**`, excessive headings, raw JSON, or formatting that looks unnatural inside the Flutter chat UI.
-5. Add user-controlled AI chat deletion.
-6. Add an appropriate automatic cleanup/retention mechanism so old conversations do not grow the Firestore database indefinitely.
-7. Preserve the existing AI architecture, quota system, security model, and existing student/alumni functionality.
-8. Do not introduce a second AI pipeline.
+**Version:** v9.0 (career-coach)
+**Status:** Spec — implementation pending approval
+**Scope:** Student dashboard recommendation system
 
 ---
 
-# Phase 0 — Full AI Architecture Audit
+## 1. Objective
 
-Before modifying code, inspect the complete AI flow.
+Transform the current **"Skill Gap Recommendations"** feature (the deterministic
+`skill_*` rows produced in `functions/recommendations/engine.js`) into an
+**AI-powered "Career Coach"** system.
 
-Audit:
+The AI analyzes the student's complete available career data and decides what the
+student should focus on next. It must **NOT** simply compare the student's skills
+against a static role skill list.
 
-* `functions/index.js`
-* AI provider modules
-* Groq integration
-* Hugging Face integration
-* `AIService`
-* `ResumeReviewService`
-* `ResumeReviewProvider`
-* AI usage/quota provider
-* AI chat views
-* Firestore conversation schema
-* Firestore rules
-* Cloud Functions
-* `functions/.env`
-* Firebase configuration
-* `functions/package.json`
-* any AI-related environment variable references
-* any hardcoded model names
-* any provider fallback logic
+**Core architectural principle:** the deterministic engine is useful only for
+extracting/validating factual profile data. It is **NOT** responsible for deciding
+what career action a student needs. The core intelligence comes from the existing
+AI provider architecture (Groq → HuggingFace fallback), cost-controlled and cached
+so we never call the model on every dashboard refresh.
 
-Search the entire repository for:
+### 1.1 Anti-pattern (must NOT happen)
 
-* `GROQ_API_KEY`
-* `HUGGINGFACE_API_KEY`
-* `GROQ_MODEL`
-* `HF_MODEL`
-* `router.huggingface.co`
-* `api.groq.com`
-* `askAI`
-* `reviewResume`
-* `AIService`
-* `ai`
-* `conversation`
-* `chat`
-* `messages`
+A Flutter/Dart/Firebase student with multiple Flutter projects and mobile
+experience must **NOT** automatically receive:
 
-Do not assume an environment variable is unused simply because it is not present in one file.
+- "Learn Kotlin"
+- "Learn Swift"
+- "Learn Android"
 
-Produce a short audit of:
+…merely because those technologies appear in a generic Mobile Developer
+requirement list.
 
-* primary provider
-* fallback provider
-* models
-* environment variables
-* secrets
-* AI callable functions
-* chat storage structure
-* quota handling
-* current retention behavior
+The AI must instead reason about whether the student should:
+
+- deepen an existing skill
+- build a stronger project
+- deploy an existing application
+- improve their resume
+- improve ATS keywords
+- gain relevant experience
+- add a certification
+- improve their portfolio
+- prepare for interviews
+- learn a genuinely important missing skill
+- or take another career-relevant action
+
+The system prioritizes **ACTIONABLE career development** over recommending
+additional technology tags.
 
 ---
 
-# Phase 1 — AI Model / Provider Migration
+## 2. Data the AI May Consider
 
-## Primary provider
+The AI analyzes the student's complete available career data:
 
-Update the primary provider to the new model/provider selected for v8.8.
-
-Do NOT blindly replace model names.
-
-Verify:
-
-* model identifier
-* API endpoint
-* authentication method
-* supported request format
-* JSON response support
-* maximum context/output limits
-* timeout requirements
-* rate-limit behavior
-* error response format
-
-Preserve the existing application-level AI interface so callers do not need unnecessary changes.
-
-The provider should continue accepting:
-
-* `systemPrompt`
-* `userPrompt`
-* optional JSON mode/options
-
-and return the same normalized response expected by the existing AI pipeline.
+- Student profile
+- Career goal / target role
+- Current year / semester
+- Skills
+- Projects
+- Project technologies
+- Experience
+- Certifications
+- Achievements
+- Resume data
+- ATS score, if available
+- Portfolio completeness
+- Existing resume reviews
+- Existing career preferences
+- Existing role/placement data, where available
 
 ---
 
-# Phase 2 — Hugging Face Fallback Migration
-
-The current Hugging Face implementation uses:
-
-`https://router.huggingface.co/v1/chat/completions`
-
-Current model:
-
-`meta-llama/Llama-3.1-8B-Instruct`
-
-Update this fallback to the approved v8.8 Hugging Face model.
-
-Before changing it, verify that the selected model is actually available through Hugging Face Inference Providers and supports the OpenAI-compatible chat completion interface.
-
-Preserve:
-
-* `HUGGINGFACE_API_KEY`
-* Bearer authentication
-* timeout handling
-* 429 handling
-* 503/provider-unavailable handling
-* response parsing
-* existing provider abstraction
-
-Do not expose API keys to Flutter/client code.
-
----
-
-# Phase 3 — Environment & Secret Audit
-
-Audit every AI environment variable.
-
-Expected categories include:
-
-* primary provider API key
-* Hugging Face API key
-* model identifiers
-* optional provider configuration
-* AI timeout/token configuration
-
-Check:
-
-* `functions/.env`
-* `.env.example` if present
-* Firebase Functions configuration
-* deployment configuration
-* GitHub/Git configuration if applicable
-* any hardcoded secrets
-* documentation mentioning obsolete keys/models
-
-IMPORTANT:
-
-Do NOT print actual API keys into logs, documentation, test output, or source code.
-
-If the API key itself is still valid, do not unnecessarily rotate it.
-
-Only request a new key if:
-
-* the provider requires it,
-* the current key is invalid/expired,
-* permissions changed,
-* or the migration requires a different credential.
-
-Update documentation so future model migrations are clear.
-
----
-
-# Phase 4 — AI Response Formatting Cleanup
-
-There is an existing UX issue where AI responses sometimes contain formatting such as:
-
-`* text`
-
-`**text**`
-
-`### Heading`
-
-raw JSON blocks
-
-escaped characters
-
-or other Markdown artifacts that look ugly in the application's chat UI.
-
-Audit how AI responses are currently rendered.
-
-Determine whether the correct solution is:
-
-1. proper Markdown rendering in Flutter,
-2. controlled Markdown sanitization,
-3. prompt-level formatting constraints,
-4. or a combination.
-
-Do NOT blindly remove all `*` characters because legitimate content may contain them.
-
-The final chat UI should display:
-
-* readable paragraphs
-* clean bullet points
-* readable headings
-* code when appropriate
-* no accidental Markdown artifacts
-* no raw JSON unless JSON is intentionally requested/displayed
-* no escaped formatting such as unnecessary `\n`
-
-Resume-review JSON parsing must remain unaffected.
-
-AI responses should be normalized at the appropriate layer rather than duplicating formatting logic across multiple UI widgets.
-
----
-
-# Phase 5 — AI Chat Deletion
-
-Currently AI conversations can accumulate indefinitely.
-
-Implement user-controlled deletion.
-
-The user should be able to:
-
-* delete an individual AI conversation, OR
-* delete their AI chat history
-
-depending on the existing conversation model.
-
-Requirements:
-
-* user can only delete their own conversations
-* deletion must be enforced server-side/rules-side
-* UI must include confirmation before destructive deletion
-* deleted conversation should disappear immediately from the UI
-* provider state/cache must be updated correctly
-* no other user's conversation can be deleted
-
-Do not allow arbitrary client-supplied user IDs to determine ownership.
-
-Use:
-
-`request.auth.uid`
-
-as the authoritative identity wherever applicable.
-
----
-
-# Phase 6 — Automatic AI Conversation Cleanup
-
-Design a retention policy to prevent unlimited Firestore growth.
-
-Do NOT automatically delete recent conversations.
-
-Implement a conservative retention mechanism, for example:
-
-* retain recent conversations
-* automatically remove conversations older than the configured retention period
-
-The retention period must be configurable rather than hardcoded throughout the codebase.
-
-Prefer a scheduled Cloud Function for cleanup.
-
-Requirements:
-
-* delete only expired AI conversation data
-* never delete unrelated Firestore documents
-* use batched/chunked deletes
-* avoid exceeding Firestore batch limits
-* handle large datasets safely
-* log only aggregate cleanup information
-* do not log conversation contents
-* do not log personal AI prompts/responses
-* make cleanup idempotent
-* handle partial failures safely
-
-If the existing conversation schema uses parent documents/subcollections, respect that schema rather than creating a new storage system.
-
----
-
-# Phase 7 — Firestore Security Audit
-
-Review the AI conversation Firestore rules.
-
-Confirm:
-
-* authenticated users can access only their own conversations
-* unauthenticated users cannot access conversations
-* users cannot read another user's AI history
-* users cannot delete another user's conversations
-* users cannot manipulate another user's quota
-* server-side cleanup can operate securely through Admin SDK
-
-Do not weaken existing security rules merely to make deletion work.
-
----
-
-# Phase 8 — AI Quota Preservation
-
-The v8.6 quota architecture must remain intact.
-
-Do NOT break:
-
-* `consumeResumeQuota`
-* `rollbackResumeUsage`
-* `getResumeUsage`
-* existing quota limits
-* AI failure rollback behavior
-
-Verify that:
-
-* successful AI calls consume usage correctly
-* failed AI calls do not permanently consume quota where rollback is expected
-* provider fallback does not double-charge usage
-* provider failure does not create duplicate usage records
-
-If the provider changes, the quota should remain application-level rather than provider-specific.
-
----
-
-# Phase 9 — Provider Fallback Behavior
-
-Review the provider fallback architecture.
-
-Expected behavior:
-
-Primary provider
-→ failure / temporary unavailability
-→ Hugging Face fallback
-→ normalized response
-→ existing application pipeline
-
-Do not create duplicate AI pipelines.
-
-Provider-specific errors should not leak raw API responses to the user.
-
-Return friendly application-level errors such as:
-
-* AI temporarily unavailable
-* Please try again
-* AI service is busy
-
-Log technical diagnostics server-side without exposing API keys or sensitive prompt content.
-
----
-
-# Phase 10 — Tests
-
-Add/update automated tests for:
-
-### Provider
-
-* primary provider configuration
-* Hugging Face fallback
-* missing API key
-* provider failure
-* timeout
-* rate limit
-* malformed response
-* normalized response
-
-### Formatting
-
-* Markdown cleanup
-* bullets
-* headings
-* accidental formatting
-* raw JSON handling
-* legitimate `*` characters are not incorrectly destroyed
-
-### Chat deletion
-
-* user can delete own conversation
-* user cannot delete another user's conversation
-* unauthenticated deletion rejected
-* deleted conversation disappears from provider state
-
-### Retention
-
-* expired conversations are eligible for deletion
-* recent conversations are preserved
-* unrelated documents are untouched
-* cleanup handles batches safely
-
-### Security
-
-* UID ownership enforced
-* quota cannot be modified by another user
-* conversation reads remain owner-scoped
-
----
-
-# Phase 11 — Validation
-
-Run:
-
-```text
-flutter analyze
-flutter test
-node --check functions/index.js
-dart format
+## 3. PHASE 1 — Fix the Existing Routing Bug
+
+In `lib/views/dashboards/student_dashboard_view.dart`, the current card tap
+handler is WRONG:
+
+```dart
+case RecommendationType.skill:
+  Navigator.pushNamed(context, profileSetupRoute);   // WRONG
+case RecommendationType.role:
+  Navigator.pushNamed(context, profileSetupRoute);   // WRONG
 ```
 
-Also run any provider-specific/unit tests.
+`profileSetupRoute` is the first-run onboarding/setup screen. It **must NEVER** be
+opened from an existing student's recommendation card.
 
-Verify:
+Fix immediately. Skill, role, and future career-coaching cards navigate to
+appropriate existing destinations:
 
-* 0 analyzer errors
-* 0 analyzer warnings
-* all existing tests pass
-* all new tests pass
-* Cloud Functions syntax passes
-* no API keys are committed
-* no obsolete model references remain
+| Recommendation | Destination |
+|---|---|
+| Profile-related actions | Edit Profile → Career & Skills |
+| Resume actions | Resume Review / Resume upload |
+| Portfolio actions | Student Portfolio screen |
+| Project actions | Projects manager |
+| Certification / Experience / Achievement actions | Respective manager screens |
 
-Search again for old model names and deprecated environment variables after implementation.
-
----
-
-# Phase 12 — Manual Testing
-
-Test at minimum:
-
-### Student
-
-* AI chat opens
-* normal question works
-* formatted response displays cleanly
-* long response works
-* AI failure shows friendly error
-* quota still works
-* conversation is saved
-* conversation can be deleted
-* deleted conversation disappears
-* old conversation cleanup does not affect recent chats
-
-### Alumni
-
-* AI functionality that remains available works
-* text-based Resume Reviewer remains functional
-* ATS pipeline remains unchanged
-* no Alumni Portfolio functionality is accidentally reintroduced
-
-### Resume Reviewer
-
-* Student uploaded PDF review still works
-* ATS parsing still works
-* review history still works
-* quota still works
-* provider migration does not break structured output
-
-### Security
-
-* Student A cannot read Student B's AI history
-* Student A cannot delete Student B's history
-* Alumni cannot access another user's AI history
-* client cannot manipulate quota
-* API keys never appear in client code/logs
+If no appropriate destination exists, create a dedicated action/detail screen.
+Do NOT break the first-time onboarding flow (`ProfileSetupView` stays reserved
+for `AuthGuard`).
 
 ---
 
-# Phase 13 — Documentation & Version
+## 4. PHASE 2 — Remove the Fake 66% Score
 
-Update:
+The current skill-gap scoring:
 
-* `pubspec.yaml`
-* `docs/todo.md`
-* `docs/issues.md`
-* `docs/v8_workspace_tracker.md`
-* `docs/confirmation.md`
-* AI/provider documentation
-* `.env.example` if present
+```js
+score: Math.min(100, 50 + entry.count * 8)
+```
 
-Record:
+produces misleading identical scores (Swift 66%, Android 66%, Kotlin 66%, iOS 66%).
+This is NOT a meaningful match score.
 
-* new primary model
-* new Hugging Face fallback model
-* provider architecture
-* environment variables
-* chat retention policy
-* deletion behavior
-* formatting strategy
-* security decisions
-* validation results
-
-Version:
-
-**v8.8.0**
-
-Do not modify unrelated version history.
+- Remove this presentation entirely.
+- Do **NOT** replace it with another fabricated percentage.
+- The AI provides meaningful metadata instead: `priority` (high/medium/low),
+  `impact` (high/medium/low), and/or a simple ranked order.
+- If a numerical score is ever required later, it must have a real, explainable
+  meaning — never fabricated from arbitrary constants.
 
 ---
 
-# Important Constraints
+## 5. PHASE 3 — AI Is the Career-Reasoning Layer
 
-1. Do NOT redesign the entire AI architecture.
-2. Do NOT create a second AI/ATS pipeline.
-3. Do NOT expose API keys to Flutter.
-4. Do NOT log API keys.
-5. Do NOT log user prompts/responses unnecessarily.
-6. Do NOT weaken Firestore security rules.
-7. Do NOT break the existing v8.6 quota/rollback architecture.
-8. Do NOT break Student uploaded-PDF Resume Reviewer.
-9. Do NOT reintroduce the removed Alumni Portfolio workflow from v8.7.
-10. Do NOT delete recent AI conversations automatically.
-11. Do NOT delete unrelated Firestore data.
-12. Do NOT blindly strip `*` from AI responses; fix Markdown rendering/normalization correctly.
-13. Preserve backward compatibility with the existing Firestore conversation structure wherever practical.
-14. Avoid unnecessary UI redesign.
+Use the existing AI provider/service architecture, same philosophy as Resume Review:
+
+- Primary: **Groq**
+- Fallback: **HuggingFace**
+- Reuse `functions/ai/aiProvider.js` (`callAIProvider`, `extractJSON`,
+  `normalizeAIResponse` patterns). Do NOT create a separate AI client.
+
+The deterministic code handles ONLY things that should be deterministic:
+
+- collecting student data
+- checking whether data exists
+- normalizing data
+- preventing duplicate recommendations
+- validating AI output
+- enforcing supported recommendation types
+- enforcing usage limits
+- caching
+- detecting when analysis is stale
+- routing / navigation
+- UI rendering
+
+Do NOT encode hundreds of career rules into `engine.js`. **The AI determines the
+actual career recommendations.**
 
 ---
 
-# Final Deliverable
+## 6. PHASE 4 — Structured AI Response
 
-At completion provide:
+The AI returns **structured JSON**, not arbitrary prose displayed directly.
 
-1. Exact files changed
-2. Primary AI provider/model
-3. Hugging Face fallback provider/model
-4. Environment variables added/removed/renamed
-5. Chat deletion implementation
-6. Automatic retention policy
-7. AI formatting solution
-8. Security changes
-9. Tests added/updated
-10. `flutter analyze` result
-11. `flutter test` result
-12. `node --check` result
-13. Manual test results
-14. Deployment status
-15. Any remaining limitations
+```json
+{
+  "careerReadiness": {
+    "level": "strong",
+    "summary": "..."
+  },
+  "careerFocus": "...",
+  "recommendations": [
+    {
+      "type": "portfolio",
+      "priority": "high",
+      "title": "...",
+      "reason": "...",
+      "action": "...",
+      "whyItMatters": "...",
+      "estimatedEffort": "..."
+    }
+  ]
+}
+```
 
-Mark the version complete only after implementation, automated validation, and deployment are confirmed.
+- Use ONLY recommendation types the application actually supports.
+- The response MUST be validated before display.
+- Malformed JSON / invalid types / missing required fields / unusable content →
+  gracefully fall back to a safe state. Never crash the dashboard.
+
+---
+
+## 7. PHASE 5 — Prompt Rules
+
+The AI prompt must explicitly include:
+
+1. NEVER recommend a skill the student already has.
+2. Do not recommend a technology merely because it appears in a generic role
+   requirement.
+3. Consider the student's EXISTING STACK before recommending a new technology.
+4. Prefer strengthening existing relevant skills when that provides more career
+   value than learning an unrelated technology.
+5. Consider the student's year/semester (as context, not rigid rules):
+   - early-year → fundamentals, projects, exploration
+   - middle-year → stronger projects, internships, specialization
+   - final-year → placement preparation, resume, interviews, portfolio quality,
+     job readiness
+6. Consider project QUALITY, not just project count.
+7. Consider experience and certifications.
+8. Consider resume/ATS information when available.
+9. Consider the target role / career goal.
+10. Recommendations must be realistically achievable.
+11. Return ~3–5 HIGH-VALUE recommendations — never 10–20.
+12. Prioritize recommendations.
+13. If the student is already strong in an area, say so explicitly instead of
+    recommending unnecessary learning.
+14. The AI is allowed to say: *"No new skill is necessary right now. Focus on
+    building/deploying/improving your existing projects."*
+
+---
+
+## 8. PHASE 6 — Example Behavior
+
+**Student:** Target = Mobile App Developer, 3rd year, skills = Flutter/Dart/
+Firebase/Git, 2 Flutter apps, Mobile Dev Intern, Flutter cert, ATS 78.
+
+**BAD (current):** `+ Kotlin 66%`, `+ Swift 66%`, `+ Android 66%`
+
+**GOOD:**
+
+1. **Strengthen Portfolio — HIGH** — Your Flutter experience is relevant to your
+   target role. Instead of adding another language, build one production-quality
+   app demonstrating auth, cloud integration, error handling, offline support,
+   notifications, and deployment.
+2. **Improve Resume ATS — MEDIUM** — Your resume could better communicate your
+   mobile development experience and relevant technical keywords.
+3. **Strengthen Android Deployment — MEDIUM** — Add a properly deployed Android
+   app as end-to-end evidence.
+
+Kotlin/Swift are NOT automatically recommended.
+
+---
+
+## 9. PHASE 7 — "Improve Your Portfolio" Recommendations
+
+Add a portfolio-improvement recommendation category. Possible actions the AI may
+choose from (it decides which matter for the individual student — not hardcoded
+advice):
+
+- Resume missing → upload/create resume
+- ATS score low → improve resume
+- Too few projects → build/add project
+- Projects lack descriptions → improve project descriptions
+- Projects lack technologies → improve project metadata
+- No experience → focus on internship/experience opportunities
+- Weak portfolio evidence → strengthen projects
+- Missing certifications → consider relevant certification
+- Missing achievements → add relevant achievements
+- Missing career goal → complete career preferences
+
+---
+
+## 10. PHASE 8 — Cost Control / Caching
+
+**DO NOT call the AI on every dashboard open/rebuild.**
+
+Flow:
+
+```
+Student opens dashboard
+  → check cached Career Coach analysis
+  → valid? → display cached analysis
+  → missing/stale? → AI request
+  → validate response
+  → save analysis
+  → display analysis
+```
+
+Metadata stored: `generatedAt`, `profileDataVersion` (fingerprint of meaningful
+career data), `analysisVersion`, usage count.
+
+Regenerate ONLY when meaningful career data changes OR the student explicitly
+requests "Re-analyze". Meaningful changes:
+
+- skills changed
+- career goal changed
+- projects changed
+- experience changed
+- certifications changed
+- resume changed
+- ATS score changed
+- portfolio changed
+
+Never regenerate because the dashboard widget rebuilt.
+
+---
+
+## 11. PHASE 9 — Usage Limit
+
+Follow the existing Resume Review usage-control pattern
+(`resume_usage/{uid}`, transactional quota consumption, rollback on AI failure).
+
+- Configurable `careerCoachMonthlyLimit` (reuse existing configurable AI usage
+  patterns where appropriate — do not hardcode if the project has a
+  configurable system).
+- UI should eventually show: **"Career Coach — N analyses remaining this month"**.
+- No API keys / provider credentials reach the Flutter client. All AI calls go
+  through the secure backend Cloud Function.
+
+---
+
+## 12. PHASE 10 — Data Privacy / Prompt Size
+
+Do not blindly send unnecessary Firestore data to the AI. Build a normalized
+`CareerAnalysisInput` object:
+
+```json
+{
+  "careerGoal": "...",
+  "academicYear": "...",
+  "skills": [],
+  "projects": [],
+  "experience": [],
+  "certifications": [],
+  "achievements": [],
+  "resumeSummary": "...",
+  "atsScore": 78,
+  "portfolioSummary": "..."
+}
+```
+
+Avoid sending: passwords, auth tokens, internal IDs (unless required),
+unrelated personal information, unnecessary Firestore metadata. Resume text is
+sent only as needed for career analysis.
+
+---
+
+## 13. PHASE 11 — UI Design
+
+Rename/reframe the dashboard section from "Skill Gap Recommendations" to
+**"AI Career Coach"**. Career guidance, not a checklist.
+
+### 13.1 Dashboard ↔ Full-Screen Architecture (approved)
+
+**STUDENT DASHBOARD — `Recommended for You` (stays on the main dashboard):**
+- Concise **"What should I do next?"** surface.
+- Shows ONLY the **2–3 highest-priority** recommendations (sorted by the AI's
+  `priority` field; existing order, sliced). Never more.
+- Each compact card shows: priority, concise title, 1–2 line explanation,
+  a short recommended action, and one CTA button.
+- At the bottom: **"View all recommendations →"** → navigates to
+  `/career-coach`.
+- If fewer than 2–3 valid recommendations exist, show only what exists.
+  Never fabricate recommendations.
+- No Career Coach analysis yet → empty/loading state with a "Generate
+  analysis" action.
+- The dashboard REFRESH icon must NOT trigger a new AI request — refreshing
+  reads the cached analysis only (no quota consumption).
+- The old "Learn: Swift / iOS", "66%", "Missing skill · 2 signals", "+ Swift"
+  cards DISAPPEAR entirely.
+
+**CAREER COACH SCREEN — `/career-coach` (full analysis):**
+- Career readiness level + summary
+- Career focus
+- ALL AI recommendations (priority, detailed reasoning, recommended action,
+  why it matters, estimated effort)
+- Re-analyze button
+- Remaining analyses / usage counter ("N analyses remaining this month")
+
+### 13.2 Card Examples (content comes from the AI analysis)
+
+```
+BAD:  + Learn Kotlin
+
+GOOD: 🎯 Strengthen Your Mobile Portfolio — High Priority
+      Your Flutter and Firebase skills already provide a strong foundation
+      for mobile development. Instead of adding another framework, your next
+      step should be a production-quality project.
+      Recommended action: Build and deploy a Flutter application with
+      Firebase authentication, offline support, and push notifications.
+      [View Career Plan]
+
+      📄 Improve Your Resume ATS Score — Medium Priority
+      Your resume demonstrates relevant mobile development skills, but some
+      role-specific keywords and measurable project outcomes could be
+      improved.
+      [Improve Resume]
+```
+
+Card concepts: 🎯 Career Focus, 🚀 Portfolio Improvement, 🛠 Skill Development,
+📄 Resume Improvement, 💼 Experience, 🎓 Certification, 📚 Learning/Preparation.
+
+Each card shows: priority, concise title, short explanation, clear action,
+appropriate navigation.
+
+**The AI generates the FULL set of recommendations. The dashboard only
+selects/renders the top 2–3 from the already-cached analysis — NO extra AI
+call to pick dashboard cards.**
+
+---
+
+## 14. PHASE 12 — Do Not Break Existing Functionality
+
+Before modifying code, inspect:
+
+- existing recommendation models
+- `engine.js`
+- `student_dashboard_view.dart`
+- AI service/provider
+- Cloud Functions
+- Resume Review usage/caching implementation
+- existing navigation routes
+- existing profile/portfolio/resume models
+
+Reuse existing architecture. Do not duplicate AI provider logic. Do not create an
+unrelated AI service if the existing one can be extended. Do not remove Resume
+Review. Do not break auth, profile, portfolio, resume, or dashboard.
+
+---
+
+## 15. PHASE 13 — Implementation Order
+
+1. **PHASE 1:** Fix routing bug.
+2. **PHASE 2:** Remove fake 66% score + old rotating skill-gap presentation.
+3. **PHASE 3:** Create Career Coach data model + structured AI response model.
+4. **PHASE 4:** Integrate with existing AI provider architecture.
+5. **PHASE 5:** Create normalized student career context.
+6. **PHASE 6:** Implement AI prompt + structured JSON output.
+7. **PHASE 7:** Validation, caching, stale-analysis detection, usage limits.
+8. **PHASE 8:** Career Coach UI cards.
+9. **PHASE 9:** Navigation for every recommendation type.
+10. **PHASE 10:** Test with multiple different student profiles.
+
+---
+
+## 16. Test Cases
+
+Test at least these scenarios:
+
+| # | Profile | Expected |
+|---|---|---|
+| A | Flutter Mobile Developer (Flutter, Dart, Firebase) | Do NOT blindly recommend Kotlin/Swift |
+| B | Web Developer (React, JavaScript, Node.js) | Web-relevant guidance |
+| C | Cybersecurity (Nmap, Wireshark, Linux, networking) | Cybersecurity-oriented guidance |
+| D | Data Science (Python, Pandas, NumPy, SQL) | Data-oriented guidance |
+| E | Strong skills + weak portfolio | Portfolio/project recommendations dominate; no more tech tagging |
+| F | Strong portfolio + weak resume/ATS | Resume improvement prioritized |
+| G | Very little profile data | No hallucinated experience/skills; recommend completing missing profile info or limited guidance from available data only |
+
+---
+
+## 17. Final Requirement
+
+The goal is NOT a smarter static skill-gap engine. The goal is to **replace the
+skill-checklist mindset with a genuine AI-powered Career Coach** that analyzes the
+student's available career evidence and determines the most useful next actions.
+
+- Deterministic code → facts, validation, caching, cost control, navigation.
+- AI model → career reasoning and personalization.
+- Preserve the existing architecture and the Resume Review usage-control
+  philosophy.

@@ -117,9 +117,14 @@ class RecommendationService {
     required dynamic profile,
   }) async {
     try {
+      // v8.9.3 (R6): the server `refreshRecommendations` callable allows 120 s
+      // (AI explanation enrichment runs the Groq 30 s → HF 60 s fallback
+      // chain, up to ~90 s). The previous 30 s CLIENT timeout could abort the
+      // call and surface an error in the UI while the server kept writing —
+      // making a healthy refresh look broken. Match the server ceiling.
       final callable = _functions.httpsCallable(
         'refreshRecommendations',
-        options: HttpsCallableOptions(timeout: const Duration(seconds: 30)),
+        options: HttpsCallableOptions(timeout: const Duration(seconds: 120)),
       );
       await callable.call<Map<String, dynamic>>(<String, dynamic>{});
 

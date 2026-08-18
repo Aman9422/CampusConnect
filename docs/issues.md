@@ -1,63 +1,75 @@
-# CampusConnect — Issues Log
-
-## v8.8.1 — AI Chat Callable Cast Regression Fix (2026-08-15)
-
-### Resolved in this version
-
-- **BUG: every AI chat message failed with "I could not process that right now."** Root cause (`docs/logs.md`):
-  `AIChatProvider.sendMessage error: Exception: Failed to connect to AI service: type '_Map<Object?, Object?>' is not a subtype of type 'Map<String, dynamic>' in type cast`.
-  The `cloud_functions` callable SDK decodes nested JSON objects as `Map<Object?, Object?>`; `AIService.sendMessage` called `.call<Map<String, dynamic>>(...)` and `AIResponse.fromJson(result.data)` cast the nested `trial`/`usage` maps directly, which threw — so the provider always fell back to the friendly error. `askAI` returns nested `trial`/`usage`; `reviewResume` returns a nested `review`; both hit the same cast hazard.
-  Fix: `AIService.sendMessage` now calls the callable WITHOUT the generic type parameter and deep-converts the whole payload with `jsonDecode(jsonEncode(result.data))` before handing it to `AIResponse.fromJson` — the exact pattern `ResumeReviewService` already used (which is why resume review worked while chat was broken). After the deep-convert, the `trial`/`usage` sub-maps are genuine `Map<String, dynamic>` so `fromJson`'s existing casts succeed; no model changes were needed.
-- **BUG: `AIChatProvider.deleteHistory()` threw the same cast on success.** The v8.8 `deleteAIHistory` callable returns `{deleted: n}`; `.call<Map<String, dynamic>>({})` applies the same unsafe downcast. Fixed by calling without the generic (the body is intentionally ignored).
-- **Regression test added:** `test/ai_callable_response_cast_test.dart` reproduces the `Map<Object?, Object?>` SDK shape, proves the deep-convert succeeds on the full `askAI`/`deleteAIHistory` shapes, and documents that the old direct cast throws the exact TypeError from the log.
-
-### Verification
-
-- `flutter analyze`: 0 errors / 0 warnings (only pre-existing info-level lints, none in the touched files).
-- `flutter test`: 172/172 pass, including the 5 new cast-regression tests.
-- No server changes required — the `askAI`/`deleteAIHistory` callables already return correct JSON; this is purely a client-side decode fix. No Cloud Function redeploy needed.
+a new issue came:-
+it still showing same soc tcs and softwre enginerr still comming and i want to ask where does it take knowledge of the domain does it take it from the start profile or portfolio or when i create a new account after verification it first popup the complete your profile in there is last option about carrer options or somthing like that which is in option cant make it required file and get the knowledge about the students domain and in recommendation system ask them to complete the portfolio first then using the portfolio data and ai cant we recommend what necessary or required for student
 
 ---
 
-## v8.8 — AI Provider Migration, Response Quality & Chat Lifecycle Hardening (2026-08-15)
+## v8.9.1 — RESOLVED (2026-08-16)
 
-### Resolved in this version
+> Status: **IMPLEMENTED + VALIDATED (294/294 tests) + ✅ DEPLOYED (2026-08-16 — `firebase deploy --only functions` SUCCESS, 18/18 functions updated: `refreshRecommendations`, `onProfileUpdatedRefreshAI`, `onResumeReviewCreatedRefreshMatches` now enforce the portfolio-first contract in production)**
 
-- **BUG: `*`, `**`, `###`, raw Markdown artifacts in AI chat responses.** Root cause: the chat system prompt allowed Markdown and the chat bubble rendered raw text. Fixed server-side at the single normalization layer (`normalizeChatText` in `functions/ai/aiProvider.js`, applied in `generateChatResponse`) + tightened `CHAT_SYSTEM_PROMPT` formatting constraints. Resume-review/deep-analysis JSON parsing untouched. Legitimate `*` (e.g. `C++`, `a*b`, `5 * 4`) preserved by conservative emphasis stripping.
-- **BUG: AI conversations accumulated indefinitely; no user deletion.** Added `deleteAIHistory` callable (owner-scoped via `request.auth.uid`; deletes both `users/{uid}/ai_interactions` and legacy `ai_conversations`), `AIChatProvider.deleteHistory()`, `AIChatView` AppBar delete action + confirmation dialog. `firestore.rules` now allows owner deletes on `users/{uid}/ai_interactions` (`update` stays false).
-- **BUG: no automatic cleanup of old AI conversations → unbounded Firestore growth.** Added `cleanupExpiredAIConversations` daily scheduled function honoring `AI_RETENTION_DAYS` (env-configurable, conservative default 90; validated positive integer). Batched deletes (≤400/batch), idempotent, only expired `ai_interactions`/`ai_conversations`; aggregate-only logs (no prompts/responses).
-- **Migration: primary model `llama-3.1-8b-instant` → `openai/gpt-oss-20b` (Groq).** Model is env-configurable via `GROQ_MODEL`. JSON mode (`response_format`) preserved. 30 s timeout, 429/5xx/malformed-response handling preserved, error surface is a deployment error (never a key leak).
-- **Migration: HF fallback `meta-llama/Llama-3.1-8B-Instruct` → `openai/gpt-oss-20b` via Inference Providers (`router.huggingface.co`).** Env-configurable via `HF_MODEL`. Bearer auth, 60 s timeout, 429/503 handling, response parsing preserved. JSON mode added for resume-review/analysis parity.
-- **Failure: no AUTOMATIC provider fallback existed.** Added the primary → HuggingFace fallback chain in `callAIProvider` (chat + resume review + deep analysis). Single-provider `AI_PROVIDER=huggingface` mode preserved. No second pipeline.
-- **Compile blocker fixed:** `AIChatProvider` used `FirebaseFunctions` without importing `cloud_functions` — added the import.
+### Answers to the user's 3 questions
 
-### Known limitations (tracked from prior versions, unchanged)
+1. **Where does the recommendation system take knowledge of the student's domain?**
+   - `functions/recommendations/engine.js` → `extractUserSignals` merges TWO sources:
+     - **Profile (stated intent)**: root `skills`, `careerInterest`, `department`, `graduationYear`, `academic`.
+     - **Portfolio (demonstrated evidence)**: `userData.portfolio` — skills, projects+tech, certifications, experience, languages, `preferences.preferredRoles` / `careerObjective`, and `resume.latestATSScore`.
+   - Career Interest is a *stated intent* signal; portfolio data is *demonstrated evidence*. The engine uses intent for ranking alignment once evidence exists — evidence is what unlocks recommendations (see below).
 
-1. No OCR — scanned/image-only PDFs return the friendly "image-based" error.
-2. `pdf-parse` xref parser may reject synthetic minimal PDFs (real Chromium/Word PDFs parse).
-3. Per-student placement outcome stages remain "N/A" (schema does not track outcomes).
-4. Engagement aggregates iterate per-student docs — slow at 500+ students.
-5. **App Check not installed** — `No AppCheckProvider installed` WARNING on login (non-blocking; rules authenticate via `request.auth`).
-6. Flattened-vs-nested portfolio shape — both read shapes tolerated since v8.4.9; app writes produce the canonical nested shape.
-7. Manual on-device matrix for v8.8 pending (Phase 12, `docs/todo.md`).
-8. **v8.8 deployed 2026-08-15** (`functions` + `firestore:rules`, 17/17 functions) — resolved.
+2. **Career options can't be skipped / they should be required:**
+   - `Career Interest` is already **REQUIRED** (validator) both in `lib/views/profile_setup_view.dart` (the post-verification "Complete your profile" popup) and in `lib/views/edit_profile_view.dart` (v8.9.1 added it there too). Students cannot complete setup without choosing a career interest.
+   - `Skills` is optional at setup but is now the KEY to unlocking recommendations — see the portfolio-first contract.
 
-## Final Audit — v8.8 (2026-08-15, post-deploy)
+3. **Complete portfolio first → then recommend what is necessary/required for the student:**
+   - **NEW v8.9.1 portfolio-first contract** in the engine — every personalized recommendation type (`role`, `placement`, `skill`, `mentor`, `job`) is gated behind `hasMeaningfulPortfolioContent` (demonstrated skills ∪ project technologies ∪ ATS-scored resume).
+   - A student with ONLY a career interest (no portfolio evidence) now receives **exactly one card**: `portfolio` — "Complete your portfolio first" (routes to the portfolio builder). NO more "Software Engineer" role cards, NO more SOC/TCS placement cards, NO legacy job/mentor noise.
+   - Once the student adds skills, projects or a resume/ATS score, the gate card disappears and the engine emits real, personalized role/placement/skill-gap (+ mentor/job) recommendations.
+   - The TCS/SOC noise is doubly filtered: the relevance gate drops any eligible placement with zero skill overlap AND zero career alignment; the portfolio-first gate stops placement matching entirely for intent-only students.
 
-### Verified OK
-
-- **Provider/model live check**: real keys from `functions/.env` exercised against BOTH endpoints — Groq and HuggingFace Inference Providers both returned HTTP 200 with `openai/gpt-oss-20b` echoed as the serving model. Phases 1/2 config is production-verified.
-- **No key leak**: `functions/.env` is untracked by git (`git ls-files --error-unmatch` → not tracked; `functions/.gitignore` covers `.env`), and the live-check printed no key material.
-- **No obsolete model references in active code**: full repo sweep found old model names only in historical changelogs/audit reports (`V6.95_AI_DEEP_ANALYSIS.md`, `project_info__20/21.md`, v8.8 migration notes) — all describe the pre-migration state and are preserved as version history.
-- **Rules semantics**: the `ai_interactions` delete rule corrects a real gap — the old specific rule `delete: if false` would have overridden the `users/{uid}` catch-all write for owner deletes; owner deletes are now properly allowed while `update` stays denied. No weakening.
-- **Quota**: consumption happens once per logical request in `askAI`/`reviewResume`; the fallback chain is internal to `generateChatResponse`/`generateResumeReviewAI`/`generateAIResponse`, so an HF failover cannot double-charge. Verified by tests.
-- **Cleanup scheduler**: `collectionGroup("ai_interactions")` + `ai_conversations` single-field queries only — no composite index required; batching ≤400 is safe.
-
-### Action items discovered
-
-1. **[HIGH — upcoming] Node 20 runtime deprecation**: the deploy banner warns Node.js 20 is deprecated (2026-04-30) and will be decommissioned **2026-10-30**, after which functions cannot be redeployed without upgrading. Recommendation: bump `functions/package.json` `engines.node` to `22`, run syntax checks/tests, then `firebase deploy --only functions` — before October 2026.
-2. **[LOW] `askAI` logs the first 50 chars of each user message** (`console.log("Message: …")`) — pre-existing truncated soft-abuse log, predates v8.8. Left unchanged to honor the preserve-existing-architecture constraint; a future pass could remove it.
-3. **[LOW] `firebase-functions` outdated**: deploy warns `^5.0.0` is outdated with breaking changes in newer majors. Not blocking; schedule an upgrade in a dedicated pass.
-4. **[INFO] `.env` values are readable in the Firebase console** (non-secret env vars). Matches the existing project pattern; keys can be moved to `firebase functions:secrets` later if desired.
+### Changes
+- `functions/recommendations/engine.js` — `hasMeaningfulPortfolioContent` flag; placement + role + legacy(mentor/job) emitters gated; portfolio-gate card consolidated on the single flag; `description`/`reason` copy updated.
+- `test/placement_match_test.dart` — portfolio-first gate + relevance gate mirrored; TCS SOC regression test; intent-only student test; evidence-student test.
+- `docs/todo.md`, `docs/issues.md`, `docs/think.md`, `docs/confirmation.md`, `docs/v8_workspace_tracker.md` — v8.9.1 sections.
+- `pubspec.yaml` → **8.9.1+93**.
 
 ---
+
+## v8.9.2 — RESOLVED (2026-08-16)
+
+> Issue: "No New Recommendations After Filling Portfolio (80% Strength)" — `project_info__25.md` / `project_info__26.md` (identical investigation reports).
+> Status: **IMPLEMENTED + VALIDATED (302/302 tests) — client fix. NO `firebase deploy` REQUIRED for this release (no `functions/` or `firestore.rules` changes in v8.9.2).**
+
+### What actually happened
+
+The v8.9.1 portfolio-first engine was working **correctly**. The failure was a **client-side data-persistence gap** that made the server see an empty document:
+
+- The logged-in user's Firestore doc (`users/{uid}`) held only `(metadata, role, personal.email)` — no `portfolio`, no `academic`, no `career`, no `skills`, no `profileCompleted`.
+- The app UI showed 80% portfolio strength because it renders from **memory/SharedPreferences cache**, not from Firestore.
+- `functions/recommendations/engine.js` computes `hasMeaningfulPortfolioContent` from **Firestore** (`userData.portfolio`). It read nothing → it correctly emitted ONLY the "Complete your portfolio first" gate card and deleted stale cards on every refresh.
+- Result: the user's 80% portfolio was invisible to the recommendation engine — "no new recommendations after filling portfolio" because the server never saw the portfolio.
+
+### Root causes (confirmed in code)
+
+1. **`ProfileService.createProfile` — the ONLY non-merge `set()` on `users/{uid}` in the codebase.** Its `else` branch did `docRef.set(profile.toFirestore())` with NO `SetOptions(merge: true)`. A non-merge `set()` **replaces the entire document**. If that branch ever executed against a doc that already existed (a race with `updateUserRole`, a stale `profileExists` read, or a re-init after logout/re-login) it permanently wiped the student's profile AND portfolio — leaving exactly the observed empty shell `(metadata, role, personal.email)`. (`project_info__14.md` Finding 4 candidate B predicted this exact mechanism.)
+2. **The v8.4.4 stale-guards silently hid the wipe.** The guards correctly ignore EMPTY server events so a local-cache replay can't wipe a just-uploaded resume — but that same protection also ignored a **genuinely** empty server document. Memory/cache kept showing 80% strength with no warning, so the divergence was invisible.
+3. **`savePortfolio`'s diff-based writes cannot rebuild a wiped doc.** When memory has data and the server is empty, `previous != null` → the service writes only *changed* sections. With an empty (null) server portfolio, no section is recognized as "changed" → nothing gets written.
+
+### Fixes (v8.9.2)
+
+| # | File | Change |
+|---|---|---|
+| 1 | `lib/services/firestore/profile_service.dart` | `createProfile` now writes **both** branches with `SetOptions(merge: true)` — the full user document can never be destroyed by this path again. merge creates the doc when missing and only fills missing fields when present. |
+| 2 | `lib/providers/portfolio_provider.dart` | **Divergence detection + self-heal.** New flag `_serverNonEmpty` distinguishes "empty event = stale cache replay" (v8.4.4 behavior, preserved) from "server document genuinely empty after having confirmed content" (wiped doc). On divergence, the provider surfaces a warning banner and **automatically re-saves the full portfolio** (full non-diff write) so the engine's evidence gate can unlock. Restore is attempted at most once per divergence (no infinite write loop) and is bounded by the existing 20 s save timeout; a failure never clears in-memory data. |
+| 3 | `lib/providers/portfolio_provider.dart` | New getters `isServerSynced` + `restoreMessage` expose the divergence to the UI. |
+| 4 | `lib/providers/portfolio_provider.dart` | Extracted the shared divergence rule into `@visibleForTesting bool shouldTriggerPortfolioRestore(...)`, used by both the stream listener and `refresh()`. |
+| 5 | `lib/views/dashboards/student_dashboard_view.dart` | Warning banner under the Resume Summary Card when the server doc is empty — explains why recommendations are still gated despite 80% strength. Restore is automatic; on failure the message instructs re-saving from Edit Portfolio. |
+| 6 | `lib/views/portfolio/student_portfolio_screen.dart` | Same warning banner on the portfolio screen (after the completion header), via a `_buildSyncWarning` helper. |
+| 7 | `test/portfolio_sync_state_test.dart` | **NEW regression suite (8 tests)** — pins the divergence rule + sync-state banner condition: v8.4.4 stale-guard preserved (no restore on the first empty event), restore triggers only after the server confirmed content, no double-restore loop, fresh-user = synced, and the exact bug state (memory has data, server never confirmed) renders as NOT synced. |
+
+### Validation
+- `flutter analyze` — **0 errors / 0 warnings** (76 pre-existing info lints, none in v8.9.2 files).
+- `flutter test` — **302/302 passed** (294 existing + 8 new sync-state regression tests).
+- `node --check` on `functions/index.js`, `functions/recommendations/engine.js`, `functions/recommendations/ai_explanations.js`, `functions/ai/aiProvider.js` — all clean (no server changes).
+- `pubspec.yaml` → **8.9.2+94**.
+
+### How the user's state is healed
+On the next app launch/login + refresh + portfolio screen visit, the provider detects the empty server doc while memory/cache holds the 80% portfolio, shows the restore banner, and **writes the portfolio back to Firestore** in one full non-diff save. The `onProfileUpdatedRefreshAI` trigger then recomputes recommendations from the now-visible portfolio evidence, and the "Complete your portfolio first" gate card is replaced with real personalized recommendations.

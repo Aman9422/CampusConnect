@@ -420,6 +420,110 @@ class TeacherAnalyticsService {
     }
   }
 
+  /// v8.9 (Phase 8): Recommendation intelligence aggregates.
+  ///
+  /// Queries the `recommendations` collectionGroup (teachers granted read via
+  /// firestore.rules) and aggregates ONLY engine fields — career goals,
+  /// target roles, skill gaps (skillsMissing on role/placement cards),
+  /// placement match tiers, and strong-match / skill-gap student counts. No
+  /// private resume text or full student profiles are ever read or returned.
+  Future<Map<String, dynamic>> getRecommendationAggregates() async {
+    try {
+      final snapshot = await _firestore
+          .collectionGroup('recommendations')
+          .limit(800)
+          .get();
+
+      final careerGoals = <String, int>{};
+      final targetRoles = <String, int>{};
+      final skillGaps = <String, int>{};
+      final placementTiers = <String, int>{};
+      final strongStudents = <String>{};
+      final gapStudents = <String>{};
+
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+        final type = data['type'] as String? ?? '';
+        final studentId =
+            data['studentId'] as String? ?? data['userId'] as String? ?? '';
+
+        // Career goal distribution: only `role` recommendations carry
+        // career-goal signals. `skill` cards were removed in v9.0 — the
+        // AI Career Coach owns career reasoning now.
+        final title = (data['title'] as String? ?? '').trim();
+        if (type == 'role' && title.isNotEmpty) {
+          final label = title.replaceFirst('Career match: ', '');
+          careerGoals[label] = (careerGoals[label] ?? 0) + 1;
+        }
+
+        // Target role distribution.
+        final targetRole = data['targetRole'] as String?;
+        if (targetRole != null && targetRole.isNotEmpty) {
+          final label = targetRole.replaceAll('_', ' ');
+          targetRoles[label] = (targetRoles[label] ?? 0) + 1;
+        }
+
+        // Skill gaps: skillsMissing on role/placement/skill recs.
+        final missing = (data['skillsMissing'] as List<dynamic>? ?? [])
+            .whereType<String>()
+            .map((s) => s.trim().toLowerCase())
+            .where((s) => s.isNotEmpty)
+            .toList();
+        for (final skill in missing) {
+          skillGaps[skill] = (skillGaps[skill] ?? 0) + 1;
+        }
+
+        // Placement match tier distribution.
+        final metadata = data['metadata'] as Map<String, dynamic>? ?? {};
+        final tier = metadata['matchTier'] as String?;
+        if (tier != null && tier.isNotEmpty) {
+          placementTiers[tier] = (placementTiers[tier] ?? 0) + 1;
+          if (studentId.isNotEmpty && tier == 'strong') {
+            strongStudents.add(studentId);
+          }
+        }
+
+        // Students with target-role skill gaps.
+        if (type == 'role' && missing.isNotEmpty && studentId.isNotEmpty) {
+          gapStudents.add(studentId);
+        }
+      }
+
+      List<Map<String, dynamic>> toCountedList(
+        Map<String, int> map, {
+        int? limitCount,
+      }) {
+        final entries = map.entries.toList()
+          ..sort((a, b) => b.value.compareTo(a.value));
+        final list = entries
+            .map((e) => {'label': e.key, 'count': e.value})
+            .toList();
+        return limitCount != null ? list.take(limitCount).toList() : list;
+      }
+
+      return {
+        'careerGoals': toCountedList(careerGoals, limitCount: 10),
+        'targetRoles': toCountedList(targetRoles, limitCount: 10),
+        'topSkillGaps': toCountedList(skillGaps, limitCount: 8),
+        'placementTiers': placementTiers,
+        'strongMatchStudents': strongStudents.length,
+        'significantGapStudents': gapStudents.length,
+      };
+    } catch (e) {
+      debugPrint(
+        'TeacherAnalyticsService.getRecommendationAggregates error: $e',
+      );
+      return {
+        'careerGoals': <Map<String, dynamic>>[],
+        'targetRoles': <Map<String, dynamic>>[],
+        'topSkillGaps': <Map<String, dynamic>>[],
+        'placementTiers': <String, int>{},
+        'strongMatchStudents': 0,
+        'significantGapStudents': 0,
+      };
+    }
+  }
+
   /// v7.4: Aggregate missing skills to identify institution-level gaps.
   Future<List<Map<String, dynamic>>> getSkillGapAnalysis({
     int limit = 8,

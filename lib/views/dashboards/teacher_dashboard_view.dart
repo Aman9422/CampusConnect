@@ -3,6 +3,7 @@ import 'package:campusconnect/providers/activity_feed_provider.dart';
 import 'package:campusconnect/providers/ai_chat_provider.dart';
 import 'package:campusconnect/providers/alumni_group_chat_provider.dart'; // v8.7
 import 'package:campusconnect/providers/ai_usage_provider.dart';
+import 'package:campusconnect/providers/career_coach_provider.dart'; // v9.0
 import 'package:campusconnect/providers/alumni_directory_provider.dart';
 import 'package:campusconnect/providers/chat_provider.dart';
 import 'package:campusconnect/providers/engagement_provider.dart';
@@ -21,8 +22,7 @@ import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/views/dashboards/widgets/teacher_dashboard_sections.dart';
 import 'package:campusconnect/views/dashboards/widgets/teacher_ai_insights_tab.dart';
 import 'package:campusconnect/views/placements/placements_list_view.dart';
-import 'package:campusconnect/views/profile/profile_view.dart'
-    as extracted_profile;
+import 'package:campusconnect/views/profile/teacher_profile_view.dart';
 import 'package:campusconnect/views/shared/main_navigation_view.dart';
 import 'package:campusconnect/views/teacher/student_analytics_view.dart';
 import 'package:campusconnect/views/widgets/chat_badge.dart';
@@ -37,7 +37,8 @@ import 'package:provider/provider.dart';
 /// 1. Students — reuse StudentAnalyticsView
 /// 2. Placements — reuse PlacementsListView
 /// 3. AI Insights — dedicated analytics dashboard (NOT an AI chat)
-/// 4. Profile — reuse extracted_profile.ProfileView
+/// 4. Profile — v8.9: TeacherProfileView (Teacher-appropriate; no Student
+///    Portfolio/Resume/Career controls)
 class TeacherDashboardView extends StatelessWidget {
   const TeacherDashboardView({super.key});
 
@@ -73,7 +74,9 @@ class TeacherDashboardView extends StatelessWidget {
           label: 'Profile',
           icon: Icons.person_outline,
           activeIcon: Icons.person,
-          widget: const extracted_profile.ProfileView(),
+          // v8.9 (Phase 13.5): Teacher-appropriate profile — the Student
+          // Profile/Portfolio workflow is no longer reused for teachers.
+          widget: const TeacherProfileView(),
         ),
       ],
     );
@@ -334,6 +337,7 @@ class _TeacherDashboardTabState extends State<_TeacherDashboardTab> {
     // consistency with the student dashboard logout path (issue M12).
     context.read<PortfolioProvider>().reset();
     context.read<AlumniGroupChatProvider>().reset(); // v8.7
+    context.read<CareerCoachProvider>().reset(); // v9.0 — BUG-1 fix
   }
 
   Future<bool> _showLogOutDialog(BuildContext context) async {

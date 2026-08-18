@@ -497,10 +497,17 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
           const SizedBox(height: AppTheme.space16),
           _buildFormField(
             controller: _careerInterestController,
-            label: 'Career Interest (optional)',
-            hint: 'e.g., Software Development',
+            label: 'Career Interest',
+            hint: 'e.g., Software Development, Data Analysis',
             icon: Icons.trending_up_rounded,
             isDark: isDark,
+            required: true,
+            validator: (v) {
+              if (v == null || v.trim().isEmpty) {
+                return 'Please enter your career interest / target domain';
+              }
+              return null;
+            },
           ),
         ];
       case UserRole.alumni:

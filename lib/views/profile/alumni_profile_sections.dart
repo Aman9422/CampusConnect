@@ -790,7 +790,7 @@ class AlumniPublicProfileSection extends StatelessWidget {
                   Switch(
                     value: isPublic,
                     onChanged: onToggle,
-                    activeColor: AppTheme.success,
+                    activeThumbColor: AppTheme.success,
                   ),
                 ],
               ),

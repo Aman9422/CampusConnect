@@ -64,6 +64,19 @@ class StudentPortfolioScreen extends StatelessWidget {
                   _buildCompletionHeader(portfolio, profile, isDark),
                   const SizedBox(height: AppTheme.space16),
 
+                  // v8.9.2 (project_info__25/26): when the app holds
+                  // portfolio data but the live Firestore document is empty
+                  // (wiped doc / failed persistence), explain the gap
+                  // between the 80% strength shown here and the "Complete
+                  // your portfolio first" recommendation gate — the server
+                  // cannot see the data the user saved. Self-heal pushes it
+                  // back automatically; on failure, re-saving fixes it.
+                  if (!portfolioProvider.isServerSynced &&
+                      portfolioProvider.restoreMessage != null) ...[
+                    _buildSyncWarning(portfolioProvider.restoreMessage!, isDark),
+                    const SizedBox(height: AppTheme.space16),
+                  ],
+
                   // v8.4.7: a failed load/refresh must be visible, never a
                   // silent "fresh 10% portfolio" while Firestore holds data.
                   if (portfolioProvider.error != null) ...[
@@ -951,6 +964,39 @@ class StudentPortfolioScreen extends StatelessWidget {
               style: AppTheme.bodySmall.copyWith(
                 color: AppTheme.error,
                 fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// v8.9.2 (project_info__25/26): warning banner shown while the device
+  /// holds portfolio data the live Firestore document no longer has. The
+  /// "Portfolio Strength" number above reads from memory/cache, so this
+  /// banner explains why recommendations are still gated ("Complete your
+  /// portfolio first") — the server cannot see the data.
+  Widget _buildSyncWarning(String message, bool isDark) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppTheme.space12),
+      decoration: BoxDecoration(
+        color: AppTheme.warning.withValues(alpha: isDark ? 0.15 : 0.1),
+        borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+        border: Border.all(color: AppTheme.warning.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.cloud_off_outlined, color: AppTheme.warning, size: 20),
+          const SizedBox(width: AppTheme.space8),
+          Expanded(
+            child: Text(
+              message,
+              style: AppTheme.bodySmall.copyWith(
+                color: isDark ? AppTheme.gray300 : AppTheme.gray700,
+                height: 1.4,
               ),
             ),
           ),

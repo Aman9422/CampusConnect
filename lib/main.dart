@@ -10,6 +10,7 @@ import 'package:campusconnect/providers/notifications_provider.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
 import 'package:campusconnect/providers/profile_provider.dart';
 import 'package:campusconnect/providers/resume_review_provider.dart';
+import 'package:campusconnect/providers/career_coach_provider.dart'; // v9.0
 import 'package:campusconnect/providers/role_provider.dart';
 import 'package:campusconnect/providers/theme_provider.dart'; // v7.2: Multi-role ecosystem providers
 import 'package:campusconnect/providers/alumni_directory_provider.dart';
@@ -78,6 +79,9 @@ import 'package:campusconnect/views/placements/placements_list_view.dart';
 import 'package:campusconnect/views/chat/ai_chat_view.dart';
 import 'package:campusconnect/views/profile/profile_view.dart'
     as extracted_profile;
+import 'package:campusconnect/views/profile/teacher_profile_view.dart'; // v8.9
+// v9.0: AI Career Coach view
+import 'package:campusconnect/views/career_coach_view.dart';
 // v8.4: Student resume portfolio views
 import 'package:campusconnect/views/portfolio/student_portfolio_screen.dart';
 import 'package:campusconnect/views/portfolio/edit_portfolio_screen.dart';
@@ -136,6 +140,8 @@ class MyApp extends StatelessWidget {
           create: (_) =>
               ResumeReviewProvider(service: ResumeReviewService.instance()),
         ),
+        // v9.0: AI Career Coach provider
+        ChangeNotifierProvider(create: (_) => CareerCoachProvider()),
         // V7.1: Role provider
         ChangeNotifierProvider(create: (_) => RoleProvider()),
         // V7.2: Multi-role ecosystem providers
@@ -278,7 +284,11 @@ class MyApp extends StatelessWidget {
               // legacy v2 shim was dead code and `/profile-view` was its
               // duplicate. `profileViewRoute` is removed below; the alumni and
               // teacher dashboards already navigate to `/profile/`.
-              profileRoute: (context) => const extracted_profile.ProfileView(),
+              // v8.9 (Phase 13.5): role-specific profile routing —
+              // Student→ProfileView, Alumni→ProfileView (alumni branch),
+              // Teacher→TeacherProfileView. No role falls through to
+              // another role's profile experience.
+              profileRoute: (context) => const _RoleAwareProfileView(),
               editProfileRoute: (context) => const EditProfileView(),
               profileSetupRoute: (context) => const ProfileSetupView(),
               notificationsRoute: (context) => const NotificationsView(),
@@ -318,6 +328,8 @@ class MyApp extends StatelessWidget {
               aiChatRoute: (context) => const AIChatView(),
               // v7.6: Password reset route
               passwordResetRoute: (context) => const PasswordResetView(),
+              // v9.0: AI Career Coach full analysis screen
+              careerCoachRoute: (context) => const CareerCoachView(),
               // v8.4: Student resume portfolio routes
               // v8.7: Editing routes are role-gated — Alumni may not enter the
               // Student Portfolio editing workflow (Task §1/§5/§14). The
@@ -359,6 +371,23 @@ class MyApp extends StatelessWidget {
         },
       ),
     );
+  }
+}
+
+/// v8.9 (Phase 13.5): maps the shared `/profile/` route to the correct
+/// role-specific profile experience. Teachers get the Teacher-appropriate
+/// profile; Students and Alumni get the role-aware `ProfileView` (which
+/// internally branches Alumni vs Student layouts).
+class _RoleAwareProfileView extends StatelessWidget {
+  const _RoleAwareProfileView();
+
+  @override
+  Widget build(BuildContext context) {
+    final role = context.watch<RoleProvider>().userRole;
+    if (role == UserRole.teacher) {
+      return const TeacherProfileView();
+    }
+    return const extracted_profile.ProfileView();
   }
 }
 
@@ -602,6 +631,7 @@ class _AuthGuardState extends State<AuthGuard> {
                     chatProvider.initWithUser(user.id); // v7.3
                     aiChatProvider.initWithUser(user.id); // v7.4
                     alumniGroupChatProvider.initWithUser(user.id); // v8.7
+                    context.read<CareerCoachProvider>().initWithUser(user.id); // v9.0
                     // v7.2: Initialize ecosystem providers after role is loaded
                     // This will be done in a separate callback below
                     profileProvider.initWithUser(
@@ -727,6 +757,8 @@ class _AuthGuardState extends State<AuthGuard> {
               context.read<PortfolioProvider>().reset();
               // v8.7: Reset alumni group chat provider
               context.read<AlumniGroupChatProvider>().reset();
+              // v9.0: Reset career coach provider
+              context.read<CareerCoachProvider>().reset();
             });
           }
 

@@ -18,6 +18,7 @@ import 'package:campusconnect/providers/portfolio_provider.dart'; // v8.4
 import 'package:campusconnect/providers/profile_provider.dart';
 import 'package:campusconnect/providers/recommendation_provider.dart';
 import 'package:campusconnect/providers/resume_review_provider.dart';
+import 'package:campusconnect/providers/career_coach_provider.dart';
 import 'package:campusconnect/providers/role_provider.dart';
 import 'package:campusconnect/providers/teacher_analytics_provider.dart';
 import 'package:campusconnect/services/auth/auth_service.dart';
@@ -27,6 +28,8 @@ import 'package:campusconnect/views/widgets/eligibility_badge.dart';
 import 'package:campusconnect/views/widgets/notification_badge.dart';
 import 'package:campusconnect/widgets/home_widgets.dart';
 import 'package:campusconnect/widgets/resume_summary_card.dart'; // v8.4.1
+import 'package:campusconnect/views/dashboards/career_coach_section.dart'; // v9.0
+import 'package:campusconnect/widgets/dashboard_error_boundary.dart'; // v9.0 IMP-10
 // v7.3: Extracted feature views (Phase 1 NotesView decomposition)
 import 'package:campusconnect/views/notes/notes_list_view.dart';
 import 'package:campusconnect/views/placements/placements_list_view.dart';
@@ -156,8 +159,12 @@ class _StudentDashboardTab extends StatelessWidget {
                     context.read<RecommendationProvider>().reset();
                     context.read<EngagementProvider>().reset();
                     context.read<AIChatProvider>().reset();
-                    context.read<ChatProvider>().reset();    // Has active Firestore stream subscriptions
-                    context.read<NotificationsProvider>().reset(); // Has active Firestore stream
+                    context
+                        .read<ChatProvider>()
+                        .reset(); // Has active Firestore stream subscriptions
+                    context
+                        .read<NotificationsProvider>()
+                        .reset(); // Has active Firestore stream
                     context.read<RoleProvider>().reset();
                     context.read<ResumeReviewProvider>().reset();
                     context.read<MentorshipProvider>().reset();
@@ -166,6 +173,7 @@ class _StudentDashboardTab extends StatelessWidget {
                     context.read<TeacherAnalyticsProvider>().reset();
                     context.read<PortfolioProvider>().reset(); // v8.4
                     context.read<AlumniGroupChatProvider>().reset(); // v8.7
+                    context.read<CareerCoachProvider>().reset(); // v9.0
                     try {
                       await AuthService.firebase().logOut();
                     } catch (_) {
@@ -221,9 +229,57 @@ class _StudentDashboardTab extends StatelessWidget {
               // masquerading as a fresh (empty) portfolio — Symptom 1's UI.
               Consumer<PortfolioProvider>(
                 builder: (context, portfolioProvider, child) {
-                  return ResumeSummaryCard(
-                    resume: portfolioProvider.portfolio?.resume,
-                    error: portfolioProvider.error,
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ResumeSummaryCard(
+                        resume: portfolioProvider.portfolio?.resume,
+                        error: portfolioProvider.error,
+                      ),
+                      // v8.9.2 (project_info__25/26): when the UI holds
+                      // portfolio data but the live Firestore document is
+                      // empty (wiped doc / failed persistence), surface WHY
+                      // the recommendations are still gated ("Complete your
+                      // portfolio first") — the server cannot see the data
+                      // the user saved. Self-heal attempts to push it back.
+                      if (!portfolioProvider.isServerSynced &&
+                          portfolioProvider.restoreMessage != null) ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: AppTheme.warning.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: AppTheme.warning.withValues(alpha: 0.4),
+                            ),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(
+                                Icons.cloud_off_outlined,
+                                color: AppTheme.warning,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  portfolioProvider.restoreMessage!,
+                                  style: AppTheme.bodySmall.copyWith(
+                                    color: isDark
+                                        ? AppTheme.gray300
+                                        : AppTheme.gray700,
+                                    height: 1.4,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
                   );
                 },
               ),
@@ -241,12 +297,31 @@ class _StudentDashboardTab extends StatelessWidget {
               _buildConnectAndGrowSection(context, isDark),
               const SizedBox(height: 24),
 
-              // v7.4: AI recommendations
-              _buildAIPicksSection(context, isDark),
+              // v9.0: AI Career Coach — top 2–3 recommendations + "View all →"
+              // v9.0 IMP-10: error boundary so a Career Coach failure doesn't
+              // crash the entire dashboard.
+              const DashboardErrorBoundary(
+                sectionName: 'AI Career Coach',
+                child: CareerCoachSection(),
+              ),
+              const SizedBox(height: 24),
+
+              // v7.4 → v8.9: AI recommendations ("Recommended for You")
+              DashboardErrorBoundary(
+                sectionName: 'Recommendations',
+                child: Builder(
+                  builder: (ctx) => _buildRecommendedSection(ctx, isDark),
+                ),
+              ),
               const SizedBox(height: 24),
 
               // v7.4: Engagement and profile strength
-              _buildEngagementSection(context, isDark),
+              DashboardErrorBoundary(
+                sectionName: 'Engagement',
+                child: Builder(
+                  builder: (ctx) => _buildEngagementSection(ctx, isDark),
+                ),
+              ),
               const SizedBox(height: 24),
 
               // Latest Placements Section
@@ -258,7 +333,12 @@ class _StudentDashboardTab extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 16),
-              _buildLatestPlacements(context, isDark),
+              DashboardErrorBoundary(
+                sectionName: 'Placements',
+                child: Builder(
+                  builder: (ctx) => _buildLatestPlacements(ctx, isDark),
+                ),
+              ),
             ],
           ),
         ),
@@ -347,7 +427,8 @@ class _StudentDashboardTab extends StatelessWidget {
                 title: 'My Portfolio',
                 subtitle: 'Build & view your professional portfolio',
                 isDark: isDark,
-                onTap: () => Navigator.pushNamed(context, studentPortfolioRoute),
+                onTap: () =>
+                    Navigator.pushNamed(context, studentPortfolioRoute),
               ),
             ],
           ),
@@ -602,10 +683,14 @@ class _StudentDashboardTab extends StatelessWidget {
     );
   }
 
-  Widget _buildAIPicksSection(BuildContext context, bool isDark) {
+  /// v8.9: "Recommended for You" — the engine now emits role matches,
+  /// placement matches, skill gaps and career actions alongside the legacy
+  /// mentor/job rows. Each card explains "Why am I seeing this?" via the
+  /// reason/aiExplanation fields and surfaces match tier labels.
+  Widget _buildRecommendedSection(BuildContext context, bool isDark) {
     return Consumer<RecommendationProvider>(
       builder: (context, recommendationProvider, child) {
-        final picks = recommendationProvider.recommendations.take(3).toList();
+        final recs = recommendationProvider.recommendations.take(4).toList();
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -613,7 +698,7 @@ class _StudentDashboardTab extends StatelessWidget {
             Row(
               children: [
                 Text(
-                  'AI Smart Picks',
+                  'Recommended for You',
                   style: AppTheme.titleMedium.copyWith(
                     fontWeight: FontWeight.w600,
                     color: isDark ? Colors.white : AppTheme.gray900,
@@ -625,13 +710,58 @@ class _StudentDashboardTab extends StatelessWidget {
                   size: 18,
                   color: AppTheme.secondaryIndigo,
                 ),
+                const Spacer(),
+                if (recommendationProvider.isLoading)
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else
+                  IconButton(
+                    icon: const Icon(Icons.refresh, size: 20),
+                    color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+                    tooltip: 'Refresh recommendations',
+                    onPressed: () async {
+                      final profileProvider = context.read<ProfileProvider>();
+                      final profile = profileProvider.profile;
+                      if (profile != null) {
+                        await recommendationProvider.refresh(profile);
+                      }
+                    },
+                  ),
               ],
             ),
             const SizedBox(height: 12),
-            if (recommendationProvider.isLoading &&
-                recommendationProvider.recommendations.isEmpty)
+            if (recommendationProvider.error != null && recs.isEmpty) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppTheme.errorBg.withValues(alpha: 0.4),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: AppTheme.error.withValues(alpha: 0.3),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.error_outline, color: AppTheme.error, size: 18),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Could not load recommendations. Pull to refresh.',
+                        style: AppTheme.bodySmall.copyWith(
+                          color: isDark ? AppTheme.gray300 : AppTheme.gray700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else if (recommendationProvider.isLoading && recs.isEmpty)
               const Center(child: CircularProgressIndicator())
-            else if (picks.isEmpty)
+            else if (recs.isEmpty)
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
@@ -643,7 +773,14 @@ class _StudentDashboardTab extends StatelessWidget {
                   ),
                 ),
                 child: Text(
-                  'Complete your profile and stay active to unlock personalized mentor and job recommendations.',
+                  // v8.9.3 (R5): the previous copy ("Complete your profile…")
+                  // blamed profile completeness even when the portfolio was
+                  // complete and the engine simply had no matching roles,
+                  // placements or mentors yet — reading exactly as "not giving
+                  // anything". The true no-data case is handled by the
+                  // portfolio gate card, so this empty state explains the real
+                  // situation and gives an actionable next step.
+                  'No personalized recommendations right now. Add more skills, projects or a resume review to unlock stronger career matches.',
                   style: AppTheme.bodySmall.copyWith(
                     color: isDark ? AppTheme.gray400 : AppTheme.gray600,
                   ),
@@ -651,7 +788,7 @@ class _StudentDashboardTab extends StatelessWidget {
               )
             else
               Column(
-                children: picks
+                children: recs
                     .map(
                       (recommendation) => _buildRecommendationCard(
                         context,
@@ -693,8 +830,23 @@ class _StudentDashboardTab extends StatelessWidget {
           case RecommendationType.chat:
             Navigator.pushNamed(context, aiChatRoute);
             break;
+          // v9.0 (Phase 1): skill/role cards must NEVER open profileSetupRoute
+          // (the first-run onboarding screen for AuthGuard). Both are
+          // profile-related actions — route to Edit Profile → Career & Skills.
           case RecommendationType.skill:
-            Navigator.pushNamed(context, profileSetupRoute);
+            Navigator.pushNamed(context, editProfileRoute);
+            break;
+          case RecommendationType.role:
+            Navigator.pushNamed(context, editProfileRoute);
+            break;
+          case RecommendationType.placement:
+            Navigator.pushNamed(context, placementsListRoute);
+            break;
+          case RecommendationType.portfolio:
+            // v8.9.1: the portfolio-first gate card routes the student to
+            // build out their portfolio (skills + projects + resume) so the
+            // AI can produce personalized placements & skill-gap recs.
+            Navigator.pushNamed(context, studentPortfolioRoute);
             break;
         }
       },
@@ -705,66 +857,193 @@ class _StudentDashboardTab extends StatelessWidget {
         decoration: BoxDecoration(
           color: isDark ? AppTheme.darkSurface : Colors.white,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: isDark ? AppTheme.gray700 : AppTheme.gray200),
+          border: Border.all(
+            color: isDark ? AppTheme.gray700 : AppTheme.gray200,
+          ),
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                color: scoreColor.withAlpha(isDark ? 46 : 24),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(
-                _recommendationIcon(recommendation.type),
-                color: scoreColor,
-                size: 18,
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    recommendation.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: AppTheme.bodyMedium.copyWith(
-                      fontWeight: FontWeight.w600,
-                      color: isDark ? Colors.white : AppTheme.gray900,
+            Row(
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: scoreColor.withAlpha(isDark ? 46 : 24),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    _recommendationIcon(recommendation.type),
+                    color: scoreColor,
+                    size: 18,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        recommendation.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTheme.bodyMedium.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? Colors.white : AppTheme.gray900,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        recommendation.description,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTheme.bodySmall.copyWith(
+                          color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: scoreColor.withAlpha(25),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '${recommendation.score.round()}%',
+                    style: AppTheme.caption.copyWith(
+                      color: scoreColor,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    recommendation.description,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: AppTheme.bodySmall.copyWith(
-                      color: isDark ? AppTheme.gray400 : AppTheme.gray600,
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: scoreColor.withAlpha(25),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                '${recommendation.score.round()}%',
-                style: AppTheme.caption.copyWith(
-                  color: scoreColor,
-                  fontWeight: FontWeight.w700,
+            // v8.9: "Why am I seeing this?" — the engine's deterministic
+            // reason (or AI-enriched explanation, when available).
+            if ((recommendation.aiExplanation != null &&
+                    recommendation.aiExplanation!.isNotEmpty) ||
+                (recommendation.reason != null &&
+                    recommendation.reason!.isNotEmpty)) ...[
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? AppTheme.gray800.withValues(alpha: 0.5)
+                      : AppTheme.gray100,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Why am I seeing this?',
+                      style: AppTheme.caption.copyWith(
+                        color: AppTheme.secondaryIndigo,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      recommendation.aiExplanation ??
+                          recommendation.reason ??
+                          '',
+                      style: AppTheme.bodySmall.copyWith(
+                        color: isDark ? AppTheme.gray300 : AppTheme.gray700,
+                        height: 1.4,
+                      ),
+                    ),
+                    if (recommendation.suggestedAction != null &&
+                        recommendation.suggestedAction!.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        '💡 ${recommendation.suggestedAction}',
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.success,
+                          fontWeight: FontWeight.w600,
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
-            ),
+            ],
+            // v8.9: matched / missing skill chips for role & placement cards.
+            if (recommendation.skillsMatched.isNotEmpty ||
+                recommendation.skillsMissing.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  if (recommendation.matchTierLabel != null)
+                    _skillChip(
+                      recommendation.matchTierLabel!,
+                      AppTheme.primaryBlue,
+                      isDark,
+                      highlight: true,
+                    ),
+                  for (final skill in recommendation.skillsMatched.take(4))
+                    _skillChip(
+                      skill,
+                      AppTheme.success,
+                      isDark,
+                      withCheck: true,
+                    ),
+                  for (final skill in recommendation.skillsMissing.take(3))
+                    _skillChip('+ $skill', AppTheme.warning, isDark),
+                ],
+              ),
+            ],
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _skillChip(
+    String label,
+    Color color,
+    bool isDark, {
+    bool withCheck = false,
+    bool highlight = false,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: isDark ? 0.18 : 0.10),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: color.withValues(alpha: highlight ? 0.6 : 0.25),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (withCheck) ...[
+            Icon(Icons.check_circle, size: 12, color: color),
+            const SizedBox(width: 4),
+          ],
+          Text(
+            label,
+            style: AppTheme.caption.copyWith(
+              color: color,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -780,6 +1059,12 @@ class _StudentDashboardTab extends StatelessWidget {
         return Icons.chat_bubble_outline_rounded;
       case RecommendationType.skill:
         return Icons.lightbulb_outline_rounded;
+      case RecommendationType.role:
+        return Icons.flag_outlined;
+      case RecommendationType.placement:
+        return Icons.business_outlined;
+      case RecommendationType.portfolio:
+        return Icons.workspace_premium_outlined;
     }
   }
 
@@ -797,7 +1082,9 @@ class _StudentDashboardTab extends StatelessWidget {
           decoration: BoxDecoration(
             color: isDark ? AppTheme.darkSurface : Colors.white,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: isDark ? AppTheme.gray700 : AppTheme.gray200),
+            border: Border.all(
+              color: isDark ? AppTheme.gray700 : AppTheme.gray200,
+            ),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

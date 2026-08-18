@@ -41,20 +41,23 @@ class ProfileService {
 
   /// Create a new profile (first login)
   ///
-  /// `StudentProfile.toFirestore()` are preserved.
+  /// v8.9.2 (project_info__25/26 — "No New Recommendations After Filling
+  /// Portfolio (80% Strength)"): BOTH branches now write with
+  /// `SetOptions(merge: true)`. The previous `else` branch was the ONLY
+  /// non-merge `set()` on `users/{uid}` in the whole codebase, and a
+  /// non-merge `set()` REPLACES the entire document. Any execution of that
+  /// branch against a doc that already existed (a race with
+  /// `updateUserRole`, a stale `profileExists` read, or a re-init after
+  /// logout/re-login) permanently wiped the student's profile AND portfolio
+  /// — leaving exactly the observed empty shell
+  /// `(metadata, role, personal.email)`. merge:true creates the doc when
+  /// missing and only fills missing fields when present, so the full
+  /// user document can never be destroyed by this path again.
   Future<void> createProfile(String uid, String email) async {
     try {
       final profile = StudentProfile.empty(uid, email);
       final docRef = _usersCollection.doc(uid);
-      final existing = await docRef.get();
-      if (existing.exists) {
-        await docRef.set(
-          profile.toFirestore(),
-          SetOptions(merge: true),
-        );
-      } else {
-        await docRef.set(profile.toFirestore());
-      }
+      await docRef.set(profile.toFirestore(), SetOptions(merge: true));
     } catch (e) {
       debugPrint('Error creating profile: $e');
       rethrow;
