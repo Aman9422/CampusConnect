@@ -92,5 +92,7 @@ exports.recomputeEngagementScores = schedulers.recomputeEngagementScores;
 exports.refreshRecommendations = recommendationsRefresh.refreshRecommendations;
 
 // Placement Analytics (SEC-1: both onCall — identity from request.auth.uid)
+// v9.1: updateApplicationStatus — teacher/alumni-only pipeline transition writer.
 exports.logPlacementView = placements.logPlacementView;
 exports.logPlacementApplication = placements.logPlacementApplication;
+exports.updateApplicationStatus = placements.updateApplicationStatus;

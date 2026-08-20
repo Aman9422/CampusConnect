@@ -76,6 +76,7 @@ import 'package:campusconnect/views/notes/teacher_notes_view.dart';
 // v7.6: Password reset view
 import 'package:campusconnect/views/password_reset_view.dart';
 import 'package:campusconnect/views/placements/placements_list_view.dart';
+import 'package:campusconnect/views/placements/placement_applicants_view.dart'; // v9.1
 import 'package:campusconnect/views/chat/ai_chat_view.dart';
 import 'package:campusconnect/views/profile/profile_view.dart'
     as extracted_profile;
@@ -325,6 +326,19 @@ class MyApp extends StatelessWidget {
               notesListRoute: (context) => const NotesListView(),
               uploadNotesRoute: (context) => const UploadNotesView(),
               placementsListRoute: (context) => const PlacementsListView(),
+              // v9.1: Teacher Applicant Review — reads `placementId` from
+              // route arguments (String), same pattern as
+              // `resumeReviewDetailRoute` / `portfolioReadOnlyRoute`.
+              // v9.1 audit (SEC-6): role-gate the applicants screen —
+              // Teacher/Alumni only (they manage placements). Manually
+              // navigating a Student to this route shows a safe denied
+              // screen; `updateApplicationStatus` + Firestore rules enforce
+              // the same boundary server-side.
+              placementApplicantsRoute: (context) =>
+                  _guardPlacementApplicants(
+                    context,
+                    const PlacementApplicantsView(),
+                  ),
               aiChatRoute: (context) => const AIChatView(),
               // v7.6: Password reset route
               passwordResetRoute: (context) => const PasswordResetView(),
@@ -419,6 +433,77 @@ Widget _guardAlumniGroupChat(BuildContext context, Widget child) {
     return const _AlumniGroupChatDeniedView();
   }
   return child;
+}
+
+/// v9.1 audit (SEC-6): Role-gates the Placement Applicants screen —
+/// Teacher/Alumni only (they manage placements).
+///
+/// The v9.1 feature shipped with no route guard: a Student who manually
+/// navigated to `placementApplicantsRoute` could view every applicant's
+/// resume/portfolio for drives they did not create. Students and roles not
+/// yet resolved are shown a safe denied screen instead. Firestore rules +
+/// `updateApplicationStatus` (actor-must-author-placement) keep the same
+/// boundary server-side, so bypassing this guard still cannot read or write
+/// application data.
+Widget _guardPlacementApplicants(BuildContext context, Widget child) {
+  final role = context.watch<RoleProvider>().userRole;
+  if (role != UserRole.teacher && role != UserRole.alumni) {
+    return const _PlacementApplicantsDeniedView();
+  }
+  return child;
+}
+
+/// Denied state for Students (and unresolved roles) reaching the Placement
+/// Applicants route.
+class _PlacementApplicantsDeniedView extends StatelessWidget {
+  const _PlacementApplicantsDeniedView();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Applicants'),
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+        elevation: 0,
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(AppTheme.space24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.lock_outline,
+                size: 64,
+                color: AppTheme.primaryBlue,
+              ),
+              const SizedBox(height: AppTheme.space16),
+              Text(
+                'Teachers & Alumni Only',
+                style: AppTheme.titleMedium.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? Colors.white
+                      : AppTheme.gray900,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: AppTheme.space12),
+              Text(
+                'Applicant review is available to placement managers only.',
+                style: AppTheme.bodyMedium.copyWith(
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? AppTheme.gray400
+                      : AppTheme.gray600,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// Denied state for non-Alumni reaching the Alumni Group Chat route.

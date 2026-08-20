@@ -588,6 +588,19 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
         AppTheme.secondaryIndigo,
         alumniDirectoryRoute,
       ),
+      // v9.1 audit (INT-1): alumni are placement managers alongside
+      // teachers (placement rules + `updateApplicationStatus` + the v9.1
+      // applicants screen all accept teacher/alumni), but the Alumni
+      // dashboard had NO entry point to the placement management surface.
+      // A 5th quick action points at the shared `placementsListRoute`; the
+      // actions row is now a Wrap so 5 items flow to 4+1 on narrow screens
+      // instead of overflowing a single Row of Expanded children.
+      _QuickAction(
+        'Placements',
+        Icons.business_outlined,
+        const Color(0xFF0891B2),
+        placementsListRoute,
+      ),
     ];
 
     return Column(
@@ -601,10 +614,26 @@ class _AlumniDashboardTabState extends State<_AlumniDashboardTab> {
           ),
         ),
         const SizedBox(height: AppTheme.space12),
-        Row(
-          children: actions
-              .map((a) => Expanded(child: _actionButton(context, a, isDark)))
-              .toList(),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            // Four items per row keeps the icon+label buttons tappable and
+            // readable — a 5th flows onto its own row. spacing is
+            // AppTheme.space8 between the 4 columns.
+            final itemWidth =
+                (constraints.maxWidth - (AppTheme.space8 * 3)) / 4;
+            return Wrap(
+              spacing: AppTheme.space8,
+              runSpacing: AppTheme.space8,
+              children: actions
+                  .map(
+                    (a) => SizedBox(
+                      width: itemWidth,
+                      child: _actionButton(context, a, isDark),
+                    ),
+                  )
+                  .toList(),
+            );
+          },
         ),
       ],
     );

@@ -31,6 +31,13 @@ service cloud.firestore {
       return isAuthenticated() && userRole() == 'teacher';
     }
 
+    // v9.1: Alumni manage placements, and application docs are
+    // placement-scoped — grant alumni the same read access teachers have on
+    // the `applications` collectionGroup + placement mirror subcollection.
+    function isAlumni() {
+      return isAuthenticated() && userRole() == 'alumni';
+    }
+
     // F1 (security): Users may NEVER change their `role` once it has been
     // persisted on their document. Role is chosen once at registration and is
     // effectively immutable to the client afterwards — role changes must go
@@ -53,6 +60,30 @@ service cloud.firestore {
           || !('role' in resource.data)
           || !('role' in request.resource.data)
           || resource.data.role == request.resource.data.role;
+    }
+
+    // v9.1 audit (SEC-1): schema validation for placement writes. Applies to
+    // BOTH create and update — `request.resource.data` is the post-write
+    // (merged-for-update) document, so the same full-schema check works for
+    // both. The `createdBy == request.auth.uid` binding is enforced here so
+    // a manager can never forge a placement authored by someone else, and
+    // malformed placement docs (the SEC-1 client DoS vector) are rejected
+    // server-side.
+    function isValidPlacementData() {
+      return request.resource.data.deadline is timestamp &&
+             request.resource.data.postedAt is timestamp &&
+             request.resource.data.isActive is bool &&
+             request.resource.data.createdBy == request.auth.uid &&
+             request.resource.data.company is string &&
+             request.resource.data.company.size() > 0 &&
+             request.resource.data.role is string &&
+             request.resource.data.role.size() > 0 &&
+             request.resource.data.description is string &&
+             request.resource.data.description.size() > 0 &&
+             request.resource.data.eligibility is string &&
+             request.resource.data.eligibility.size() > 0 &&
+             request.resource.data.salary is string &&
+             request.resource.data.salary.size() > 0;
     }
 
     // ===============================================
@@ -181,12 +212,30 @@ service cloud.firestore {
     // ===============================================
     match /placements/{placementId} {
       allow read: if isAuthenticated();
-      allow create, update, delete: if canManagePlacements();
+      // v9.1 audit (SEC-1): managers may create (with schema + createdBy
+      // binding) and update/delete ONLY placements they authored. An
+      // unrestricted `canManagePlacements()` allowed any teacher/alumni to
+      // delete every placement or write malformed docs that crashed every
+      // client rendering the list.
+      allow create: if canManagePlacements() && isValidPlacementData();
+      allow update: if canManagePlacements() &&
+        resource.data.createdBy == request.auth.uid &&
+        isValidPlacementData();
+      allow delete: if canManagePlacements() &&
+        resource.data.createdBy == request.auth.uid;
 
       // Applications under placements
+      // v9.1: alumni may read the placement mirror docs (they manage
+      // placements and application docs are placement-scoped).
+      // v9.1 audit (SEC-2): create is LOCKED (`false`) on both application
+      // paths — `logPlacementApplication` uses the Admin SDK and bypasses
+      // rules, so clients never need direct create. Previously `create` was
+      // open, letting students forge docs with arbitrary status/resumeUrl
+      // (self-promotion + phishing-resume chain). Updates/deletes go
+      // through `updateApplicationStatus` (Admin SDK).
       match /applications/{appUserId} {
-        allow create: if isOwner(appUserId);
-        allow read: if isOwner(appUserId);
+        allow create: if false;
+        allow read: if isOwner(appUserId) || isAlumni() || isTeacher();
         allow update, delete: if false;
       }
     }
@@ -196,7 +245,13 @@ service cloud.firestore {
     // ===============================================
     match /applications/{applicationId} {
       allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      // v9.1 audit (SEC-2): create is LOCKED on BOTH application paths —
+      // `logPlacementApplication` uses the Admin SDK and bypasses rules, so
+      // clients never need direct create. Previously `create` was open
+      // (`userId == request.auth.uid`), letting students forge docs with
+      // arbitrary `status` and `resumeUrl` (self-promotion + phishing-resume
+      // chain, arbitrary placementId pollution).
+      allow create: if false;
       allow update, delete: if false;
     }
 
@@ -396,7 +451,16 @@ service cloud.firestore {
     // for pipeline analytics.
     // ===============================================
     match /{path=**}/applications/{appId} {
-      allow read: if isTeacher() || isOwner(appId);
+      // v9.1: alumni added — alumni manage placements and application docs
+      // are placement-scoped. Teachers/alumni read via collectionGroup
+      // queries (`getApplicationsForPlacement`, `getApplicantCounts`).
+      // v9.1 audit (SEC-5): the owner side of the read rule now checks the
+      // DOCUMENT's `userId` field instead of the doc-ID `appId` — canonical
+      // doc IDs are `{uid}_{placementId}` so `isOwner(appId)` was always
+      // false. `resource.data.userId == request.auth.uid` is the correct
+      // owner check and works for BOTH canonical and mirror docs.
+      allow read: if isTeacher() || isAlumni() ||
+        (isAuthenticated() && resource.data.userId == request.auth.uid);
     }
 
     // ===============================================

@@ -150,4 +150,86 @@ class PlacementsService {
       rethrow;
     }
   }
+
+  /// v9.1: All applications for a placement, deduped by student.
+  ///
+  /// A collectionGroup query on `applications` matches BOTH mirrors:
+  ///   - canonical: `applications/{uid}_{placementId}` (field `resumeUrl`)
+  ///   - mirror:    `placements/{placementId}/applications/{uid}` (field `resume`)
+  ///
+  /// Each student appears in both docs, so we dedupe by [userId] and prefer
+  /// the canonical doc — the one that carries `resumeUrl`.
+  Future<List<Application>> getApplicationsForPlacement(
+      String placementId) async {
+    try {
+      final snapshot = await _firestore
+          .collectionGroup('applications')
+          .where('placementId', isEqualTo: placementId)
+          .get();
+
+      final byUser = <String, Application>{};
+      final hadResumeUrl = <String, bool>{};
+
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+        final userId = data['userId'] as String? ?? data['studentId'] as String?;
+        if (userId == null) continue;
+
+        final carriesResumeUrl = data.containsKey('resumeUrl');
+        final current = byUser[userId];
+        final currentCarriesResumeUrl = hadResumeUrl[userId] ?? false;
+
+        // Keep first match; replace only when the new doc is canonical
+        // (`resumeUrl`) and the kept doc was only a mirror (`resume`).
+        if (current == null || (carriesResumeUrl && !currentCarriesResumeUrl)) {
+          byUser[userId] = Application.fromFirestore(doc);
+          hadResumeUrl[userId] = carriesResumeUrl;
+        }
+      }
+
+      final applications = byUser.values.toList()
+        ..sort((a, b) => b.appliedAt.compareTo(a.appliedAt));
+      return applications;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  /// v9.1: Unique applicant count per placement.
+  ///
+  /// Uses a collectionGroup query (same dedupe concern as
+  /// [getApplicationsForPlacement]) and counts DISTINCT students — the two
+  /// mirrors for one student count once. [placementIds] is batched into
+  /// chunks of 10 (`whereIn` Firestore limit).
+  Future<Map<String, int>> getApplicantCounts(
+      List<String> placementIds) async {
+    if (placementIds.isEmpty) return {};
+
+    final uniqueByPlacement = <String, Set<String>>{};
+
+    for (var start = 0; start < placementIds.length; start += 10) {
+      final end = start + 10 < placementIds.length
+          ? start + 10
+          : placementIds.length;
+      final chunk = placementIds.sublist(start, end);
+
+      final snapshot = await _firestore
+          .collectionGroup('applications')
+          .where('placementId', whereIn: chunk)
+          .get();
+
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+        final placementId = data['placementId'] as String?;
+        final userId = data['userId'] as String? ?? data['studentId'] as String?;
+        if (placementId == null || userId == null) continue;
+        uniqueByPlacement
+            .putIfAbsent(placementId, () => <String>{})
+            .add(userId);
+      }
+    }
+
+    return uniqueByPlacement
+        .map((placementId, students) => MapEntry(placementId, students.length));
+  }
 }

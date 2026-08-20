@@ -16,6 +16,7 @@ const resumeInsightsRoute = '/resume-review/insights'; // v6.9
 const notesListRoute = '/notes-list';
 const uploadNotesRoute = '/upload-notes';
 const placementsListRoute = '/placements-list';
+const placementApplicantsRoute = '/placements/applicants'; // v9.1
 const aiChatRoute = '/ai-chat';
 
 // v7.1: Role-based dashboard routes

@@ -84,6 +84,12 @@ class TeacherAnalyticsProvider extends ChangeNotifier {
   PlacementPipelineData? get pipelineCounts => _pipelineData;
   int get pipelineEligible => _pipelineData?.eligibleStudents ?? 0;
   int get pipelineApplied => _pipelineData?.appliedStudents ?? 0;
+  // v9.1: real shortlisted/interviewed/placed counts — status-bucketed
+  // distinct-student counts from `TeacherAnalyticsService
+  // .getApplicationPipelineCounts`.
+  int get pipelineShortlisted => _pipelineData?.shortlistedStudents ?? 0;
+  int get pipelineInterviewed => _pipelineData?.interviewedStudents ?? 0;
+  int get pipelinePlaced => _pipelineData?.placedStudents ?? 0;
   int get pipelineTotalStudents => _pipelineData?.eligibleStudents ?? 0;
   int get pipelineTotalPlacements =>
       0; // Dead getter — placement count comes from PlacementsProvider

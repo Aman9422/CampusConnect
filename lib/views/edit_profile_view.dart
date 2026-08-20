@@ -408,8 +408,9 @@ class _EditProfileViewState extends State<EditProfileView> {
                     _fullNameController,
                     TextInputType.text,
                     validator: (v) {
-                      if (v == null || v.trim().isEmpty)
+                      if (v == null || v.trim().isEmpty) {
                         return 'Please enter your full name';
+                      }
                       return null;
                     },
                   ),
@@ -620,8 +621,9 @@ class _EditProfileViewState extends State<EditProfileView> {
                       _collegeController,
                       TextInputType.text,
                       validator: (v) {
-                        if (v == null || v.trim().isEmpty)
+                        if (v == null || v.trim().isEmpty) {
                           return 'Please enter your college name';
+                        }
                         return null;
                       },
                     ),
@@ -631,8 +633,9 @@ class _EditProfileViewState extends State<EditProfileView> {
                       TextInputType.text,
                       hint: 'e.g., Computer Science',
                       validator: (v) {
-                        if (v == null || v.trim().isEmpty)
+                        if (v == null || v.trim().isEmpty) {
                           return 'Please enter your program';
+                        }
                         return null;
                       },
                     ),
@@ -686,12 +689,14 @@ class _EditProfileViewState extends State<EditProfileView> {
                       const TextInputType.numberWithOptions(decimal: true),
                       hint: 'e.g., 8.5',
                       validator: (v) {
-                        if (v == null || v.trim().isEmpty)
+                        if (v == null || v.trim().isEmpty) {
                           return 'Please enter your CGPA';
+                        }
                         final cgpa = double.tryParse(v.trim());
                         if (cgpa == null) return 'Please enter a valid number';
-                        if (cgpa < 0 || cgpa > 10)
+                        if (cgpa < 0 || cgpa > 10) {
                           return 'CGPA must be between 0 and 10';
+                        }
                         return null;
                       },
                     ),

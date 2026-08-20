@@ -227,8 +227,33 @@ class _StudentDashboardTab extends StatelessWidget {
               // v8.4.8 (MB15): pass provider.error into the card so a failed
               // load surfaces a banner on the dashboard instead of silently
               // masquerading as a fresh (empty) portfolio — Symptom 1's UI.
+              //
+              // Conditional visibility: hide the entire card when a resume is
+              // uploaded (hasResume == true). The student still accesses
+              // portfolio, ATS, resume review etc. through their existing
+              // routes. While the provider is loading for the first time
+              // (!isInitialized), render nothing to avoid a brief "No Resume"
+              // flicker. If the portfolio load failed, always show the card so
+              // the error banner is visible.
               Consumer<PortfolioProvider>(
                 builder: (context, portfolioProvider, child) {
+                  final hasResume =
+                      portfolioProvider.portfolio?.resume?.hasResume == true;
+                  final isLoadingInitial =
+                      portfolioProvider.isLoading &&
+                      !portfolioProvider.isInitialized;
+                  final hasError = portfolioProvider.error != null;
+
+                  // Hide card once we know the student has a resume.
+                  if (hasResume && !isLoadingInitial) {
+                    return const SizedBox.shrink();
+                  }
+
+                  // Suppress "No Resume" flicker during first load.
+                  if (isLoadingInitial && !hasError) {
+                    return const SizedBox.shrink();
+                  }
+
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [

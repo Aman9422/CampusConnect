@@ -32,6 +32,14 @@ class Placement {
 
   factory Placement.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
+    // v9.1 audit (SEC-1 defense-in-depth): a malformed placement doc (e.g.
+    // `deadline` stored as a String, or `postedAt` missing) used to crash
+    // EVERY client rendering the placements list via the hard casts
+    // `(data['deadline'] as Timestamp).toDate()`. The server-side rules now
+    // reject such docs, but the model stays tolerant so one bad legacy doc
+    // can never take down the whole placements feature.
+    final deadline = data['deadline'];
+    final postedAt = data['postedAt'];
     return Placement(
       id: doc.id,
       company: data['company'] ?? '',
@@ -39,12 +47,23 @@ class Placement {
       description: data['description'] ?? '',
       eligibility: data['eligibility'] ?? '',
       salary: data['salary'] ?? 'Not Specified',
-      deadline: (data['deadline'] as Timestamp).toDate(),
-      postedAt: (data['postedAt'] as Timestamp).toDate(),
+      deadline: deadline is Timestamp
+          ? deadline.toDate()
+          : DateTime.now().add(const Duration(days: 30)),
+      postedAt: postedAt is Timestamp
+          ? postedAt.toDate()
+          : DateTime.now(),
       isActive: data['isActive'] ?? true,
       // v6.5: Parse structured requirements
+      // v9.1 audit (SEC-1 defense-in-depth): guard the cast — a malformed
+      // legacy doc with a non-map `requirements` (e.g. a String from a
+      // console edit) used to throw a TypeError here and crash EVERY client
+      // rendering the placements list. A non-map field now degrades to the
+      // open-to-all default instead.
       requirements: PlacementRequirements.fromMap(
-        data['requirements'] as Map<String, dynamic>?,
+        data['requirements'] is Map<String, dynamic>
+            ? data['requirements'] as Map<String, dynamic>
+            : null,
       ),
     );
   }

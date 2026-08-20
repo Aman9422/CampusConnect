@@ -453,8 +453,9 @@ class _AIInsightsTabState extends State<AIInsightsTab> {
                           'Placed',
                         ];
                         final idx = value.toInt();
-                        if (idx < 0 || idx >= labels.length)
+                        if (idx < 0 || idx >= labels.length) {
                           return const SizedBox.shrink();
+                        }
                         return Padding(
                           padding: const EdgeInsets.only(top: 6),
                           child: Text(
@@ -589,8 +590,9 @@ class _AIInsightsTabState extends State<AIInsightsTab> {
                       showTitles: true,
                       getTitlesWidget: (value, meta) {
                         final idx = value.toInt();
-                        if (idx < 0 || idx >= displayDepts.length)
+                        if (idx < 0 || idx >= displayDepts.length) {
                           return const SizedBox.shrink();
+                        }
                         final name =
                             (displayDepts[idx]['department'] as String? ?? '');
                         final short = name.length > 8
@@ -1358,8 +1360,9 @@ class _AIInsightsTabState extends State<AIInsightsTab> {
                       reservedSize: 22,
                       getTitlesWidget: (value, meta) {
                         final idx = value.toInt();
-                        if (idx < 0 || idx >= trends.length)
+                        if (idx < 0 || idx >= trends.length) {
                           return const SizedBox.shrink();
+                        }
                         final month = (trends[idx]['month'] as String? ?? '');
                         // Show only last 3 chars of month key
                         final short = month.length >= 7
@@ -1522,7 +1525,7 @@ class _AIInsightsTabState extends State<AIInsightsTab> {
     // Application and placement activity
     if (totalApplied > 0 || totalPlacements > 0) {
       paragraphs.add(
-        'There are $totalPlacements placement drives (${activePlacements} active), '
+        'There are $totalPlacements placement drives ($activePlacements active), '
         'with $totalApplied applications submitted across all students. '
         '${activePlacements > 0 ? 'Encourage students to apply for the open positions.' : 'Consider posting new opportunities to increase placement activity.'}',
       );

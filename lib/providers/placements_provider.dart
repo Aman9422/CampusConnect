@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:campusconnect/models/application.dart';
 import 'package:campusconnect/models/placement.dart';
 import 'package:campusconnect/models/placement_eligibility.dart';
 import 'package:campusconnect/models/student_profile.dart';
@@ -52,6 +53,10 @@ class PlacementsProvider with ChangeNotifier {
   // V6.5: Eligibility cache
   Map<String, PlacementEligibility> _eligibilityCache = {};
 
+  // v9.1: Applicant counts (teacher/alumni) — placementId → unique students
+  Map<String, int> _applicantCounts = {};
+  bool _applicantCountsLoaded = false;
+
   // Getters
   List<Placement> get placements => _placements;
   Set<String> get appliedPlacementIds => _appliedPlacementIds;
@@ -60,6 +65,11 @@ class PlacementsProvider with ChangeNotifier {
   bool get isInitialized => _isInitialized;
   String? get error => _error;
   bool get isOnline => _isOnline; // V5.1: Expose network state
+
+  // v9.1: applicant count getters
+  int applicantCountFor(String placementId) =>
+      _applicantCounts[placementId] ?? 0;
+  bool get hasApplicantCounts => _applicantCountsLoaded;
 
   bool hasApplied(String placementId) =>
       _appliedPlacementIds.contains(placementId);
@@ -119,6 +129,9 @@ class PlacementsProvider with ChangeNotifier {
     _applyingPlacementId = null;
     _userProfile = null;
     _eligibilityCache = {};
+    // v9.1: clear applicant counts on logout (teacher session leak guard)
+    _applicantCounts = {};
+    _applicantCountsLoaded = false;
     _isDisposed = true; // V6.3: Mark as disposed to stop any pending operations
     // v8.4.2 (S3c/M5): cancel the connectivity subscription so no listener
     // survives logout (prevents leaks + duplicates on the next login).
@@ -489,6 +502,79 @@ class PlacementsProvider with ChangeNotifier {
       );
 
       // V5.1: Throw user-friendly error
+      throw Exception(ErrorMessages.getUserFriendlyMessage(e));
+    }
+  }
+
+  /// v9.1: Unique applicant count per placement (teacher/alumni cards).
+  ///
+  /// One-time load; callers decide when to refresh. Non-fatal on failure —
+  /// cards degrade to showing no count rather than blocking the list.
+  Future<void> loadApplicantCounts({List<String>? placementIds}) async {
+    if (_isDisposed) return;
+    final ids = placementIds ?? _placements.map((p) => p.id).toList();
+    if (ids.isEmpty) return;
+
+    try {
+      final counts = await _service.getApplicantCounts(ids);
+      if (_isDisposed) return;
+      _applicantCounts = counts;
+      _applicantCountsLoaded = true;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('PlacementsProvider loadApplicantCounts error: $e');
+    }
+  }
+
+  /// v9.1: All applicants for a placement (teacher/alumni drill-down).
+  Future<List<Application>> getApplicationsForPlacement(
+      String placementId) async {
+    return _service.getApplicationsForPlacement(placementId);
+  }
+
+  /// v9.1: Advance an application through the pipeline
+  /// (`shortlisted` → `interviewed` → `placed`, or `rejected`).
+  ///
+  /// Wraps the `updateApplicationStatus` onCall with a 30s timeout and
+  /// friendly error translation. Callers should refresh applicant counts or
+  /// re-fetch the list after a success.
+  Future<bool> updateApplicationStatus({
+    required String placementId,
+    required String studentId,
+    required String status,
+  }) async {
+    try {
+      final callable = FirebaseFunctions.instance.httpsCallable(
+        'updateApplicationStatus',
+      );
+
+      final result = await callable
+          .call({
+            'placementId': placementId,
+            'studentId': studentId,
+            'status': status,
+          })
+          .timeout(
+            const Duration(seconds: 30),
+            onTimeout: () {
+              throw Exception('Request timed out. Please try again.');
+            },
+          );
+
+      if (result.data is! Map<String, dynamic>) {
+        throw Exception('Unexpected response from server');
+      }
+
+      final data = result.data as Map<String, dynamic>;
+      if (data['success'] != true) {
+        throw Exception(
+          data['message'] as String? ?? 'Failed to update application status',
+        );
+      }
+
+      return true;
+    } catch (e) {
+      debugPrint('PlacementsProvider updateApplicationStatus error: $e');
       throw Exception(ErrorMessages.getUserFriendlyMessage(e));
     }
   }

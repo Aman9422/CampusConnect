@@ -56,11 +56,12 @@ class PlacementPipelineData {
 
   /// Whether the stage at [stageIndex] has real tracked data.
   ///
-  /// Currently only Eligible (0) and Applied (1) are tracked because the
-  /// Firestore schema does not yet track per-application stage progression.
-  /// Once the schema adds a `status` field to the applications subcollection,
-  /// this method can be updated to return true for all stages.
+  /// v9.1: ALL stages are now tracked — applications carry a `status` field
+  /// (`applied | shortlisted | interviewed | placed | rejected`) written by
+  /// the `updateApplicationStatus` Cloud Function, and
+  /// `TeacherAnalyticsService.getApplicationPipelineCounts` buckets statuses
+  /// into per-stage distinct-student counts.
   static bool isStageTracked(int stageIndex) {
-    return stageIndex <= 1;
+    return stageIndex >= 0 && stageIndex < stageLabels.length;
   }
 }

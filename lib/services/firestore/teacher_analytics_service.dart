@@ -271,28 +271,58 @@ class TeacherAnalyticsService {
         totalStudents = snapshot.docs.length;
       }
 
-      // Get distinct student IDs from applications collection
-      // Critical: we count unique userIds, NOT application documents
-      int distinctAppliedStudents = 0;
+      // v9.1: bucket application STATUS into per-stage DISTINCT-student
+      // counts. The collectionGroup matches BOTH mirrors (canonical
+      // `applications/{uid}_{placementId}` + mirror
+      // `placements/{placementId}/applications/{uid}`) and a student can
+      // apply to multiple placements with different statuses, so we collect
+      // each student's ENTIRE status set and count them at their HIGHEST
+      // reached stage:
+      //   - placed: any doc with status 'placed'
+      //   - interviewed: any doc with 'interviewed' (or placed — cumulative)
+      //   - shortlisted: any doc with 'shortlisted' (or interviewed/placed)
+      //   - applied: any application doc at all
+      final studentStatuses = <String, Set<String>>{};
       try {
         final appsQuery = await _firestore
             .collectionGroup('applications')
             .get();
-        final uniqueStudentIds = appsQuery.docs
-            .map((doc) => doc.data()['userId'] as String?)
-            .where((id) => id != null)
-            .toSet();
-        distinctAppliedStudents = uniqueStudentIds.length;
+        for (final doc in appsQuery.docs) {
+          final data = doc.data();
+          final studentId =
+              data['userId'] as String? ?? data['studentId'] as String?;
+          if (studentId == null) continue;
+          final status = data['status'] as String? ?? 'applied';
+          studentStatuses.putIfAbsent(studentId, () => <String>{}).add(status);
+        }
       } catch (e) {
         debugPrint(
           'TeacherAnalyticsService: collectionGroup apps query error: $e',
         );
       }
 
+      int shortlisted = 0;
+      int interviewed = 0;
+      int placed = 0;
+      for (final statuses in studentStatuses.values) {
+        if (statuses.contains('placed')) {
+          placed++;
+          interviewed++;
+          shortlisted++;
+        } else if (statuses.contains('interviewed')) {
+          interviewed++;
+          shortlisted++;
+        } else if (statuses.contains('shortlisted')) {
+          shortlisted++;
+        }
+      }
+
       return PlacementPipelineData(
         eligibleStudents: totalStudents,
-        appliedStudents: distinctAppliedStudents,
-        // Shortlisted, Interview, Placed — not trackable without schema change
+        appliedStudents: studentStatuses.length,
+        shortlistedStudents: shortlisted,
+        interviewedStudents: interviewed,
+        placedStudents: placed,
       );
     } catch (e) {
       debugPrint(

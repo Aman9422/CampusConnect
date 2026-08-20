@@ -224,10 +224,17 @@ class QuickStatistics extends StatelessWidget {
     final totalStudents = analytics.pipelineTotalStudents > 0
         ? analytics.pipelineTotalStudents
         : (analytics.studentData?.length ?? 0);
-    final placedCount = placements.placements.where((p) => p.isActive).length;
+    // v9.1 audit (BUG-D): the "Placement Rate" used to be
+    // activeDrives ÷ students — it could exceed 100% and was semantically
+    // wrong. V9.1 wired REAL distinct-student counts into the pipeline
+    // (TeacherAnalyticsService.getApplicationPipelineCounts); use
+    // `analytics.pipelinePlaced` for the numerator, falling back gracefully
+    // (0) when pipeline data hasn't loaded or the apps query failed.
+    final activeDrives = placements.placements.where((p) => p.isActive).length;
+    final placedStudents = analytics.pipelinePlaced;
     final avgScore = analytics.averageScore;
     final placementRate = totalStudents > 0
-        ? ((placedCount / totalStudents) * 100).round()
+        ? ((placedStudents / totalStudents) * 100).round()
         : 0;
     final activeMentorships = mentorship.acceptedMentorshipsCount;
     final avgEngagement = analytics.avgEngagement;
@@ -249,7 +256,7 @@ class QuickStatistics extends StatelessWidget {
           ),
           _statCard(
             'Active Drives',
-            '$placedCount',
+            '$activeDrives',
             Icons.business_outlined,
             AppTheme.success,
             isDark,
@@ -415,16 +422,22 @@ class DepartmentOverview extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final analytics = context.watch<TeacherAnalyticsProvider>();
-    final placements = context.watch<PlacementsProvider>();
+    // v9.1 audit (BUG-D): `placements` was previously read for
+    // `placements.placements.length` in the now-fixed "Active/Student"
+    // metric; the rate is computed from `analytics.pipelinePlaced` so the
+    // provider read is gone.
     if (!analytics.hasData) return const SizedBox.shrink();
 
     final depts = analytics.departmentAnalytics ?? [];
     final totalStudents = analytics.pipelineTotalStudents > 0
         ? analytics.pipelineTotalStudents
         : (analytics.studentData?.length ?? 0);
-    final totalPlacementDrives = placements.placements.length;
+    // v9.1 audit (BUG-D): "Active/Student" used to be totalDrives ÷ students —
+    // same fake metric as QuickStatistics. Use the REAL distinct-student
+    // placed count from the pipeline (analytics.pipelinePlaced).
+    final placedStudents = analytics.pipelinePlaced;
     final overallPlacementPct = totalStudents > 0
-        ? ((totalPlacementDrives / totalStudents) * 100).round()
+        ? ((placedStudents / totalStudents) * 100).round()
         : 0;
 
     return Container(
@@ -673,13 +686,18 @@ class PlacementPipeline extends StatelessWidget {
         ? analytics.pipelineTotalStudents
         : (analytics.studentData?.length ?? 0);
     final totalApplied = analytics.pipelineApplied;
+    // v9.1: real status-bucketed distinct-student counts — applications
+    // carry a `status` field (applied | shortlisted | interviewed | placed |
+    // rejected) written by `updateApplicationStatus`, and
+    // `TeacherAnalyticsService.getApplicationPipelineCounts` buckets each
+    // student at their highest reached stage. No more "Not tracked".
+    final shortlisted = analytics.pipelineShortlisted;
+    final interviewed = analytics.pipelineInterviewed;
+    final placed = analytics.pipelinePlaced;
     final allPlacements = placements.placements;
     final activePlacements = allPlacements
         .where((p) => p.isActive && !p.isDeadlinePassed)
         .length;
-
-    // Only show stages backed by real data. Shortlisted, Interview, Placed are "N/A"
-    // since the current schema doesn't track those stages.
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(AppTheme.space20),
@@ -731,26 +749,26 @@ class PlacementPipeline extends StatelessWidget {
                   _pipelineArrow(isDark),
                   _pipelineStep(
                     'Shortlisted',
-                    'N/A',
-                    AppTheme.gray500,
+                    '$shortlisted',
+                    AppTheme.warning,
                     isDark,
-                    subtitle: 'Not tracked',
+                    subtitle: 'Shortlisted',
                   ),
                   _pipelineArrow(isDark),
                   _pipelineStep(
                     'Interview',
-                    'N/A',
-                    AppTheme.gray500,
+                    '$interviewed',
+                    AppTheme.secondaryIndigo,
                     isDark,
-                    subtitle: 'Not tracked',
+                    subtitle: 'Interviewed',
                   ),
                   _pipelineArrow(isDark),
                   _pipelineStep(
                     'Placed',
-                    'N/A',
-                    AppTheme.gray500,
+                    '$placed',
+                    AppTheme.success,
                     isDark,
-                    subtitle: 'Not tracked',
+                    subtitle: 'Placed',
                   ),
                 ],
               ),
@@ -1278,8 +1296,9 @@ class AtRiskStudents extends StatelessWidget {
     // NOTE: placements and mentorship providers hold the TEACHER's own data,
     // not per-student data. Do NOT use them for per-student risk signals.
 
-    if (!analytics.hasData || analytics.studentData == null)
+    if (!analytics.hasData || analytics.studentData == null) {
       return const SizedBox.shrink();
+    }
 
     // Evaluate multi-signal risk for each student using only available per-student data
     final atRiskStudents = <Map<String, dynamic>>[];
@@ -1298,8 +1317,9 @@ class AtRiskStudents extends StatelessWidget {
       if (reviewCount <= 1 && score < 60) signals.add('Limited engagement');
 
       // Signal 4: Score >= 50 but only 1 review (borderline engagement)
-      if (reviewCount == 1 && score >= 50 && score < 70)
+      if (reviewCount == 1 && score >= 50 && score < 70) {
         signals.add('Minimal activity');
+      }
 
       // Note: Placement applications, mentorship status, and engagement score
       // require per-student subcollection queries (not available in dashboard).

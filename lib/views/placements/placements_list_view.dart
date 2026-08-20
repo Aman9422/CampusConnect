@@ -1,3 +1,4 @@
+import 'package:campusconnect/constants/routes.dart'; // v9.1
 import 'package:campusconnect/enums/user_role.dart';
 import 'package:campusconnect/models/placement.dart';
 import 'package:campusconnect/models/placement_eligibility.dart';
@@ -20,8 +21,18 @@ import 'package:provider/provider.dart';
 ///
 /// Phase 1 of NotesView decomposition: Clean, focused placement browsing view
 /// for students. Displays placement opportunities with application functionality.
-class PlacementsListView extends StatelessWidget {
+/// v9.1: Stateful so teachers/alumni can trigger a ONE-TIME applicant-count
+/// load (post-frame, guarded — the PlacementsProvider is shared and resets
+/// on logout, so the flag is per-widget-lifecycle).
+class PlacementsListView extends StatefulWidget {
   const PlacementsListView({super.key});
+
+  @override
+  State<PlacementsListView> createState() => _PlacementsListViewState();
+}
+
+class _PlacementsListViewState extends State<PlacementsListView> {
+  bool _countsLoadScheduled = false;
 
   @override
   Widget build(BuildContext context) {
@@ -30,6 +41,18 @@ class PlacementsListView extends StatelessWidget {
     final canManagePlacements =
         role == UserRole.teacher || role == UserRole.alumni;
     final canApplyPlacements = role == UserRole.student;
+
+    // v9.1: One-time count load for managers. Scheduled after the first
+    // frame so placements are loaded and the provider is reachable. The
+    // provider method is non-fatal on failure — cards degrade to showing no
+    // count rather than blocking the list.
+    if (canManagePlacements && !_countsLoadScheduled) {
+      _countsLoadScheduled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        context.read<PlacementsProvider>().loadApplicantCounts();
+      });
+    }
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -53,7 +76,10 @@ class PlacementsListView extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             onPressed: () {
-              context.read<PlacementsProvider>().refresh();
+              final provider = context.read<PlacementsProvider>();
+              provider.refresh();
+              // v9.1: applicant counts may have changed since the last load.
+              if (canManagePlacements) provider.loadApplicantCounts();
             },
           ),
         ],
@@ -173,6 +199,8 @@ class _PlacementsContent extends StatelessWidget {
             eligibility: eligibility,
             canManagePlacements: canManagePlacements,
             canApplyPlacements: canApplyPlacements,
+            // v9.1: unique applicant count for the manager card summary
+            applicantCount: provider.applicantCountFor(placement.id),
           );
         },
       ),
@@ -246,12 +274,15 @@ class _PlacementCard extends StatelessWidget {
   final PlacementEligibility? eligibility;
   final bool canManagePlacements;
   final bool canApplyPlacements;
+  // v9.1: unique applicant count (0 until the one-time count load finishes)
+  final int applicantCount;
 
   const _PlacementCard({
     required this.placement,
     this.eligibility,
     required this.canManagePlacements,
     required this.canApplyPlacements,
+    this.applicantCount = 0,
   });
 
   @override
@@ -449,6 +480,13 @@ class _PlacementCard extends StatelessWidget {
                       company: placement.company,
                       role: placement.role,
                     ),
+                  // v9.1: Manager summary — unique applicant count plus the
+                  // drill-down into who applied (PlacementApplicantsView).
+                  if (canManagePlacements)
+                    _ApplicantSummaryButton(
+                      placementId: placement.id,
+                      applicantCount: applicantCount,
+                    ),
                 ],
               ),
             ],
@@ -466,6 +504,75 @@ class _PlacementCard extends StatelessWidget {
         value: provider,
         child: _PlacementEditorDialog(existingPlacement: placement),
       ),
+    );
+  }
+}
+
+/// v9.1: Teacher/alumni placement-card summary — unique applicant count chip
+/// plus the "View Applicants" entry point into PlacementApplicantsView.
+class _ApplicantSummaryButton extends StatelessWidget {
+  final String placementId;
+  final int applicantCount;
+
+  const _ApplicantSummaryButton({
+    required this.placementId,
+    required this.applicantCount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppTheme.space10,
+            vertical: AppTheme.space4,
+          ),
+          decoration: BoxDecoration(
+            color: AppTheme.primaryBlue.withValues(alpha: isDark ? 0.2 : 0.1),
+            borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+            border: Border.all(
+              color: AppTheme.primaryBlue.withValues(alpha: 0.3),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.people_outline,
+                size: 14,
+                color: AppTheme.primaryBlue,
+              ),
+              const SizedBox(width: AppTheme.space4),
+              Text(
+                '$applicantCount applied',
+                style: AppTheme.caption.copyWith(
+                  color: AppTheme.primaryBlue,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: AppTheme.space8),
+        OutlinedButton.icon(
+          onPressed: () => Navigator.of(context).pushNamed(
+            placementApplicantsRoute,
+            arguments: placementId,
+          ),
+          icon: const Icon(Icons.visibility_outlined, size: 16),
+          label: const Text('View Applicants'),
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppTheme.space12,
+              vertical: AppTheme.space8,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
