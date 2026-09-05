@@ -146,35 +146,11 @@ class NotificationsService {
     }
   }
 
-  // ============================================
-  // ANNOUNCEMENT METHODS (Read-only for users)
-  // ============================================
-
-  /// Get all active announcements
-  Stream<List<AppNotification>> getAnnouncementsStream() {
-    return _firestore
-        .collection('announcements')
-        .where('isActive', isEqualTo: true)
-        .orderBy('createdAt', descending: true)
-        .limit(10)
-        .snapshots()
-        .map((snapshot) {
-          return snapshot.docs.map((doc) {
-            final data = doc.data();
-            return AppNotification(
-              id: doc.id,
-              type: NotificationType.announcement,
-              title: data['title'] as String? ?? 'Announcement',
-              body: data['body'] as String? ?? '',
-              data: {'announcementId': doc.id},
-              isRead: false, // Announcements don't track read status per user
-              createdAt:
-                  (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-              expiresAt: (data['expiresAt'] as Timestamp?)?.toDate(),
-            );
-          }).toList();
-        });
-  }
+  // NOTE (removed dead code): getAnnouncementsStream() was removed — no view
+  // ever called it. Announcements are served through user-level notifications
+  // (type: announcement). If a dedicated announcements board is needed later,
+  // recreate it (and add the composite index: announcements: isActive ↑
+  // createdAt ↓).
 
   // ============================================
   // HELPER METHODS FOR PLACEMENT NOTIFICATIONS

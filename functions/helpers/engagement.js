@@ -8,7 +8,10 @@
  */
 
 const admin = require("firebase-admin");
-const {maybeCreateNotification} = require("./shared");
+const {
+  maybeCreateNotification,
+  dayKey,
+} = require("./shared");
 
 // ===============================================
 // ENGAGEMENT SUMMARY
@@ -27,17 +30,50 @@ const {maybeCreateNotification} = require("./shared");
  * Writes the result to `users/{uid}/engagement_summary/summary`.
  */
 async function recomputeEngagementSummary(userId, userData) {
-  const activitySnapshot = await admin.firestore()
+  const summaryRef = admin.firestore()
       .collection("users")
       .doc(userId)
-      .collection("activities")
-      .orderBy("occurredAt", "desc")
-      .limit(250)
-      .get();
+      .collection("engagement_summary")
+      .doc("summary");
 
-  const activities = activitySnapshot.docs.map((doc) => doc.data());
-  const activityPoints = activities.reduce((sum, item) => sum + (item.points || 0), 0);
-  const dailyStreak = computeStreakFromActivities(activities);
+  const summarySnapshot = await summaryRef.get();
+  const existing = summarySnapshot.exists ? summarySnapshot.data() : {};
+
+  // IMP-9: prefer the materialized aggregates (activityPoints, dailyStreak,
+  // lastActiveAt) maintained by `logUserActivity`'s atomic transaction. Only
+  // fall back to a full activity scan for users who never logged an activity
+  // since the aggregate shipped (migration) — so the daily scheduler no longer
+  // scans 250 activity docs on every run.
+  const hasAggregate =
+      typeof existing.activityPoints === "number" &&
+      typeof existing.dailyStreak === "number";
+
+  let activityPoints;
+  let dailyStreak;
+  let lastActiveAt;
+  let seededFromScan = false;
+
+  if (hasAggregate) {
+    activityPoints = existing.activityPoints;
+    dailyStreak = existing.dailyStreak;
+    lastActiveAt = existing.lastActiveAt || null;
+  } else {
+    // Migration path: compute once from a bounded scan and seed the aggregate.
+    const activitySnapshot = await admin.firestore()
+        .collection("users")
+        .doc(userId)
+        .collection("activities")
+        .orderBy("occurredAt", "desc")
+        .limit(250)
+        .get();
+
+    const activities = activitySnapshot.docs.map((doc) => doc.data());
+    activityPoints = activities.reduce((sum, item) => sum + (item.points || 0), 0);
+    dailyStreak = computeStreakFromActivities(activities);
+    lastActiveAt = activities.length > 0 ? activities[0].occurredAt : null;
+    seededFromScan = true;
+  }
+
   const profileStrength = computeProfileStrength(userData);
   const engagementScore = Math.min(
       100,
@@ -63,20 +99,26 @@ async function recomputeEngagementSummary(userId, userData) {
     buildBadge("networking_pro", "networkingPro", "Networking Pro", "Build strong networking activity", activityPoints, 100),
   ];
 
-  await admin.firestore()
-      .collection("users")
-      .doc(userId)
-      .collection("engagement_summary")
-      .doc("summary")
-      .set({
-        engagementScore,
-        profileStrength,
-        dailyStreak,
-        activityPoints,
-        badges,
-        updatedAt: admin.firestore.Timestamp.now(),
-        lastActiveAt: activities.length > 0 ? activities[0].occurredAt : null,
-      }, {merge: true});
+  const writeData = {
+    engagementScore,
+    profileStrength,
+    badges,
+    updatedAt: admin.firestore.Timestamp.now(),
+  };
+
+  if (seededFromScan) {
+    // Seed the aggregate so the next daily recompute can skip the scan. The
+    // streak pointer is the day of the most recent activity, matching the
+    // semantics that `logUserActivity` uses to continue the streak.
+    writeData.activityPoints = activityPoints;
+    writeData.dailyStreak = dailyStreak;
+    writeData.lastActiveAt = lastActiveAt;
+    writeData.streakLastActiveKey = lastActiveAt
+        ? dayKey(lastActiveAt.toDate())
+        : null;
+  }
+
+  await summaryRef.set(writeData, {merge: true});
 
   if (dailyStreak > 0 && dailyStreak % 7 === 0) {
     await maybeCreateNotification(userId, "engagementMilestone", {

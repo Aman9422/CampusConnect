@@ -18,6 +18,9 @@ const admin = require("firebase-admin");
 const crypto = require("crypto");
 const {generateAIResponse} = require("./aiProvider");
 const {logAnalyticsEvent} = require("../helpers/shared");
+// v9.0 (IMP-15): unified AI quota — `ai_analysis_usage/{uid}` is now a legacy
+// mirror; the authoritative store is `user_ai_quotas/{uid}.aiAnalysis`.
+const quota = require("./quota");
 
 // ===============================================
 // CONSTANTS
@@ -270,48 +273,15 @@ exports.compensateStaleAIAnalysisQuota = onSchedule(
           `${cutoff.toDate().toISOString()}`
       );
 
+      // v9.0 (IMP-15): the unified `user_ai_quotas/{uid}` doc is now the
+      // authoritative quota store, so the sweep must refund BOTH the legacy
+      // `ai_analysis_usage/{uid}` mirror AND the unified doc atomically.
+      // `runFeatureSweep` queries the union of users with a stale reservation
+      // in either store and refunds each user once across both — no double
+      // refund, no unified/legacy divergence.
       let compensated = 0;
-
       try {
-        const snapshot = await admin.firestore()
-            .collection(AI_ANALYSIS_USAGE_COLLECTION)
-            .where("pendingSince", "<", cutoff)
-            .limit(1000)
-            .get();
-
-        for (const usageDoc of snapshot.docs) {
-          const userId = usageDoc.id;
-          const data = usageDoc.data();
-          const monthlyCount = data.monthlyCount || 0;
-          if (monthlyCount <= 0) continue;
-
-          try {
-            await admin.firestore().runTransaction(async (transaction) => {
-              const freshDoc = await transaction.get(usageDoc.ref);
-              if (!freshDoc.exists) return;
-
-              const freshData = freshDoc.data();
-              if (!freshData.pendingSince) return;
-              if (freshData.pendingSince.toMillis() >= cutoff.toMillis()) return;
-
-              const count = freshData.monthlyCount || 0;
-              if (count <= 0) return;
-
-              transaction.update(usageDoc.ref, {
-                monthlyCount: count - 1,
-                pendingRequestId: admin.firestore.FieldValue.delete(),
-                pendingSince: admin.firestore.FieldValue.delete(),
-              });
-            });
-            compensated++;
-          } catch (perUserError) {
-            console.error(
-                `compensateStaleAIAnalysisQuota: failed for user ${userId}:`,
-                perUserError
-            );
-          }
-        }
-
+        compensated = await quota.runFeatureSweep("aiAnalysis", cutoff);
         console.log(
             `compensateStaleAIAnalysisQuota: refunded ${compensated} stale credit(s)`
         );
@@ -339,90 +309,7 @@ exports.compensateStaleAIAnalysisQuota = onSchedule(
  * @throws {HttpsError#resource-exhausted} when the monthly limit is reached
  */
 async function consumeAIAnalysisQuota(userId, requestId) {
-  const usageRef = admin.firestore()
-      .collection(AI_ANALYSIS_USAGE_COLLECTION)
-      .doc(userId);
-
-  const now = new Date();
-  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-  const timestamp = admin.firestore.Timestamp.now();
-
-  try {
-    return await admin.firestore().runTransaction(async (transaction) => {
-      const usageDoc = await transaction.get(usageRef);
-      const reservationFields = {
-        pendingRequestId: requestId,
-        pendingSince: timestamp,
-      };
-
-      if (!usageDoc.exists) {
-        const firstUsage = {
-          monthlyCount: 1,
-          monthlyLimit: AI_MONTHLY_LIMIT,
-          lastAnalyzedAt: timestamp,
-          lastResetMonth: currentMonth,
-          ...reservationFields,
-        };
-        transaction.set(usageRef, firstUsage);
-        return {
-          monthlyCount: 1,
-          monthlyLimit: AI_MONTHLY_LIMIT,
-          lastResetMonth: currentMonth,
-        };
-      }
-
-      const data = usageDoc.data();
-      const lastResetMonth = data.lastResetMonth || "";
-
-      if (lastResetMonth !== currentMonth) {
-        const resetData = {
-          monthlyCount: 1,
-          monthlyLimit: AI_MONTHLY_LIMIT,
-          lastAnalyzedAt: timestamp,
-          lastResetMonth: currentMonth,
-          ...reservationFields,
-        };
-        transaction.update(usageRef, resetData);
-        return {
-          monthlyCount: 1,
-          monthlyLimit: AI_MONTHLY_LIMIT,
-          lastResetMonth: currentMonth,
-        };
-      }
-
-      const monthlyCount = data.monthlyCount || 0;
-      if (monthlyCount >= AI_MONTHLY_LIMIT) {
-        throw new admin.functions.https.HttpsError(
-            "resource-exhausted",
-            `AI analysis limit reached (${AI_MONTHLY_LIMIT} per month). Resets next month.`,
-            {
-              usage: {
-                monthlyCount,
-                monthlyLimit: AI_MONTHLY_LIMIT,
-                lastResetMonth: currentMonth,
-              },
-            }
-        );
-      }
-
-      const updatedData = {
-        monthlyCount: monthlyCount + 1,
-        monthlyLimit: AI_MONTHLY_LIMIT,
-        lastAnalyzedAt: timestamp,
-        lastResetMonth: currentMonth,
-        ...reservationFields,
-      };
-      transaction.update(usageRef, updatedData);
-      return {
-        monthlyCount: updatedData.monthlyCount,
-        monthlyLimit: AI_MONTHLY_LIMIT,
-        lastResetMonth: currentMonth,
-      };
-    });
-  } catch (error) {
-    console.error("Error consuming AI analysis quota:", error);
-    throw error;
-  }
+  return quota.consumeFeatureQuota(userId, "aiAnalysis", requestId);
 }
 
 /**
@@ -430,26 +317,7 @@ async function consumeAIAnalysisQuota(userId, requestId) {
  * Called after a successful analysis (credit kept, reservation un-stamped).
  */
 async function clearAIAnalysisReservation(userId, requestId) {
-  const usageRef = admin.firestore()
-      .collection(AI_ANALYSIS_USAGE_COLLECTION)
-      .doc(userId);
-
-  try {
-    await admin.firestore().runTransaction(async (transaction) => {
-      const usageDoc = await transaction.get(usageRef);
-      if (!usageDoc.exists) return;
-
-      const data = usageDoc.data();
-      if (!data.pendingRequestId || data.pendingRequestId !== requestId) return;
-
-      transaction.update(usageRef, {
-        pendingRequestId: admin.firestore.FieldValue.delete(),
-        pendingSince: admin.firestore.FieldValue.delete(),
-      });
-    });
-  } catch (clearError) {
-    console.error("Error clearing AI analysis reservation:", clearError);
-  }
+  return quota.clearFeatureReservation(userId, "aiAnalysis", requestId);
 }
 
 /**
@@ -457,36 +325,5 @@ async function clearAIAnalysisReservation(userId, requestId) {
  * Decrements the count and clears THIS request's reservation in one transaction.
  */
 async function rollbackAIAnalysisUsage(userId, requestId) {
-  const usageRef = admin.firestore()
-      .collection(AI_ANALYSIS_USAGE_COLLECTION)
-      .doc(userId);
-
-  const now = new Date();
-  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-
-  try {
-    await admin.firestore().runTransaction(async (transaction) => {
-      const usageDoc = await transaction.get(usageRef);
-      if (!usageDoc.exists) return;
-
-      const data = usageDoc.data();
-      const lastResetMonth = data.lastResetMonth || "";
-      if (lastResetMonth !== currentMonth) return;
-
-      const monthlyCount = data.monthlyCount || 0;
-      if (monthlyCount <= 0) return;
-
-      const update = {
-        monthlyCount: monthlyCount - 1,
-      };
-      if (data.pendingRequestId && data.pendingRequestId === requestId) {
-        update.pendingRequestId = admin.firestore.FieldValue.delete();
-        update.pendingSince = admin.firestore.FieldValue.delete();
-      }
-
-      transaction.update(usageRef, update);
-    });
-  } catch (rollbackError) {
-    console.error("Error rolling back AI analysis usage:", rollbackError);
-  }
+  return quota.rollbackFeatureQuota(userId, "aiAnalysis", requestId);
 }

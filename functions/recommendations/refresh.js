@@ -17,6 +17,18 @@ const {buildRecommendations, extractPortfolio} = require("./engine");
 const {enrichRecommendationExplanations} = require("./ai_explanations");
 const {maybeCreateNotification} = require("../helpers/shared");
 
+// v9.0 (IMP-8): cursor-based pagination for the bulk candidate queries in
+// `refreshRecommendationsForStudent`. Firestore caps a single query's result
+// set, and a single `.limit(120)` would silently drop candidates once the user
+// base grows past that. Paging with `startAfter` keeps each read small and
+// avoids dropping matches. `RECOMMENDATION_CANDIDATE_MAX` bounds the engine
+// workload; `RECOMMENDATION_CANDIDATE_PAGE_SIZE` keeps each round-trip small.
+// Both are env-tunable (defaults are a modest increase from the prior 120 cap).
+const RECOMMENDATION_CANDIDATE_PAGE_SIZE =
+    parseInt(process.env.RECOMMENDATION_CANDIDATE_PAGE_SIZE || "100", 10);
+const RECOMMENDATION_CANDIDATE_MAX =
+    parseInt(process.env.RECOMMENDATION_CANDIDATE_MAX || "200", 10);
+
 // ===============================================
 // EXPORTS
 // ===============================================
@@ -63,6 +75,42 @@ exports.refreshRecommendations = onCall(
 );
 
 /**
+ * Loads up to `maxResults` documents from a Firestore query, paging through
+ * the result set with a cursor (`startAfter`) instead of a single large
+ * `.limit()`. Uses the implicit document-ID ordering, so `startAfter(lastDoc)`
+ * advances past the final doc of the previous page. Stops early once the
+ * collection is exhausted or the cap is reached.
+ *
+ * @param {FirebaseFirestore.Query} baseQuery A query with all `.where()`
+ *   filters applied, no `.limit()`/`.orderBy()`.
+ * @param {number} [maxResults] Cap on the total docs collected.
+ * @param {number} [pageSize] Per-page size (bounded read).
+ * @returns {Promise<Array<object>>} Docs as `{...data, id}`.
+ */
+async function loadCandidates(
+    baseQuery,
+    maxResults = RECOMMENDATION_CANDIDATE_MAX,
+    pageSize = RECOMMENDATION_CANDIDATE_PAGE_SIZE
+) {
+  const docs = [];
+  let lastDoc = null;
+  while (docs.length < maxResults) {
+    const query = lastDoc
+        ? baseQuery.startAfter(lastDoc).limit(pageSize)
+        : baseQuery.limit(pageSize);
+    const snapshot = await query.get();
+    if (snapshot.empty) break;
+    for (const doc of snapshot.docs) {
+      docs.push({...doc.data(), id: doc.id});
+      if (docs.length >= maxResults) break;
+    }
+    if (snapshot.docs.length < pageSize) break; // exhausted
+    lastDoc = snapshot.docs[snapshot.docs.length - 1];
+  }
+  return docs;
+}
+
+/**
  * Engine orchestrator — loads candidate data, runs the deterministic engine,
  * enriches explanations, and persists the result.
  *
@@ -71,35 +119,29 @@ exports.refreshRecommendations = onCall(
  * triggers.
  */
 async function refreshRecommendationsForStudent(userId, userData, options = {}) {
-  const [alumniSnapshot, opportunitiesSnapshot, placementsSnapshot, applicationsSnapshot] =
+  const [alumniDocs, opportunityDocs, placementDocs, applicationSnapshot] =
       await Promise.all([
-        admin.firestore()
-            .collection("users")
-            .where("role", "==", "alumni")
-            .where("profileCompleted", "==", true)
-            .limit(120)
-            .get(),
-        admin.firestore()
-            .collection("opportunities")
-            .where("isActive", "==", true)
-            .limit(120)
-            .get(),
-        admin.firestore()
-            .collection("placements")
-            .where("isActive", "==", true)
-            .limit(120)
-            .get(),
+        loadCandidates(
+            admin.firestore().collection("users")
+                .where("role", "==", "alumni")
+                .where("profileCompleted", "==", true)
+        ),
+        loadCandidates(
+            admin.firestore().collection("opportunities")
+                .where("isActive", "==", true)
+        ),
+        loadCandidates(
+            admin.firestore().collection("placements")
+                .where("isActive", "==", true)
+        ),
         admin.firestore()
             .collection("applications")
             .where("userId", "==", userId)
             .get(),
       ]);
 
-  const alumniDocs = alumniSnapshot.docs.map((doc) => ({...doc.data(), id: doc.id}));
-  const opportunityDocs = opportunitiesSnapshot.docs.map((doc) => ({...doc.data(), id: doc.id}));
-  const placementDocs = placementsSnapshot.docs.map((doc) => ({...doc.data(), id: doc.id}));
   const appliedPlacementIds = new Set(
-      applicationsSnapshot.docs.map((doc) => doc.data().placementId).filter(Boolean)
+      applicationSnapshot.docs.map((doc) => doc.data().placementId).filter(Boolean)
   );
 
   console.log(

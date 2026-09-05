@@ -22,27 +22,11 @@ class NotesService {
         });
   }
 
-  // Get notes filtered by subject
-  Stream<List<Note>> getNotesBySubject(String subject) {
-    return _notesCollection
-        .where('subject', isEqualTo: subject)
-        .orderBy('uploadedAt', descending: true)
-        .snapshots()
-        .map((snapshot) {
-          return snapshot.docs.map((doc) => Note.fromFirestore(doc)).toList();
-        });
-  }
-
-  // Get notes filtered by year
-  Stream<List<Note>> getNotesByYear(String year) {
-    return _notesCollection
-        .where('year', isEqualTo: year)
-        .orderBy('uploadedAt', descending: true)
-        .snapshots()
-        .map((snapshot) {
-          return snapshot.docs.map((doc) => Note.fromFirestore(doc)).toList();
-        });
-  }
+  // NOTE (removed dead code): getNotesBySubject() and getNotesByYear() were
+  // removed — no UI ever called them, so they were unused. If subject/year
+  // filtering is needed later, recreate them (and add the corresponding
+  // composite indexes: notes: subject ↑ uploadedAt ↓ and notes: year ↑
+  // uploadedAt ↓).
 
   // Get notes uploaded by a specific teacher/user
   Stream<List<Note>> getNotesByUploader(String uploaderName) {

@@ -44,6 +44,9 @@ const {
   computeCareerInputFingerprint,
   generateCareerCoaching,
 } = require("./recommendations/career_coach");
+// v9.0 (IMP-15): unified AI quota — `career_coach_usage/{uid}` is now a legacy
+// mirror; the authoritative store is `user_ai_quotas/{uid}.careerCoach`.
+const quota = require("./ai/quota");
 
 // ===============================================
 // v9.0: CAREER COACH CONSTANTS
@@ -299,44 +302,7 @@ exports.generateCareerCoachAnalysis = onCall(
  * @returns {Promise<object>} {monthlyCount, monthlyLimit, lastResetMonth}
  */
 async function getCareerCoachUsage(userId) {
-  try {
-    const usageDoc = await admin.firestore()
-        .collection("career_coach_usage")
-        .doc(userId)
-        .get();
-
-    if (!usageDoc.exists) {
-      return {
-        monthlyCount: 0,
-        monthlyLimit: CAREER_COACH_MONTHLY_LIMIT,
-        lastResetMonth: null,
-      };
-    }
-
-    const data = usageDoc.data();
-    const now = new Date();
-    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-
-    if (data.lastResetMonth !== currentMonth) {
-      return {
-        monthlyCount: 0,
-        monthlyLimit: CAREER_COACH_MONTHLY_LIMIT,
-        lastResetMonth: currentMonth,
-      };
-    }
-
-    return {
-      monthlyCount: data.monthlyCount || 0,
-      monthlyLimit: CAREER_COACH_MONTHLY_LIMIT,
-      lastResetMonth: data.lastResetMonth,
-    };
-  } catch (error) {
-    console.error("Error getting career coach usage:", error);
-    return {
-      monthlyCount: 0,
-      monthlyLimit: CAREER_COACH_MONTHLY_LIMIT,
-    };
-  }
+  return quota.getFeatureUsage(userId, "careerCoach");
 }
 
 /**
@@ -353,93 +319,7 @@ async function getCareerCoachUsage(userId) {
  * @throws {HttpsError#resource-exhausted} when the monthly limit is reached
  */
 async function consumeCareerCoachQuota(userId, requestId) {
-  const usageRef = admin.firestore()
-      .collection("career_coach_usage")
-      .doc(userId);
-
-  const now = new Date();
-  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-  const timestamp = admin.firestore.Timestamp.now();
-
-  try {
-    return await admin.firestore().runTransaction(async (transaction) => {
-      const usageDoc = await transaction.get(usageRef);
-      const reservationFields = {
-        pendingRequestId: requestId,
-        pendingSince: timestamp,
-      };
-
-      if (!usageDoc.exists) {
-        // First analysis this month — create the usage doc, already consumed.
-        const firstUsage = {
-          monthlyCount: 1,
-          monthlyLimit: CAREER_COACH_MONTHLY_LIMIT,
-          lastAnalyzedAt: timestamp,
-          lastResetMonth: currentMonth,
-          ...reservationFields,
-        };
-        transaction.set(usageRef, firstUsage);
-        return {
-          monthlyCount: 1,
-          monthlyLimit: CAREER_COACH_MONTHLY_LIMIT,
-          lastResetMonth: currentMonth,
-        };
-      }
-
-      const data = usageDoc.data();
-      const lastResetMonth = data.lastResetMonth || "";
-
-      // New month → reset the counter to 1 (this call is the first analysis).
-      if (lastResetMonth !== currentMonth) {
-        const resetData = {
-          monthlyCount: 1,
-          monthlyLimit: CAREER_COACH_MONTHLY_LIMIT,
-          lastAnalyzedAt: timestamp,
-          lastResetMonth: currentMonth,
-          ...reservationFields,
-        };
-        transaction.update(usageRef, resetData);
-        return {
-          monthlyCount: 1,
-          monthlyLimit: CAREER_COACH_MONTHLY_LIMIT,
-          lastResetMonth: currentMonth,
-        };
-      }
-
-      // Same month → enforce the limit inside the transaction (atomic).
-      const monthlyCount = data.monthlyCount || 0;
-      if (monthlyCount >= CAREER_COACH_MONTHLY_LIMIT) {
-        throw new admin.functions.https.HttpsError(
-            "resource-exhausted",
-            `Career Coach monthly limit reached (${CAREER_COACH_MONTHLY_LIMIT} analyses/month). Resets next month.`,
-            {
-              usage: {
-                monthlyCount,
-                monthlyLimit: CAREER_COACH_MONTHLY_LIMIT,
-                lastResetMonth: currentMonth,
-              },
-            }
-        );
-      }
-
-      const updatedData = {
-        monthlyCount: monthlyCount + 1,
-        monthlyLimit: CAREER_COACH_MONTHLY_LIMIT,
-        lastAnalyzedAt: timestamp,
-        lastResetMonth: currentMonth,
-        ...reservationFields,
-      };
-      transaction.update(usageRef, updatedData);
-      return {
-        monthlyCount: updatedData.monthlyCount,
-        monthlyLimit: CAREER_COACH_MONTHLY_LIMIT,
-        lastResetMonth: currentMonth,
-      };
-    });
-  } catch (error) {
-    console.error("Error consuming career coach quota:", error);
-    throw error;
-  }
+  return quota.consumeFeatureQuota(userId, "careerCoach", requestId);
 }
 
 /**
@@ -454,27 +334,7 @@ async function consumeCareerCoachQuota(userId, requestId) {
  * @returns {Promise<void>}
  */
 async function clearCareerCoachReservation(userId, requestId) {
-  const usageRef = admin.firestore()
-      .collection("career_coach_usage")
-      .doc(userId);
-
-  try {
-    await admin.firestore().runTransaction(async (transaction) => {
-      const usageDoc = await transaction.get(usageRef);
-      if (!usageDoc.exists) return;
-
-      const data = usageDoc.data();
-      // Only clear OUR reservation — never touch another in-flight request.
-      if (!data.pendingRequestId || data.pendingRequestId !== requestId) return;
-
-      transaction.update(usageRef, {
-        pendingRequestId: admin.firestore.FieldValue.delete(),
-        pendingSince: admin.firestore.FieldValue.delete(),
-      });
-    });
-  } catch (clearError) {
-    console.error("Error clearing career coach reservation:", clearError);
-  }
+  return quota.clearFeatureReservation(userId, "careerCoach", requestId);
 }
 
 /**
@@ -487,39 +347,7 @@ async function clearCareerCoachReservation(userId, requestId) {
  * @returns {Promise<void>}
  */
 async function rollbackCareerCoachUsage(userId, requestId) {
-  const usageRef = admin.firestore()
-      .collection("career_coach_usage")
-      .doc(userId);
-
-  const now = new Date();
-  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-
-  try {
-    await admin.firestore().runTransaction(async (transaction) => {
-      const usageDoc = await transaction.get(usageRef);
-      if (!usageDoc.exists) return;
-
-      const data = usageDoc.data();
-      const lastResetMonth = data.lastResetMonth || "";
-      if (lastResetMonth !== currentMonth) return; // already reset
-
-      const monthlyCount = data.monthlyCount || 0;
-      if (monthlyCount <= 0) return;
-
-      const update = {
-        monthlyCount: monthlyCount - 1,
-      };
-      // Only clear OUR reservation — never touch another in-flight request.
-      if (data.pendingRequestId && data.pendingRequestId === requestId) {
-        update.pendingRequestId = admin.firestore.FieldValue.delete();
-        update.pendingSince = admin.firestore.FieldValue.delete();
-      }
-
-      transaction.update(usageRef, update);
-    });
-  } catch (rollbackError) {
-    console.error("Error rolling back career coach usage:", rollbackError);
-  }
+  return quota.rollbackFeatureQuota(userId, "careerCoach", requestId);
 }
 
 // ===============================================
@@ -625,51 +453,15 @@ exports.compensateStaleCareerCoachQuota = onSchedule(
           `${cutoff.toDate().toISOString()}`
       );
 
+      // v9.0 (IMP-15): the unified `user_ai_quotas/{uid}` doc is now the
+      // authoritative quota store, so the sweep must refund BOTH the legacy
+      // `career_coach_usage/{uid}` mirror AND the unified doc atomically.
+      // `runFeatureSweep` queries the union of users with a stale reservation
+      // in either store and refunds each user once across both — no double
+      // refund, no unified/legacy divergence.
       let compensated = 0;
-
       try {
-        const snapshot = await admin.firestore()
-            .collection("career_coach_usage")
-            .where("pendingSince", "<", cutoff)
-            .limit(1000)
-            .get();
-
-        for (const usageDoc of snapshot.docs) {
-          const userId = usageDoc.id;
-          const data = usageDoc.data();
-          const monthlyCount = data.monthlyCount || 0;
-          if (monthlyCount <= 0) continue;
-
-          try {
-            await admin.firestore().runTransaction(async (transaction) => {
-              // Re-read inside the transaction: the reservation may have been
-              // cleared (success/rollback) between the query and now.
-              const freshDoc = await transaction.get(usageDoc.ref);
-              if (!freshDoc.exists) return;
-
-              const freshData = freshDoc.data();
-              // Only refund if the reservation is STILL stale and un-cleared.
-              if (!freshData.pendingSince) return;
-              if (freshData.pendingSince.toMillis() >= cutoff.toMillis()) return;
-
-              const count = freshData.monthlyCount || 0;
-              if (count <= 0) return;
-
-              transaction.update(usageDoc.ref, {
-                monthlyCount: count - 1,
-                pendingRequestId: admin.firestore.FieldValue.delete(),
-                pendingSince: admin.firestore.FieldValue.delete(),
-              });
-            });
-            compensated++;
-          } catch (perUserError) {
-            console.error(
-                `compensateStaleCareerCoachQuota: failed for user ${userId}:`,
-                perUserError
-            );
-          }
-        }
-
+        compensated = await quota.runFeatureSweep("careerCoach", cutoff);
         console.log(
             `compensateStaleCareerCoachQuota: refunded ${compensated} stale credit(s)`
         );

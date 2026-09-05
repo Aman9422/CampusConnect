@@ -20,6 +20,9 @@ const crypto = require("crypto");
 const pdfParse = require("pdf-parse/lib/pdf-parse.js");
 const {generateResumeReviewAI} = require("./aiProvider");
 const {logAnalyticsEvent} = require("../helpers/shared");
+// v9.0 (IMP-15): unified AI quota management — `resume_usage/{uid}` is now a
+// legacy mirror; the authoritative store is `user_ai_quotas/{uid}.resumeReview`.
+const quota = require("./quota");
 
 // ===============================================
 // CONSTANTS
@@ -245,51 +248,15 @@ exports.compensateStaleResumeQuota = onSchedule(
           `${cutoff.toDate().toISOString()}`
       );
 
+      // v9.0 (IMP-15): the unified `user_ai_quotas/{uid}` doc is now the
+      // authoritative quota store, so the sweep must refund BOTH the legacy
+      // `resume_usage/{uid}` mirror AND the unified doc atomically.
+      // `runFeatureSweep` queries the union of users with a stale reservation
+      // in either store and refunds each user once across both — no double
+      // refund, no unified/legacy divergence.
       let compensated = 0;
-
       try {
-        const snapshot = await admin.firestore()
-            .collection("resume_usage")
-            .where("pendingSince", "<", cutoff)
-            .limit(1000)
-            .get();
-
-        for (const usageDoc of snapshot.docs) {
-          const userId = usageDoc.id;
-          const data = usageDoc.data();
-          const monthlyCount = data.monthlyCount || 0;
-          if (monthlyCount <= 0) continue;
-
-          try {
-            await admin.firestore().runTransaction(async (transaction) => {
-              // Re-read inside the transaction: the reservation may have been
-              // cleared (success/rollback) between the query and now.
-              const freshDoc = await transaction.get(usageDoc.ref);
-              if (!freshDoc.exists) return;
-
-              const freshData = freshDoc.data();
-              // Only refund if the reservation is STILL stale and un-cleared.
-              if (!freshData.pendingSince) return;
-              if (freshData.pendingSince.toMillis() >= cutoff.toMillis()) return;
-
-              const count = freshData.monthlyCount || 0;
-              if (count <= 0) return;
-
-              transaction.update(usageDoc.ref, {
-                monthlyCount: count - 1,
-                pendingRequestId: admin.firestore.FieldValue.delete(),
-                pendingSince: admin.firestore.FieldValue.delete(),
-              });
-            });
-            compensated++;
-          } catch (perUserError) {
-            console.error(
-                `compensateStaleResumeQuota: failed for user ${userId}:`,
-                perUserError
-            );
-          }
-        }
-
+        compensated = await quota.runFeatureSweep("resumeReview", cutoff);
         console.log(
             `compensateStaleResumeQuota: refunded ${compensated} stale credit(s)`
         );
@@ -407,43 +374,13 @@ async function resumeTextFromStorage(uid, storagePath) {
  */
 async function getResumeUsage(userId) {
   try {
-    const usageDoc = await admin.firestore()
-        .collection("resume_usage")
-        .doc(userId)
-        .get();
-
-    if (!usageDoc.exists) {
-      return {
-        monthlyCount: 0,
-        monthlyLimit: RESUME_MONTHLY_LIMIT,
-        lastResetMonth: null,
-      };
-    }
-
-    const data = usageDoc.data();
-    const now = new Date();
-    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-
-    // Check if month has reset
-    if (data.lastResetMonth !== currentMonth) {
-      return {
-        monthlyCount: 0,
-        monthlyLimit: RESUME_MONTHLY_LIMIT,
-        lastResetMonth: currentMonth,
-      };
-    }
-
-    return {
-      monthlyCount: data.monthlyCount || 0,
-      monthlyLimit: RESUME_MONTHLY_LIMIT,
-      lastResetMonth: data.lastResetMonth,
-      lastReviewAt: data.lastReviewAt?.toDate?.()?.toISOString() || null,
-    };
+    return await quota.getFeatureUsage(userId, "resumeReview");
   } catch (error) {
     console.error("Error getting resume usage:", error);
     return {
       monthlyCount: 0,
       monthlyLimit: RESUME_MONTHLY_LIMIT,
+      lastResetMonth: null,
     };
   }
 }
@@ -470,93 +407,7 @@ async function getResumeUsage(userId) {
  * @throws {HttpsError#resource-exhausted} when the monthly limit is reached
  */
 async function consumeResumeQuota(userId, requestId) {
-  const usageRef = admin.firestore()
-      .collection("resume_usage")
-      .doc(userId);
-
-  const now = new Date();
-  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-  const timestamp = admin.firestore.Timestamp.now();
-
-  try {
-    return await admin.firestore().runTransaction(async (transaction) => {
-      const usageDoc = await transaction.get(usageRef);
-      const reservationFields = {
-        pendingRequestId: requestId,
-        pendingSince: timestamp,
-      };
-
-      if (!usageDoc.exists) {
-        // First review this month — create the usage doc, already consumed.
-        const firstUsage = {
-          monthlyCount: 1,
-          monthlyLimit: RESUME_MONTHLY_LIMIT,
-          lastReviewAt: timestamp,
-          lastResetMonth: currentMonth,
-          ...reservationFields,
-        };
-        transaction.set(usageRef, firstUsage);
-        return {
-          monthlyCount: 1,
-          monthlyLimit: RESUME_MONTHLY_LIMIT,
-          lastResetMonth: currentMonth,
-        };
-      }
-
-      const data = usageDoc.data();
-      const lastResetMonth = data.lastResetMonth || "";
-
-      // New month → reset the counter to 1 (this call is the first review).
-      if (lastResetMonth !== currentMonth) {
-        const resetData = {
-          monthlyCount: 1,
-          monthlyLimit: RESUME_MONTHLY_LIMIT,
-          lastReviewAt: timestamp,
-          lastResetMonth: currentMonth,
-          ...reservationFields,
-        };
-        transaction.update(usageRef, resetData);
-        return {
-          monthlyCount: 1,
-          monthlyLimit: RESUME_MONTHLY_LIMIT,
-          lastResetMonth: currentMonth,
-        };
-      }
-
-      // Same month → enforce the limit inside the transaction (atomic).
-      const monthlyCount = data.monthlyCount || 0;
-      if (monthlyCount >= RESUME_MONTHLY_LIMIT) {
-        throw new admin.functions.https.HttpsError(
-            "resource-exhausted",
-            `Monthly review limit reached (${RESUME_MONTHLY_LIMIT} reviews/month). Resets next month.`,
-            {
-              usage: {
-                monthlyCount: monthlyCount,
-                monthlyLimit: RESUME_MONTHLY_LIMIT,
-                lastResetMonth: currentMonth,
-              },
-            }
-        );
-      }
-
-      const updatedData = {
-        monthlyCount: monthlyCount + 1,
-        monthlyLimit: RESUME_MONTHLY_LIMIT,
-        lastReviewAt: timestamp,
-        lastResetMonth: currentMonth,
-        ...reservationFields,
-      };
-      transaction.update(usageRef, updatedData);
-      return {
-        monthlyCount: updatedData.monthlyCount,
-        monthlyLimit: RESUME_MONTHLY_LIMIT,
-        lastResetMonth: currentMonth,
-      };
-    });
-  } catch (error) {
-    console.error("Error consuming resume quota:", error);
-    throw error;
-  }
+  return quota.consumeFeatureQuota(userId, "resumeReview", requestId);
 }
 
 /**
@@ -572,27 +423,7 @@ async function consumeResumeQuota(userId, requestId) {
  * @returns {Promise<void>}
  */
 async function clearResumeReservation(userId, requestId) {
-  const usageRef = admin.firestore()
-      .collection("resume_usage")
-      .doc(userId);
-
-  try {
-    await admin.firestore().runTransaction(async (transaction) => {
-      const usageDoc = await transaction.get(usageRef);
-      if (!usageDoc.exists) return;
-
-      const data = usageDoc.data();
-      // Only clear OUR reservation — never touch another in-flight request.
-      if (!data.pendingRequestId || data.pendingRequestId !== requestId) return;
-
-      transaction.update(usageRef, {
-        pendingRequestId: admin.firestore.FieldValue.delete(),
-        pendingSince: admin.firestore.FieldValue.delete(),
-      });
-    });
-  } catch (clearError) {
-    console.error("Error clearing resume reservation:", clearError);
-  }
+  return quota.clearFeatureReservation(userId, "resumeReview", requestId);
 }
 
 /**
@@ -614,37 +445,5 @@ async function clearResumeReservation(userId, requestId) {
  * @returns {Promise<void>}
  */
 async function rollbackResumeUsage(userId, requestId) {
-  const usageRef = admin.firestore()
-      .collection("resume_usage")
-      .doc(userId);
-
-  const now = new Date();
-  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-
-  try {
-    await admin.firestore().runTransaction(async (transaction) => {
-      const usageDoc = await transaction.get(usageRef);
-      if (!usageDoc.exists) return;
-
-      const data = usageDoc.data();
-      const lastResetMonth = data.lastResetMonth || "";
-      if (lastResetMonth !== currentMonth) return; // already reset — nothing to roll back
-
-      const monthlyCount = data.monthlyCount || 0;
-      if (monthlyCount <= 0) return;
-
-      const update = {
-        monthlyCount: monthlyCount - 1,
-      };
-      // Only clear OUR reservation — never touch another in-flight request.
-      if (data.pendingRequestId && data.pendingRequestId === requestId) {
-        update.pendingRequestId = admin.firestore.FieldValue.delete();
-        update.pendingSince = admin.firestore.FieldValue.delete();
-      }
-
-      transaction.update(usageRef, update);
-    });
-  } catch (rollbackError) {
-    console.error("Error rolling back resume usage:", rollbackError);
-  }
+  return quota.rollbackFeatureQuota(userId, "resumeReview", requestId);
 }

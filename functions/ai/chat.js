@@ -16,6 +16,9 @@ const {onCall} = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const {generateChatResponse} = require("./aiProvider");
 const {sanitizeAIInput, logAnalyticsEvent} = require("../helpers/shared");
+// v9.0 (IMP-15): unified AI quota — `ai_usage/{uid}` is now a legacy mirror;
+// the authoritative store is `user_ai_quotas/{uid}.chat`.
+const quota = require("./quota");
 
 // ===============================================
 // CONSTANTS
@@ -254,67 +257,12 @@ exports.askAI = onCall(
  * @return {object} Usage data {dailyCount, lastResetAt}
  */
 async function trackUsage(userId) {
-  const usageRef = admin.firestore()
-      .collection("ai_usage")
-      .doc(userId);
-
-  const now = admin.firestore.Timestamp.now();
-  const oneDayAgo = admin.firestore.Timestamp.fromMillis(
-      now.toMillis() - (24 * 60 * 60 * 1000)
-  );
-
-  try {
-    const result = await admin.firestore().runTransaction(async (transaction) => {
-      const usageDoc = await transaction.get(usageRef);
-
-      if (!usageDoc.exists) {
-        // First time user - create usage document
-        const newUsageData = {
-          dailyCount: 1,
-          lastUsedAt: now,
-          lastResetAt: now,
-        };
-        transaction.set(usageRef, newUsageData);
-        return newUsageData;
-      }
-
-      const data = usageDoc.data();
-      const lastResetAt = data.lastResetAt;
-
-      // Check if we need to reset the counter (24 hours passed)
-      if (lastResetAt.toMillis() < oneDayAgo.toMillis()) {
-        // Reset counter
-        const resetData = {
-          dailyCount: 1,
-          lastUsedAt: now,
-          lastResetAt: now,
-        };
-        transaction.update(usageRef, resetData);
-        return resetData;
-      } else {
-        // Increment counter
-        const updatedData = {
-          dailyCount: data.dailyCount + 1,
-          lastUsedAt: now,
-          lastResetAt: lastResetAt, // Keep existing reset time
-        };
-        transaction.update(usageRef, updatedData);
-        return updatedData;
-      }
-    });
-
-    return {
-      dailyCount: result.dailyCount,
-      lastResetAt: result.lastResetAt.toDate().toISOString(),
-    };
-  } catch (error) {
-    console.error("Error tracking usage:", error);
-    // Return safe defaults if tracking fails
-    return {
-      dailyCount: 1,
-      lastResetAt: now.toDate().toISOString(),
-    };
-  }
+  // v9.0 (IMP-15): delegate to the unified quota store. `incrementDailyUsage`
+  // writes BOTH `user_ai_quotas/{uid}.chat` (authoritative) and the legacy
+  // `ai_usage/{uid}` mirror atomically, and returns `{dailyCount, lastResetAt}`
+  // exactly as the old implementation did (ISO `lastResetAt`). Behavior is
+  // unchanged: 24h reset, soft 50/day limit, first-use starts at 1.
+  return quota.incrementDailyUsage(userId, "chat");
 }
 
 /**

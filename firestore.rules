@@ -306,6 +306,25 @@ service cloud.firestore {
     }
 
     // ===============================================
+    // v9.0: AI DEEP ANALYSIS USAGE (Cloud Functions managed)
+    // ===============================================
+    match /ai_analysis_usage/{userId} {
+      allow read: if isOwner(userId);
+      allow write: if false; // Only Cloud Functions can write
+    }
+
+    // ===============================================
+    // v9.0 (IMP-15): UNIFIED AI QUOTA (Cloud Functions managed)
+    // Single source of truth for all AI feature quotas (chat, resumeReview,
+    // careerCoach, aiAnalysis). Owner may read; writes are Admin SDK only so
+    // the single-writer + quota contract is never bypassed by a client.
+    // ===============================================
+    match /user_ai_quotas/{userId} {
+      allow read: if isOwner(userId);
+      allow write: if false; // Only Cloud Functions can write
+    }
+
+    // ===============================================
     // ANALYTICS (ADMIN ONLY)
     // ===============================================
     match /analytics_events/{eventId} {

@@ -16,23 +16,31 @@ const admin = require("firebase-admin");
 /**
  * v9.0 (IMP-12): Sanitize user input before sending to AI providers.
  *
- * Strips control characters (except newlines/tabs) that could confuse the
- * AI model or be used for prompt injection. Preserves normal Unicode
- * characters and whitespace. Does NOT alter the semantic content — only
- * removes invisible control bytes and limits special character density.
+ * Strips ASCII control characters (except newlines/tabs) and zero-width
+ * Unicode characters that could be used for invisible prompt injection.
+ * Preserves normal Unicode characters, URLs, Markdown and code (it never
+ * alters the semantic content). Also caps the total length so an oversized
+ * resume or message cannot blow up the model context window. Truncation cuts
+ * on a UTF-16 code-unit boundary and appends a clear "[truncated]…" marker.
  *
  * @param {string} text - Raw user input
+ * @param {number} [maxLength=12000] - Maximum allowed length
  * @returns {string} Sanitized text safe for AI prompt insertion
  */
-function sanitizeAIInput(text) {
+function sanitizeAIInput(text, maxLength = 12000) {
   if (typeof text !== "string") return "";
   // Strip ASCII control characters (0x00-0x1F except \n \t, plus 0x7F)
   // and zero-width Unicode characters that could be used for invisible
   // instruction injection.
-  return text
+  let sanitized = text
       .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
       .replace(/[\u200B\u200C\u200D\uFEFF\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, "")
       .trim();
+
+  if (sanitized.length > maxLength) {
+    sanitized = `${sanitized.slice(0, maxLength)}…[truncated]`;
+  }
+  return sanitized;
 }
 
 // ===============================================
@@ -129,46 +137,83 @@ async function maybeCreateNotification(userId, type, payload) {
 }
 
 // ===============================================
+// DAY-KEY HELPERS (IMP-9)
+// ===============================================
+
+/**
+ * Return a UTC day key ("YYYY-M-D", no zero padding) for a Date. Used to
+ * track the streak aggregate without scanning the full activity history.
+ */
+function dayKey(date) {
+  return `${date.getUTCFullYear()}-${date.getUTCMonth() + 1}-${date.getUTCDate()}`;
+}
+
+/**
+ * Return the UTC day key for the day immediately before the given day key.
+ */
+function previousDayKey(dayKeyStr) {
+  const [y, m, d] = dayKeyStr.split("-").map(Number);
+  return dayKey(new Date(Date.UTC(y, m - 1, d - 1)));
+}
+
+// ===============================================
 // ACTIVITY LOGGING
 // ===============================================
 
 /**
  * Log a user activity event (engagement system).
  *
- * IMP-9: also maintains running aggregates (activityPoints, lastActiveAt)
- * on the engagement summary doc via atomic `FieldValue.increment`. The daily
- * scheduler can use these instead of scanning all activity docs.
+ * IMP-9: also maintains running aggregates (activityPoints, dailyStreak,
+ * streakLastActiveKey, lastActiveAt) on the engagement summary doc. The
+ * activity write and the aggregate update happen in a single atomic
+ * transaction so a retried invocation cannot double-count points or corrupt
+ * the streak (idempotency).
  */
 async function logUserActivity(userId, eventType, points, metadata = {}) {
-  // Log the activity event.
-  await admin.firestore()
+  const firestore = admin.firestore();
+  const activityRef = firestore
       .collection("users")
       .doc(userId)
       .collection("activities")
-      .add({
+      .doc();
+  const summaryRef = firestore
+      .collection("users")
+      .doc(userId)
+      .collection("engagement_summary")
+      .doc("summary");
+
+  try {
+    // Read-modify-write in a single transaction so dailyStreak is maintained
+    // (and never double-counted) for arbitrarily long streaks. The activity
+    // write and the aggregate update commit atomically: a retried invocation
+    // cannot log the activity twice or corrupt the streak.
+    await firestore.runTransaction(async (tx) => {
+      const summarySnap = await tx.get(summaryRef);
+      const existing = summarySnap.exists ? summarySnap.data() : {};
+      const todayKey = dayKey(new Date());
+      const lastKey = existing.streakLastActiveKey;
+      const lastStreak = existing.dailyStreak || 0;
+      const nextStreak = lastKey === todayKey
+          ? lastStreak
+          : (lastKey === previousDayKey(todayKey) ? lastStreak + 1 : 1);
+
+      tx.set(activityRef, {
         userId,
         eventType,
         points,
         metadata,
         occurredAt: admin.firestore.Timestamp.now(),
       });
-
-  // IMP-9: maintain running aggregates on the engagement summary so the
-  // daily scheduler can skip the full activity scan when these exist.
-  // `FieldValue.increment` is atomic — no transaction needed.
-  try {
-    await admin.firestore()
-        .collection("users")
-        .doc(userId)
-        .collection("engagement_summary")
-        .doc("summary")
-        .set({
-          activityPoints: admin.firestore.FieldValue.increment(points),
-          lastActiveAt: admin.firestore.Timestamp.now(),
-        }, {merge: true});
-  } catch (aggError) {
-    // Non-fatal: the daily scheduler will still compute from activities.
-    console.error("logUserActivity: aggregate update failed:", aggError);
+      tx.set(summaryRef, {
+        activityPoints: admin.firestore.FieldValue.increment(points),
+        lastActiveAt: admin.firestore.Timestamp.now(),
+        dailyStreak: nextStreak,
+        streakLastActiveKey: todayKey,
+      }, {merge: true});
+    });
+  } catch (error) {
+    console.error("logUserActivity error:", error);
+    throw error;
   }
 }
 
@@ -246,4 +291,7 @@ module.exports = {
   logUserActivity,
   isPortfolioMetadataOnlyChange,
   portfolioContentChanged,
+  // IMP-9: engagement aggregate helpers
+  dayKey,
+  previousDayKey,
 };

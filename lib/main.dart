@@ -92,13 +92,19 @@ import 'package:campusconnect/views/portfolio/experience_manager_screen.dart';
 import 'package:campusconnect/views/portfolio/achievements_manager_screen.dart';
 import 'package:campusconnect/views/portfolio/resume_upload_screen.dart';
 import 'package:campusconnect/views/portfolio/portfolio_read_only_view.dart';
+import 'package:firebase_app_check/firebase_app_check.dart'; // v9.0 (IMP-6): App Check
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart'; // v9.0 (IMP-6): kDebugMode/kProfileMode/defaultTargetPlatform
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  // v9.0 (IMP-6): Activate Firebase App Check after Firebase.initializeApp.
+  // This configures the attestation token providers; ENFORCEMENT is enabled
+  // separately in the Firebase Console (App Check → Apps → Manage enforcement).
+  await _activateAppCheck();
   // v8.8.2 (C, MEDIUM): removed the blocking `LocalPreferencesService.init()`
   // from the startup path. Theme/Layout providers self-initialize lazily via
   // their own `init()` (which awaits `_prefs.init()` internally), so the
@@ -106,6 +112,78 @@ void main() async {
   // (~171 skipped frames / 1.27s `Davey!` in the pid 24538 log). The prefs
   // resolve a few frames later and the UI converges to the stored theme.
   runApp(const MyApp());
+}
+
+/// v9.0 (IMP-6): Activate Firebase App Check.
+///
+/// App Check protects Firebase backend resources (Firestore/Functions/Storage)
+/// from tampered clients. This configures the attestation token providers;
+/// ENFORCEMENT is enabled separately in the Firebase Console (App Check →
+/// Apps → Manage enforcement). Do NOT enable enforcement until the App Check
+/// debug token (printed to the console in debug builds) is registered in the
+/// Console (App Check → Apps → Manage debug tokens), or local development and
+/// emulator builds will fail with `permission-denied` on every backend call.
+///
+/// Behavior:
+/// - Debug / profile builds use the platform `debug` provider (no real
+///   attestation; requires the registered App Check debug token).
+/// - Release builds use production attestation:
+///   Android → Play Integrity, iOS → DeviceCheck, Web → reCAPTCHA v3 (the
+///   Site Key is supplied via `--dart-define=WEB_RECAPTCHA_V3_SITE_KEY=...`).
+///
+/// App Check is supported on Android, iOS and Web (the platforms in Task §9).
+/// Unsupported desktop platforms (Windows/Linux/macOS) are skipped so startup
+/// does not throw; enforcement for those apps is left off in the Console.
+Future<void> _activateAppCheck() async {
+  final supportedPlatform =
+      kIsWeb ||
+      defaultTargetPlatform == TargetPlatform.android ||
+      defaultTargetPlatform == TargetPlatform.iOS;
+  if (!supportedPlatform) return;
+
+  // Web App Check (reCAPTCHA v3) requires the Site Key, supplied via
+  // --dart-define=WEB_RECAPTCHA_V3_SITE_KEY=... (Firebase Console → App Check →
+  // Web app → reCAPTCHA v3 Site Key). If absent (e.g. a mobile-only build) Web
+  // App Check is skipped so the build still runs.
+  const webSiteKey = String.fromEnvironment(
+    'WEB_RECAPTCHA_V3_SITE_KEY',
+    defaultValue: '',
+  );
+
+  if (kDebugMode || kProfileMode) {
+    // Debug/profile: use the debug providers so local dev + emulators work
+    // once the printed debug token is registered in the App Check console
+    // (App Check → Apps → Manage debug tokens). Profile is treated as debug so
+    // `flutter run --profile` (perf profiling) does not break either.
+    if (webSiteKey.isNotEmpty) {
+      await FirebaseAppCheck.instance.activate(
+        providerAndroid: AndroidDebugProvider(),
+        providerApple: AppleDebugProvider(),
+        providerWeb: ReCaptchaV3Provider(webSiteKey),
+      );
+    } else {
+      await FirebaseAppCheck.instance.activate(
+        providerAndroid: AndroidDebugProvider(),
+        providerApple: AppleDebugProvider(),
+      );
+    }
+    return;
+  }
+
+  // Release: production attestation providers (Android → Play Integrity,
+  // iOS → DeviceCheck, Web → reCAPTCHA v3).
+  if (webSiteKey.isNotEmpty) {
+    await FirebaseAppCheck.instance.activate(
+      providerAndroid: const AndroidPlayIntegrityProvider(),
+      providerApple: const AppleDeviceCheckProvider(),
+      providerWeb: ReCaptchaV3Provider(webSiteKey),
+    );
+  } else {
+    await FirebaseAppCheck.instance.activate(
+      providerAndroid: const AndroidPlayIntegrityProvider(),
+      providerApple: const AppleDeviceCheckProvider(),
+    );
+  }
 }
 
 class MyApp extends StatelessWidget {
