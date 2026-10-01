@@ -202,11 +202,17 @@ class ResumeReviewService {
 class ResumeReviewResponse {
   final ResumeReview review;
   final ResumeReviewUsage usage;
+
+  /// v9.2 audit (§4.1): id of the review document the SERVER persisted to
+  /// `users/{uid}/resumeReviews`. Null when the best-effort server persist
+  /// failed (the review itself is still returned to the caller).
+  final String? reviewId;
   final String? warning;
 
   const ResumeReviewResponse({
     required this.review,
     required this.usage,
+    this.reviewId,
     this.warning,
   });
 
@@ -218,6 +224,7 @@ class ResumeReviewResponse {
       usage: ResumeReviewUsage.fromJson(
         json['usage'] as Map<String, dynamic>? ?? {},
       ),
+      reviewId: json['reviewId'] as String?,
       warning: json['warning'] as String?,
     );
   }

@@ -1,5 +1,6 @@
 import 'package:campusconnect/models/placement_pipeline_data.dart';
 import 'package:campusconnect/services/firestore/teacher_analytics_service.dart';
+import 'package:campusconnect/utilities/load_dedupe.dart';
 import 'package:flutter/material.dart';
 
 /// TeacherAnalyticsProvider - v8.2
@@ -96,9 +97,46 @@ class TeacherAnalyticsProvider extends ChangeNotifier {
   @Deprecated('Use pipelineData instead')
   List<int> get allStageValues => _pipelineData?.allStageValues ?? [];
 
-  /// Load all analytics data
-  Future<void> loadAnalytics() async {
-    if (_isDisposed) return;
+  /// v9.2 (P1): the single in-flight analytics load + monotonic load
+  /// generation, in one small reusable gate. Concurrent callers — the two
+  /// eager `IndexedStack` tabs plus the empty-result retry — share the
+  /// in-flight future instead of each firing duplicate Firestore reads;
+  /// [reset] bumps the epoch so a load in flight across a logout is discarded
+  /// rather than writing stale data into the freshly-reset provider.
+  final LoadDedupe _loadGate = LoadDedupe();
+
+  /// Load all analytics data.
+  ///
+  /// v9.2 (P1) — idempotent + re-entrancy guarded:
+  ///   - If a load is already in flight, returns that SAME future, so the two
+  ///     `IndexedStack` tabs building together (and any retry) cannot trigger
+  ///     duplicate backend reads.
+  ///   - If data is already loaded and [force] is false, returns immediately.
+  ///   - [force] (used by [refresh] and the empty-result retry) starts a fresh
+  ///     load, still subject to the in-flight de-duplication above.
+  Future<void> loadAnalytics({bool force = false}) {
+    if (_isDisposed) return Future<void>.value();
+
+    // 1) A load is already running — piggyback on it (no duplicate reads).
+    final inFlight = _loadGate.inFlight;
+    if (inFlight != null) return inFlight;
+
+    // 2) Data already present and a refresh wasn't requested — nothing to do.
+    if (!force && hasData) return Future<void>.value();
+
+    // 3) Start exactly one load; the gate clears the handle on completion.
+    final future = _runLoad();
+    _loadGate.begin(future);
+    return future;
+  }
+
+  Future<void> _runLoad() async {
+    final epoch = _loadGate.epoch;
+
+    // v9.2 (P1): reset the service's load-scoped read cache so this cycle
+    // issues each underlying query (student roster, resumeReviews, applications,
+    // per-student latest review) exactly once across all 9 aggregate calls.
+    _analyticsService.beginLoad();
 
     _isLoading = true;
     _error = null;
@@ -119,7 +157,7 @@ class TeacherAnalyticsProvider extends ChangeNotifier {
         _analyticsService.getRecommendationAggregates(),
       ]);
 
-      if (_isDisposed) return; // Safety check
+      if (_isDisposed || !_loadGate.owns(epoch)) return; // Safety check
 
       _stats = results[0] as Map<String, dynamic>;
       _studentData = results[1] as List<Map<String, dynamic>>;
@@ -141,20 +179,23 @@ class TeacherAnalyticsProvider extends ChangeNotifier {
         '${_engagementAggregates?['studentCount'] ?? 0} engagement summaries',
       );
     } catch (e) {
-      if (_isDisposed) return; // Safety check
+      if (_isDisposed || !_loadGate.owns(epoch)) return; // Safety check
       _error = 'Failed to load analytics data';
       debugPrint('TeacherAnalyticsProvider load error: $e');
     } finally {
-      _isLoading = false;
-      if (!_isDisposed) {
+      // Only the load that still owns the current epoch may clear the flag —
+      // a stale load completing after a reset must not clobber fresh state.
+      if (!_isDisposed && _loadGate.owns(epoch)) {
+        _isLoading = false;
         notifyListeners();
       }
     }
   }
 
-  /// Refresh analytics data
+  /// Force a fresh load (used by pull-to-refresh). Concurrent-safe: a second
+  /// caller while a load is running shares that load instead of duplicating it.
   Future<void> refresh() async {
-    await loadAnalytics();
+    await loadAnalytics(force: true);
   }
 
   /// Get specific stat value with fallback
@@ -267,6 +308,11 @@ class TeacherAnalyticsProvider extends ChangeNotifier {
   /// on the next login. Does NOT set _isDisposed — that is only for
   /// actual widget tree disposal, not for logout/reset cycles.
   void reset() {
+    // v9.2 (P1): invalidate any in-flight load so its results can never be
+    // written into the freshly-reset provider, and drop the de-dup handle so a
+    // post-re-login load may start immediately.
+    _loadGate.invalidate();
+
     // Clear all state — do NOT set _isDisposed here, otherwise
     // loadAnalytics() will be permanently blocked after logout→relogin.
     _stats = null;

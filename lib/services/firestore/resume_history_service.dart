@@ -27,40 +27,11 @@ class ResumeHistoryService {
         .collection('resumeReviews');
   }
 
-  /// Save a new resume review to history
-  Future<String> saveReview({
-    required String userId,
-    required ResumeReview review,
-    String? targetRole,
-  }) async {
-    try {
-      final now = DateTime.now();
-      final monthKey = '${now.year}-${now.month.toString().padLeft(2, '0')}';
-
-      final docRef = await _getUserReviewsCollection(userId).add({
-        'userId': userId,
-        'atsScore': review.atsScore,
-        'strengths': review.strengths,
-        'missingKeywords': review.missingKeywords,
-        'formatIssues': review.formatIssues,
-        'bulletImprovements': review.bulletImprovements
-            .map((b) => b.toJson())
-            .toList(),
-        'sectionAdvice': review.sectionAdvice.toJson(),
-        'overallAdvice': review.overallAdvice,
-        'hireabilityVerdict': review.hireabilityVerdict,
-        'targetRole': targetRole,
-        'createdAt': FieldValue.serverTimestamp(),
-        'monthKey': monthKey,
-      });
-
-      debugPrint('ResumeHistoryService: Saved review ${docRef.id}');
-      return docRef.id;
-    } catch (e) {
-      debugPrint('ResumeHistoryService: Error saving review: $e');
-      rethrow;
-    }
-  }
+  // v9.2 audit (§4.1, "resumeReviews is fully owner-writable"): the client
+  // `saveReview` writer was REMOVED. Reviews are now persisted SERVER-side by
+  // the `reviewResume` callable, and `firestore.rules` denies all client
+  // create/update on `users/{uid}/resumeReviews` — a client-side write here
+  // would throw `permission-denied`. This service is read/delete only.
 
   /// Fetch all reviews for a user (sorted by createdAt desc)
   Future<List<ResumeReviewHistory>> fetchHistory(String userId) async {

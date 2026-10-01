@@ -296,7 +296,7 @@ class _RegisterViewState extends State<RegisterView>
                                       decoration: BoxDecoration(
                                         color: isSelected
                                             ? AppTheme.primaryBlue
-                                                .withOpacity(isDark ? 0.2 : 0.08)
+                                                .withValues(alpha: isDark ? 0.2 : 0.08)
                                             : isDark
                                                 ? AppTheme.darkSurfaceVariant
                                                 : AppTheme.gray50,

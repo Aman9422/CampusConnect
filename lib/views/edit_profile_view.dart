@@ -475,7 +475,7 @@ class _EditProfileViewState extends State<EditProfileView> {
                         ),
                         const SizedBox(height: AppTheme.space8),
                         DropdownButtonFormField<String>(
-                          value: _employmentType,
+                          initialValue: _employmentType,
                           dropdownColor: isDark
                               ? AppTheme.darkSurface
                               : Colors.white,
@@ -519,7 +519,7 @@ class _EditProfileViewState extends State<EditProfileView> {
                         ),
                         const SizedBox(height: AppTheme.space8),
                         DropdownButtonFormField<String>(
-                          value: _workMode,
+                          initialValue: _workMode,
                           dropdownColor: isDark
                               ? AppTheme.darkSurface
                               : Colors.white,
@@ -653,7 +653,7 @@ class _EditProfileViewState extends State<EditProfileView> {
                         ),
                         const SizedBox(height: AppTheme.space8),
                         DropdownButtonFormField<int>(
-                          value: _selectedYear,
+                          initialValue: _selectedYear,
                           dropdownColor: isDark
                               ? AppTheme.darkSurface
                               : Colors.white,

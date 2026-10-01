@@ -219,7 +219,9 @@ class ActivityListItem extends StatelessWidget {
                                 vertical: 2,
                               ),
                               decoration: BoxDecoration(
-                                color: activity.iconColor.withValues(alpha: 0.1),
+                                color: activity.iconColor.withValues(
+                                  alpha: 0.1,
+                                ),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text(
@@ -256,7 +258,7 @@ class ActivityListItem extends StatelessWidget {
         width: 40,
         height: 40,
         decoration: BoxDecoration(
-          color: activity.iconColor.withOpacity(isDark ? 0.15 : 0.1),
+          color: activity.iconColor.withValues(alpha: isDark ? 0.15 : 0.1),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
             color: activity.iconColor.withValues(alpha: 0.2),
@@ -569,7 +571,7 @@ class TodayHighlight extends StatelessWidget {
           width: 32,
           height: 32,
           decoration: BoxDecoration(
-            color: color.withOpacity(isDark ? 0.15 : 0.1),
+            color: color.withValues(alpha: isDark ? 0.15 : 0.1),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Icon(icon, color: color, size: 16),
@@ -619,8 +621,8 @@ class ActivityEmptyState extends StatelessWidget {
             width: 64,
             height: 64,
             decoration: BoxDecoration(
-              color: (isDark ? AppTheme.gray600 : AppTheme.gray300).withOpacity(
-                0.3,
+              color: (isDark ? AppTheme.gray600 : AppTheme.gray300).withValues(
+                alpha: 0.3,
               ),
               borderRadius: BorderRadius.circular(16),
             ),

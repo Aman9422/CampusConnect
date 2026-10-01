@@ -13,7 +13,6 @@
  */
 
 const {onCall} = require("firebase-functions/v2/https");
-const {onSchedule} = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
 const crypto = require("crypto");
 const {generateAIResponse} = require("./aiProvider");
@@ -29,8 +28,6 @@ const quota = require("./quota");
 const AI_MONTHLY_LIMIT = 3; // AI deep analysis calls per month
 const AI_MAX_RESUME_LENGTH = 5000; // Max resume chars for AI input
 const AI_ANALYSIS_USAGE_COLLECTION = "ai_analysis_usage";
-/** v9.0 (BUG-2): age after which an un-cleared AI analysis reservation is stale. */
-const AI_ANALYSIS_RESERVATION_STALE_HOURS = 24;
 
 // ===============================================
 // EXPORTS
@@ -78,7 +75,11 @@ exports.generateResumeAnalysis = onCall(
         );
       }
 
-      const { reviewId, resumeText, targetRole } = request.data;
+      // v9.2 audit (BUG-7): guard the destructure. A callable invoked with no
+      // body left `request.data` undefined, so this threw a raw `TypeError`
+      // (surfaced to the client as `internal`) instead of the friendly
+      // `invalid-argument` below. Every sibling callable now null-guards.
+      const { reviewId, resumeText, targetRole } = request.data || {};
 
       // Validate required fields
       if (!reviewId || typeof reviewId !== "string") {
@@ -250,47 +251,6 @@ exports.generateResumeAnalysis = onCall(
     }
 );
 
-/**
- * v9.0 (BUG-2): daily sweep that refunds AI analysis credits whose
- * reservation was left stale by a crash/500 in `generateResumeAnalysis`.
- *
- * Runs daily at 04:20 UTC (after the Resume Review sweep at 04:00 and the
- * Career Coach sweep at 04:10). Safety contract mirrors both sweeps.
- */
-exports.compensateStaleAIAnalysisQuota = onSchedule(
-    {
-      schedule: "every day 04:20",
-      region: "us-central1",
-      timeZone: "UTC",
-    },
-    async () => {
-      const cutoff = admin.firestore.Timestamp.fromMillis(
-          Date.now() - AI_ANALYSIS_RESERVATION_STALE_HOURS * 60 * 60 * 1000
-      );
-
-      console.log(
-          `compensateStaleAIAnalysisQuota: refunding reservations older than ` +
-          `${cutoff.toDate().toISOString()}`
-      );
-
-      // v9.0 (IMP-15): the unified `user_ai_quotas/{uid}` doc is now the
-      // authoritative quota store, so the sweep must refund BOTH the legacy
-      // `ai_analysis_usage/{uid}` mirror AND the unified doc atomically.
-      // `runFeatureSweep` queries the union of users with a stale reservation
-      // in either store and refunds each user once across both — no double
-      // refund, no unified/legacy divergence.
-      let compensated = 0;
-      try {
-        compensated = await quota.runFeatureSweep("aiAnalysis", cutoff);
-        console.log(
-            `compensateStaleAIAnalysisQuota: refunded ${compensated} stale credit(s)`
-        );
-      } catch (error) {
-        console.error("compensateStaleAIAnalysisQuota error:", error);
-      }
-    }
-);
-
 // ===============================================
 // PRIVATE HELPERS
 // ===============================================
@@ -299,7 +259,7 @@ exports.compensateStaleAIAnalysisQuota = onSchedule(
  * Atomically check the monthly AI analysis limit AND increment the quota,
  * stamping a per-request reservation (`pendingRequestId` / `pendingSince`)
  * so a crash/500 after consumption but before the AI-failure rollback can be
- * refunded by `compensateStaleAIAnalysisQuota`.
+ * refunded by `compensateStaleAIQuotas`.
  *
  * Mirrors `consumeResumeQuota` and `consumeCareerCoachQuota` exactly.
  *

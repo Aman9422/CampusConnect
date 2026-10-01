@@ -28,6 +28,33 @@ service firebase.storage {
          firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role in ['teacher', 'alumni']);
     }
 
+    // v9.2 audit (INT-1): immutable placement resume snapshots.
+    //
+    // `logPlacementApplication` copies the applied resume to
+    // `resumes/{uid}/snapshots/app_{applicationId}.pdf` — TWO path segments
+    // after `uid`. The single-segment `match /resumes/{userId}/{fileName}`
+    // above therefore did NOT cover it, so it fell through to the deny-all
+    // and was reachable ONLY through the long-lived signed URL stored in the
+    // application doc (signed URLs bypass Storage rules). This grants the
+    // same read access as a live resume so the snapshot can be read by path
+    // (owner / teacher / alumni) without relying on the signed URL.
+    //
+    // Snapshots are write-once: only the Admin SDK (Cloud Functions) creates
+    // or removes them, so client write is denied.
+    //
+    // NOTE (signed-URL expiry): `logPlacementApplication` still stores a
+    // signed URL (expiring 2035) in the application doc and the client UI
+    // currently opens that URL. Because the path is now rule-covered, a
+    // future change can drop to short-lived, on-demand URLs minted by an
+    // authenticated teacher/alumni path with no further rule change.
+    match /resumes/{userId}/snapshots/{fileName} {
+      allow read: if request.auth != null &&
+        (request.auth.uid == userId ||
+         firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) &&
+         firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role in ['teacher', 'alumni']);
+      allow write: if false;
+    }
+
     // Deny all other files
     match /{allPaths=**} {
       allow read, write: if false;

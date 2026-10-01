@@ -108,14 +108,20 @@ class _TeacherDashboardTabState extends State<_TeacherDashboardTab> {
     });
   }
 
-  Future<void> _loadAll({bool firstLoad = false}) async {
-    await context.read<TeacherAnalyticsProvider>().loadAnalytics();
-    await context.read<PlacementsProvider>().refresh();
+  Future<void> _loadAll({bool firstLoad = false, bool force = false}) async {
+    // v9.2 (P1): idempotent + de-duplicated load. The provider ignores this
+    // call when data is already present (or shares the in-flight load), so the
+    // eager `IndexedStack` tabs + retry can no longer produce duplicate reads.
+    final analyticsProvider = context.read<TeacherAnalyticsProvider>();
+    final placementsProvider = context.read<PlacementsProvider>();
+    final resumeReviewProvider = context.read<ResumeReviewProvider>();
+    await analyticsProvider.loadAnalytics(force: force);
+    await placementsProvider.refresh();
     // Only refresh resume history on the first attempt — retries skip
     // it since the provider already has the data cached.
     if (firstLoad || !_historyRefreshed) {
       _historyRefreshed = true;
-      await context.read<ResumeReviewProvider>().refreshHistory();
+      await resumeReviewProvider.refreshHistory();
     }
     _checkAndRetry();
   }
@@ -135,7 +141,9 @@ class _TeacherDashboardTabState extends State<_TeacherDashboardTab> {
       _loadRetryCount++;
       Future.delayed(_retryDelay, () {
         if (!mounted) return;
-        _loadAll();
+        // Force a real re-fetch — the first (empty) result is already cached
+        // in the provider, so a non-forced call would be a no-op.
+        _loadAll(force: true);
       });
     }
   }
@@ -150,9 +158,16 @@ class _TeacherDashboardTabState extends State<_TeacherDashboardTab> {
         Expanded(
           child: RefreshIndicator(
             onRefresh: () async {
-              await context.read<TeacherAnalyticsProvider>().loadAnalytics();
-              await context.read<PlacementsProvider>().refresh();
-              await context.read<ResumeReviewProvider>().refreshHistory();
+              // v9.2 (P1): pull-to-refresh forces a fresh analytics load.
+              // Providers are read before the first await so no BuildContext
+              // is used across an async gap.
+              final analyticsProvider = context
+                  .read<TeacherAnalyticsProvider>();
+              final placementsProvider = context.read<PlacementsProvider>();
+              final resumeReviewProvider = context.read<ResumeReviewProvider>();
+              await analyticsProvider.refresh();
+              await placementsProvider.refresh();
+              await resumeReviewProvider.refreshHistory();
             },
             child: SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),

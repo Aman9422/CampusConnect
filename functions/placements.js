@@ -80,7 +80,10 @@ const STATUS_RATE_LIMIT_MAX = 20; // Max 20 status updates per minute
  * is re-created instead of aborting the whole transaction).
  */
 exports.updateApplicationStatus = onCall(
-    {cors: false, maxInstances: 20},
+    // v9.2 audit (BUG-4): explicit timeout. Every other callable sets one;
+    // this one ran on the 60 s default (see logPlacementApplication for the
+    // 120 s rationale — that one does Storage work, this one does not).
+    {cors: false, maxInstances: 20, timeoutSeconds: 60},
     async (request) => {
       const uid = request.auth?.uid;
 
@@ -205,28 +208,46 @@ exports.updateApplicationStatus = onCall(
           if (mirrorDoc.exists) {
             transaction.update(mirrorRef, {status});
           } else {
+            // v9.2 audit (BUG-6): re-create the mirror as an EQUIVALENT copy
+            // of the canonical doc. Previously it was written as a PARTIAL
+            // doc — no resume / resumeStoragePath / appliedAt / resumeVersion
+            // / atsScoreAtApplication — so once a mirror had been lost and
+            // recovered, the applicants UI (which reads the mirror's `resume`
+            // field) showed a resume-less applicant.
             transaction.set(mirrorRef, {
               userId: studentId,
               studentId,
               placementId,
               status,
+              resume: canonicalData.resumeUrl || null,
+              resumeStoragePath: canonicalData.resumeStoragePath || null,
+              resumeVersion: canonicalData.resumeVersion || null,
+              atsScoreAtApplication: canonicalData.atsScoreAtApplication || null,
+              appliedAt: canonicalData.appliedAt ||
+                  admin.firestore.FieldValue.serverTimestamp(),
               createdAt: admin.firestore.FieldValue.serverTimestamp(),
             });
           }
 
-          return {previousStatus};
+          // v9.2 audit (BUG-6): hand the placement fields already read inside
+          // the transaction back to the caller so the notification does not
+          // re-read the placement — one redundant read per status change, and
+          // a read that could race a concurrent placement edit.
+          return {
+            previousStatus,
+            company: placementData.company || "placement",
+            role: placementData.role || "position",
+          };
         });
 
         // Student notification (statusChange shape — matches
         // NotificationsService.notifyStatusChange on the client).
         try {
-          const placementDoc = await db.collection("placements").doc(placementId).get();
-          const placementData = placementDoc.exists ? placementDoc.data() : null;
           await _notifyStatusChange({
             userId: studentId,
             placementId,
-            company: placementData?.company || "placement",
-            role: placementData?.role || "position",
+            company: result.company,
+            role: result.role,
             status,
           });
         } catch (notifyError) {
@@ -396,7 +417,8 @@ async function _notifyStatusChange({userId, placementId, company, role, status})
  * `request.auth.uid` — body-based userId is no longer trusted.
  */
 exports.logPlacementView = onCall(
-    {cors: false, maxInstances: 10},
+    // v9.2 audit (BUG-4): explicit timeout (was on the 60 s default).
+    {cors: false, maxInstances: 10, timeoutSeconds: 60},
     async (request) => {
       const uid = request.auth?.uid;
 
@@ -461,7 +483,11 @@ exports.logPlacementView = onCall(
  *   - BUG-E: `request.data` is null-guarded before destructuring.
  */
 exports.logPlacementApplication = onCall(
-    {cors: false, maxInstances: 100},
+    // v9.2 audit (BUG-4): explicit timeout. The apply path does a Storage
+    // `copy` + `getSignedUrl` (two GCS round-trips) before it opens the
+    // Firestore transaction, so the 60 s default could fail a healthy apply
+    // under load. 120 s matches the other Storage-touching callables.
+    {cors: false, maxInstances: 100, timeoutSeconds: 120},
     async (request) => {
       const uid = request.auth?.uid;
 
@@ -506,19 +532,38 @@ exports.logPlacementApplication = onCall(
         let isNewApplication = false;
 
         // v8.4.2 (S2a/H1): copy the resume to an immutable snapshot path.
+        //
+        // v9.2 audit (BUG-3): the copy is now gated on the snapshot NOT
+        // already existing. Previously it ran UNCONDITIONALLY, BEFORE the
+        // idempotency check below, so a second `logPlacementApplication` call
+        // for the same application re-copied the student's CURRENT
+        // `resumes/{uid}/latest.pdf` over `snapshots/app_{applicationId}.pdf`
+        // — silently replacing the resume that was submitted at apply time
+        // (defeating the immutable-snapshot contract) and paying a Storage
+        // copy + a getSignedUrl on every duplicate attempt. The snapshot bytes
+        // are now write-once.
+        //
+        // NOTE (INT-1): the snapshot lives at
+        // `resumes/{uid}/snapshots/{fileName}`, now covered by storage.rules.
+        // The signed URL below is what the UI opens today — see the INT-1 note
+        // on its long-lived expiry.
         let snapshotStoragePath = resumeStoragePath;
         let snapshotUrl = resumeUrl || "";
         if (resumeStoragePath) {
           try {
+            const bucket = admin.storage().bucket();
             const snapshotPath = `resumes/${uid}/snapshots/app_${applicationId}.pdf`;
-            await admin.storage().bucket()
-                .file(resumeStoragePath)
-                .copy(admin.storage().bucket().file(snapshotPath));
-            const [url] = await admin.storage().bucket()
-                .file(snapshotPath)
-                .getSignedUrl({action: "read", expires: "01-01-2035"});
+            const snapshotFile = bucket.file(snapshotPath);
+            const [snapshotExists] = await snapshotFile.exists();
+            if (!snapshotExists) {
+              await bucket.file(resumeStoragePath).copy(snapshotFile);
+              const [url] = await snapshotFile.getSignedUrl({
+                action: "read",
+                expires: "01-01-2035",
+              });
+              snapshotUrl = url;
+            }
             snapshotStoragePath = snapshotPath;
-            snapshotUrl = url;
           } catch (snapshotError) {
             // Non-fatal: keep the original path/URL if the copy fails.
             console.error("logPlacementApplication: resume snapshot copy failed:", snapshotError);
@@ -634,3 +679,15 @@ exports.logPlacementApplication = onCall(
       }
     }
 );
+
+// ===============================================
+// TESTABLE CONSTANTS (v9.2 audit TEST-1)
+// ===============================================
+
+// The SEC-3 application status state machine is the security-critical contract
+// that a scripted caller cannot jump (`applied → placed`). It is exported so
+// `test/placement_transitions.test.js` can assert it directly without a live
+// Firestore/Storage (the callable itself is driven end-to-end by emulator
+// tests, but the transition TABLE is pure data and must never silently drift).
+exports.APPLICATION_STATUSES = APPLICATION_STATUSES;
+exports.STATUS_TRANSITIONS = STATUS_TRANSITIONS;

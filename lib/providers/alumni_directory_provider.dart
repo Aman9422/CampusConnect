@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:campusconnect/models/student_profile.dart';
 import 'package:campusconnect/services/firestore/alumni_directory_service.dart';
 import 'package:flutter/material.dart';
@@ -34,6 +36,12 @@ class AlumniDirectoryProvider extends ChangeNotifier {
   int? _selectedGraduationYear;
   String? _selectedDepartment;
   List<String> _selectedSkills = [];
+
+  /// v9.2 (P2): retained real-time subscription — previously
+  /// `startListeningToAlumniUpdates` created an untracked [StreamSubscription]
+  /// that leaked across logout / re-login (duplicate listeners + the
+  /// `WatchStream ... NOT_FOUND` warning). Cancelled in [reset] / [dispose].
+  StreamSubscription<List<StudentProfile>>? _alumniUpdatesSubscription;
 
   // Getters
   List<StudentProfile>? get alumni => _filteredAlumni ?? _alumni;
@@ -361,27 +369,30 @@ class AlumniDirectoryProvider extends ChangeNotifier {
 
   /// Stream methods for real-time updates
   void startListeningToAlumniUpdates() {
-    _alumniDirectoryService.alumniDirectoryStream().listen(
-      (alumni) {
-        if (!_isDisposed) {
-          _alumni = alumni;
+    _alumniUpdatesSubscription?.cancel();
+    _alumniUpdatesSubscription = _alumniDirectoryService
+        .alumniDirectoryStream()
+        .listen(
+          (alumni) {
+            if (!_isDisposed) {
+              _alumni = alumni;
 
-          // Re-apply current filters
-          if (hasActiveFilters) {
-            _performSearch();
-          } else {
-            notifyListeners();
-          }
-        }
-      },
-      onError: (error) {
-        if (!_isDisposed) {
-          _error = 'Real-time update failed';
-          debugPrint('AlumniDirectoryProvider stream error: $error');
-          notifyListeners();
-        }
-      },
-    );
+              // Re-apply current filters
+              if (hasActiveFilters) {
+                _performSearch();
+              } else {
+                notifyListeners();
+              }
+            }
+          },
+          onError: (error) {
+            if (!_isDisposed) {
+              _error = 'Real-time update failed';
+              debugPrint('AlumniDirectoryProvider stream error: $error');
+              notifyListeners();
+            }
+          },
+        );
   }
 
   /// Utility methods
@@ -448,6 +459,11 @@ class AlumniDirectoryProvider extends ChangeNotifier {
   /// Reset provider (on logout)
   void reset() {
     _isDisposed = true;
+    // v9.2 (P2): cancel the real-time subscription so no listener survives
+    // logout (prevents duplicate listeners + the `WatchStream ... NOT_FOUND`
+    // warning on the next login).
+    _alumniUpdatesSubscription?.cancel();
+    _alumniUpdatesSubscription = null;
     _alumni = null;
     _filteredAlumni = null;
     _recentAlumni = null;
@@ -466,5 +482,13 @@ class AlumniDirectoryProvider extends ChangeNotifier {
     _selectedDepartment = null;
     _selectedSkills = [];
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    // v9.2 (P2): cancel any live subscription on provider disposal so no
+    // listener survives app teardown (reset() cancels it on logout).
+    _alumniUpdatesSubscription?.cancel();
+    super.dispose();
   }
 }

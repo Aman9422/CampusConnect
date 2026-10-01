@@ -75,20 +75,12 @@ class RecommendationService {
     }
   }
 
-  Future<void> createRecommendation(
-    String userId,
-    Recommendation recommendation,
-  ) async {
-    try {
-      await _recommendationsRef(userId)
-          .doc(recommendation.id)
-          .set(recommendation.toFirestore(), SetOptions(merge: true));
-    } catch (e) {
-      debugPrint('RecommendationService.createRecommendation error: $e');
-      rethrow;
-    }
-  }
-
+  // v9.2 audit (SEC-2): `createRecommendation` was REMOVED — the server
+  // `recommendations/engine.js` is the single writer of recommendation
+  // documents and `firestore.rules` now denies client create/delete
+  // (`allow create, delete: if false`). The method had no callers. Only
+  // interaction tracking (`markRecommendationInteracted`) remains, which the
+  // rules narrow to the `metadata` key so a client can never forge a score.
   Future<void> markRecommendationInteracted(
     String userId,
     String recommendationId,

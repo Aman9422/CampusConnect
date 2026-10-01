@@ -1,381 +1,710 @@
-# CampusConnect v9.1 — Final Comprehensive Audit Report
+# CampusConnect — V9.2 Whole-App Audit Report
 
-**Date:** 2026-08-20
-**Version audited:** `9.1.0+97` (pubspec.yaml) · **Feature:** Teacher Applicant Review / Placement Pipeline
-**Source report(s):** `project_info__30.md` + `project_info__31.md` (identical V9.1 Final Audit Report)
-**Reference:** `project_info__29.md` (V9.1 spec), `docs/todo.md` (V9.1 checklist)
-**Scope:** placement applications (canonical + mirror), applicant view, status pipeline, Cloud Functions (`placements.js`), `firestore.rules`, `firestore.indexes.json`, `storage.rules`, teacher dashboard integration, role-based access, routing.
+**Audit date:** 2026-09-27
+**Build audited:** `9.1.2+99` (`pubspec.yaml`) with the **V9.2 optimization workstream** applied (`docs/Task.md`, `docs/v9_2_audit_report.md`)
+**Scope:** every layer — Flutter `lib/`, Cloud Functions `functions/`, Firestore rules, Storage rules, indexes, quotas, schedulers, recommendation engine, AI providers, engagement, placement pipeline, resume review, portfolio, teacher analytics, alumni chat, role/routing, App Check, secrets, tests.
+**Method:** full source read of every file cited, plus authoritative Firebase docs for rule semantics. Every finding below names the file and symbol that proves it.
 
-> This report consolidates the V9.1 audit with the open (unmarked) items carried over from the v9.0 confirmation audit. All completed/marked tasks have been removed from the tracker; see [§8](#8-carried-over-open-items-v90-audit) for carried-over open items and [§10](#10-severity-matrix-combined) for the combined severity matrix.
->
-> **Resolution status (2026-08-20):** the V9.1 audit-fix sprint is in progress — **9 items are RESOLVED** (SEC-1, SEC-2, SEC-3, SEC-4, SEC-5, BUG-A, BUG-B, BUG-E, BUG-H — see [§12](#12-resolution-status-2026-08-20) and `docs/todo.md` Phases 1–3) and **5 items remain OPEN** (BUG-D, BUG-F, BUG-G, SEC-6, INT-1 — `docs/todo.md` Phase 4). SEC-7/IMP-6 and IMP-8/9/11/12/15/16 remain carried over (see §8).
+> **Verdict up front: NOT production-safe.** Two **Firestore rules** defects (SEC-1, SEC-2) are exploitable by any signed-in user and were *not* caught by the V9.2 pass (which modified no rules). SEC-1 allows **privilege self-elevation to teacher/alumni** via a single client write — granting access to every user's PII, all resume reviews, all analytics, and all applications. Two HIGH functional defects (BUG-1, BUG-2) silently break the AI retention policy and make engagement points/badges flicker. All are small, surgical fixes.
+
+---
+
+## Severity Matrix
+
+| ID | Sev | Area | Finding | Verified in |
+|----|-----|------|---------|-------------|
+| **SEC-1** | **CRITICAL** | Rules | `match /{subcollection=**}` (v2 ⇒ matches **zero** segments) grants `isOwner(userId)` write on the `users/{uid}` **document itself**, overriding `canWriteRole` → any user can set `role:'teacher'`/`'alumni'` | `firestore.rules` |
+| **SEC-2** | **HIGH** | Rules | Same catch-all overrides `allow write: if false` on `recommendations`, `recommendations_meta`, `engagement_summary`, `ai_insights`, `career_coach` **and** the MED-5 `activities` points restriction / `ai_interactions` `update:false` — the "single-writer", "CF-only" and "can't self-award points" contracts are not rule-enforced | `firestore.rules`, `engagement_service.dart`, `recommendation_service.dart` |
+| **BUG-1** | **HIGH** | Functions | `cleanupExpiredAIConversations` filters `ai_interactions` by `createdAt`; `askAI` writes `timestamp` → retention **never deletes anything** (unbounded growth + privacy retention failure) | `functions/ai/chatDelete.js`, `functions/ai/chat.js` |
+| **BUG-2** | **HIGH** | Client+Fn | Engagement has **two live writers** (`EngagementService.recomputeEngagement` on every login vs server `logUserActivity`/`recomputeEngagementSummary`) with divergent point/streak algorithms → score & badge flicker, double-counted client recompute, 200 reads + 1 write per login | `engagement_service.dart`, `engagement_provider.dart`, `functions/helpers/shared.js`, `functions/helpers/engagement.js` |
+| **BUG-3** | MED | Functions | `logPlacementApplication` copies the immutable resume snapshot **before** the idempotency check → a duplicate apply re-copies the *current* resume over `snapshots/app_{applicationId}.pdf` | `functions/placements.js` |
+| **BUG-4** | MED | Functions | Placement callables omit `timeoutSeconds`; snapshot copy + signed-URL generation run on the default 60 s ceiling and on every duplicate call | `functions/placements.js` |
+| **BUG-5** | MED | UI/Logic | Teacher `StudentAnalyticsView` renders "Resume Reviews / Avg Score" from the **teacher's own** `ResumeReviewProvider.history` — contradicting the real cross-student numbers shown lower on the same screen | `lib/views/teacher/student_analytics_view.dart` |
+| **BUG-6** | MED | Functions | `updateApplicationStatus` re-creates a missing mirror as a **partial** doc (no `resume`/`resumeStoragePath`/`appliedAt`) and re-reads the placement after the transaction (redundant read) | `functions/placements.js` |
+| **BUG-11** | MED | Recommendation | "Career match: X" role cards are still emitted for roles the student never chose, even when the student has **declared** a career interest (e.g. "Web Developer · 26%" to an App-Development student). **Fixed in code** this pass (engine now suppresses all role cards once a role is declared). | `functions/recommendations/engine.js` |
+| **PERF-1** | MED | Cost | Teacher analytics still does **N+1 reads of `engagement_summary`** per student + an **unbounded** roster scan + an up-to-800-doc recommendations read per load | `lib/services/firestore/teacher_analytics_service.dart` |
+| **BUG-7** | LOW | Functions | `generateResumeAnalysis` destructures `request.data` unguarded (every sibling callable now uses `request.data || {}`) | `functions/ai/deepAnalysis.js` |
+| **BUG-8** | LOW | Utility | `LoadDedupe.begin` discards the future returned by `whenComplete`, an unhandled-error surface | `lib/utilities/load_dedupe.dart` |
+| **BUG-9** | LOW | State | `AuthGuard._profileSynced` is one-shot per session → `PlacementsProvider` eligibility is stale after an in-session profile edit | `lib/main.dart` |
+| **BUG-10** | LOW | Dead code | `EngagementProvider.trackActivity` has **no callers**; if used with any event other than `resumeReviewed`/5 the `activities` rule rejects it silently | `engagement_provider.dart`, `firestore.rules` |
+| **INT-1** | LOW | Storage | Placement **snapshot** objects (`resumes/{uid}/snapshots/app_*.pdf`) are not matched by `resumes/{userId}/{fileName}` → reachable only via the long-lived signed URL | `storage.rules`, `functions/placements.js` |
+| **TEST-1** | LOW | Tests | `functions` test script runs only `quota.test.js` + `schedulers.test.js`; placements/chat/resume/careerCoach/triggers/deepAnalysis have no tests (Task §20 asks for them) | `functions/package.json` |
+
+**Resolved since the V9.1 report (do not re-open):** SEC-1…SEC-5 (v9.1 set), BUG-A, BUG-B, BUG-E, BUG-H — and **BUG-D is now fixed**: `teacher_dashboard_sections.dart` derives the placement rate from `analytics.pipelinePlaced` (lines 234/438/696). `placementApplicantsRoute` is now role-gated (`_guardPlacementApplicants` in `main.dart`), closing SEC-6.
 
 ---
 
 ## Table of Contents
 
 1. [Executive Summary](#1-executive-summary)
-2. [Bugs & Logical Errors](#2-bugs--logical-errors)
-3. [Security Findings](#3-security-findings)
+2. [Critical & High Findings](#2-critical--high-findings)
+3. [Bugs & Logical Errors](#3-bugs--logical-errors)
 4. [Firebase Rules, Functions & Indexes](#4-firebase-rules-functions--indexes)
-5. [Routing & Integration Audit](#5-routing--integration-audit)
+5. [Routing & Integration](#5-routing--integration)
 6. [Edge Cases & Boundary Problems](#6-edge-cases--boundary-problems)
-7. [Performance / Scale Concerns](#7-performance--scale-concerns)
-8. [Carried-Over Open Items (v9.0 audit)](#8-carried-over-open-items-v90-audit)
+7. [Performance, Scale & Cost](#7-performance-scale--cost)
+8. [Security: App Check, Secrets, Input Validation](#8-security-app-check-secrets-input-validation)
 9. [Improvements (priority-ordered)](#9-improvements-priority-ordered)
-10. [Severity Matrix (combined)](#10-severity-matrix-combined)
-11. [Verdict](#11-verdict)
+10. [Carried-Over Open Items](#10-carried-over-open-items)
+11. [Verdict & Version History](#11-verdict--version-history)
 
 ---
 
 ## 1. Executive Summary
 
-V9.1 is an architecturally sound feature that mostly integrates well: the dual-mirror write is transactional, the collectionGroup dedupe is correct, the `updateApplicationStatus` callable is the right single-writer pattern, and the pipeline widget now shows real status-bucketed counts.
+The V9.2 workstream itself is sound and its housekeeping landed well: lazy dashboard tabs, `LoadDedupe`, the listener-lifecycle fixes, the teacher-analytics N+1 removal, the scheduler consolidation (7→5 jobs) and the unified `user_ai_quotas` store are all present and internally consistent, and `flutter analyze` is clean.
 
-**However, the version has 3 HIGH-severity security holes and 2 HIGH-severity robustness bugs** that must be fixed before this can be considered production-safe:
+But V9.2 **touched no rules**, and the rules contain a latent structural defect that predates it and was never exercised by a test: a recursive catch-all that (under `rules_version = '2'`) also matches the **parent** document. The consequences are the two most important findings in this report:
 
-| # | Severity | Area | Summary |
-|---|----------|------|---------|
-| SEC-1 | **HIGH** | Rules | Any teacher/alumni can create/update/**delete any placement doc** with arbitrary fields (no `createdBy` check, no schema validation) → global DoS + data destruction |
-| SEC-2 | **HIGH** | Rules | Students can **forge application docs directly** (`applications/{uid}_{pid}` and mirror) with arbitrary `status`/`placementId`/`resumeUrl` — the v9.1 "update:false" threat model forgot **create** is open |
-| SEC-3 | **HIGH** | Functions | `updateApplicationStatus` has **no placement-ownership check** (any teacher/alumni can mutate any placement's applicants) and **no transition state machine** (applied → placed in one jump; placed → rejected allowed) |
-| SEC-4 | **HIGH** | Functions | `logPlacementApplication` never verifies the placement **exists, is active, or has a valid deadline** — closed/fake placements can be applied to, polluting teacher analytics |
-| BUG-A | **HIGH** | Functions | `updateApplicationStatus` blindly `transaction.update`s the mirror doc — **throws if the mirror is missing** (legacy/partial writes) and rolls back the canonical update |
-| BUG-B | **MEDIUM** | Service | `Application.fromFirestore` hard-casts `data['userId'] as String` — a mirror-only legacy doc (**no userId**) crashes the whole applicants query |
-| BUG-D | **MEDIUM** | UI | `QuickStatistics` "Placement Rate" = activeDrives/students (can exceed 100%, is semantically wrong) while the real `pipelinePlaced` count sits unused — **stale v8.2 logic survived V9.1** |
-| INT-1 | **MEDIUM** | Integration | Alumni are granted placement-manager powers (rules + callable + UI logic) but **the Alumni dashboard has no placements entry point** — feature half-wired for half its authors |
+- **SEC-1 — privilege self-elevation.** `canWriteRole` (the "F1 fix" from v8.4.6 that was supposed to make `role` immutable) is **completely bypassed**, because the later catch-all grants the owner an unconditional `write`. A one-line client write (`users/{uid}.update({role:'teacher'})`) turns any student into a teacher, unlocking `isTeacher()`-gated reads of every user document, all resume reviews, all analytics, all engagement summaries and all applications. This is the exact hole the rules claim to have closed (see the `F1 (security)` comment in `firestore.rules`).
+- **SEC-2 — contract bypass + a false "single writer" claim.** The same catch-all defeats `allow write: if false` on five subcollections. Worse, the client *already* relies on it: `EngagementService.recomputeEngagement` writes `engagement_summary/summary` and `RecommendationService.createRecommendation`/`markRecommendationInteracted` write `recommendations/*`. So the documented "Cloud Functions are the only writer" contract is not enforced by rules at all — and **BUG-2** shows the engagement dual-writer is not merely theoretical: it produces wrong numbers.
+
+Two HIGH functional defects sit alongside: the AI retention job never deletes a single document (**BUG-1**), and engagement points are double-counted in one writer and streaked in two different time zones (**BUG-2**).
+
+Items 1–4 in [§9](#9-improvements-priority-ordered) are small, local, and should ship before anything else.
 
 ---
 
-## 2. Bugs & Logical Errors
+## 2. Critical & High Findings
 
-### BUG-A [HIGH] — `updateApplicationStatus` crashes when the mirror doc is missing
-**File:** `functions/placements.js` (transaction inside `updateApplicationStatus`)
+### SEC-1 [CRITICAL] — Rules catch-all bypasses role immutability → user self-elevates to teacher/alumni
 
-```js
-const canonicalDoc = await transaction.get(canonicalRef);
-if (!canonicalDoc.exists) { throw ... "Application not found."; }
-...
-transaction.update(canonicalRef, {status});
-transaction.update(mirrorRef, {status});   // ← NOT guarded
+**File:** `firestore.rules`
+
+```rules
+match /users/{userId} {
+  allow read, write: if isOwner(userId) && canWriteRole(userId);   // (A) tries to freeze `role`
+  ...
+  // All other subcollections under users/{uid}
+  match /{subcollection=**} {                                       // (B) ← catch-all
+    allow read, write: if isOwner(userId);
+  }
+}
 ```
 
-The canonical doc is existence-checked; the mirror is **not**. `transaction.update` on a non-existent doc throws (`no document to update`), aborting the whole transaction — so the canonical status write also fails with an `internal` error. Scenarios where the mirror is missing:
+The rules file begins with `rules_version = '2';`. Per the Firebase documentation (*Structuring Cloud Firestore Security Rules → “Version 2”*):
 
-- Canonical-only applications created before the mirror (V5) was introduced, or by a direct SDK write (see SEC-2).
-- A mirror manually/accidentally deleted.
+> “In version 2 … recursive wildcards match **zero or more** path items. `match /cities/{city}/{document=**}` matches documents in any subcollections **as well as documents in the `cities` collection**.”
 
-**Fix:** inside the transaction, `transaction.get(mirrorRef)`; if missing, `transaction.set(mirrorRef, {status, ...})` (or skip the mirror write — the canonical is the source of truth).
+Nested under `match /users/{userId}`, rule (B) therefore applies to the path `/users/{userId}/{subcollection=**}` — and with **zero** captured segments that is `/users/{userId}` **itself**, i.e. the user document.
 
-### BUG-B [MEDIUM] — Hard cast on `userId` crashes `getApplicationsForPlacement` for legacy mirror docs
-**Files:** `lib/services/firestore/placements_service.dart` + `lib/models/application.dart`
+Firestore rules are **additive**: “if multiple `allow` expressions match a request, the access is allowed if **any** of the conditions is `true`” (same doc, “Overlapping match statements”). There is no deny precedence. Therefore, for a write to `users/{uid}`:
 
-The dedupe loop tolerantly reads `data['userId'] as String? ?? data['studentId'] as String?`, but then calls `Application.fromFirestore(doc)` whose constructor does **`data['userId'] as String`** — a null-unsafe cast. Any mirror doc that predates the `userId` field (or comes from a forged create that only sets `studentId`) throws a `TypeError` that propagates out of `getApplicationsForPlacement` → the **entire applicants screen fails**, not just one applicant.
+- (A) grants only when `canWriteRole(userId)` is true, **and**
+- (B) grants whenever `isOwner(userId)` is true — **which it always is for your own doc.**
 
-**Fix:** `userId: data['userId'] as String? ?? data['studentId'] as String? ?? ''`.
+Because (B) grants, the write is allowed **regardless of `canWriteRole`**. The `role`-immutability guard never runs.
 
-### BUG-D [MEDIUM] — "Placement Rate" and "Active/Student" still use fake metrics
-**File:** `lib/views/dashboards/widgets/teacher_dashboard_sections.dart` (`QuickStatistics`, `DepartmentOverview`)
+**Exploit (any authenticated user, incl. web DevTools against the deployed project):**
+
+```js
+await db.collection('users').doc(myUid).update({ role: 'teacher' }); // allowed by (B)
+```
+
+Immediately `userRole()` → `'teacher'`, so `isTeacher()` is true and the actor can read:
+
+- **every** `users/*` doc via `allow read: if isTeacher();` (phone, email, academic records — the v8.4.2 M2 privacy caveat becomes a full-roster PII dump),
+- every `resumeReviews/*` (ATS scores, strengths, weaknesses, missing keywords) via `/{path=**}/resumeReviews/{reviewId}`,
+- every `recommendations/*` and `engagement_summary/*` via their teacher collectionGroup rules,
+- every `applications/*` via `/{path=**}/applications/{appId} { allow read: if isTeacher() … }`.
+
+Setting `role: 'alumni'` unlocks `isAlumni()` reads of all placement applications and student portfolios. `canManagePlacements()` then permits creating placements. This is a full cross-role data-exfiltration primitive from an ordinary account.
+
+**Fix (one of):**
+1. Delete the catch-all and enumerate the genuinely owner-writable subcollections (`notifications`, `resumeReviews`, and the two engagement/recommendation paths that must remain owner-writable — see SEC-2), or
+2. Keep the catch-all but restrict it to creation of owner data only, e.g. `match /{subcollection=**} { allow read: if isOwner(userId); allow create: if isOwner(userId); }` — never `write`, and never covering the parent path, or
+3. Re-add the role guard explicitly inside the catch-all and stop relying on `canWriteRole` from the parent rule.
+
+Whichever is chosen, add a regression test (firestore rules unit test or a documented manual check) that a client write of `role` is **denied**.
+
+### SEC-2 [HIGH] — Same catch-all defeats `write:if false` on five subcollections; the client already writes two of them
+
+**Files:** `firestore.rules`; `lib/services/firestore/engagement_service.dart`; `lib/services/firestore/recommendation_service.dart`
+
+The catch-all (SEC-1) also matches any **deeper** path, so the following hardening is inert for the document's owner:
+
+| Subcollection | Declared | Actually effective (owner) |
+|---|---|---|
+| `recommendations/{id}` | `allow write: if false` | **writable** |
+| `recommendations_meta/{id}` | `allow write: if false` | **writable** |
+| `engagement_summary/{id}` | `allow write: if false` | **writable** |
+| `ai_insights/{id}` | `allow write: if false` | **writable** |
+| `career_coach/{id}` | `allow write: if false` | **writable** |
+| `activities/{id}` | `allow create: if … eventType=='resumeReviewed' && points==5` (MED-5) | **any `eventType`/`points` writable** |
+| `ai_interactions/{id}` | `allow update: if false` | **updatable** (append-only intent void) |
+
+This is not hypothetical. Two live client code paths depend on the hole:
+
+- `EngagementService.recomputeEngagement` → `_summaryRef(userId).set(summary, merge:true)` writes `users/{uid}/engagement_summary/summary` **from the client** (called on every login by `EngagementProvider.initWithUser`).
+- `RecommendationService.createRecommendation` and `markRecommendationInteracted` write `users/{uid}/recommendations/*` from the client.
+
+So the in-code claims — e.g. the `career_coach` rule comment *“Prevents clients from bypassing the AI + quota system by writing directly to the summary doc”* and the recommendation `“single-writer contract”* — are **false as written**. A user can:
+
+- write `career_coach/summary` directly, bypassing the AI call and the 3/month quota entirely (and read the crafted doc back as if the coach produced it);
+- forge `recommendations/*` (arbitrary `score`, `opportunityId`, `reason`) so the dashboard shows fabricated “Recommended for You” items;
+- write `engagement_summary/summary` with `engagementScore:100` and pre-earned badges (see BUG-2 for the organic version of the same corruption);
+- write `ai_insights/*` and read them back as server-generated.
+
+There is no cross-user impact (each write is scoped to the writer), so this is data-integrity / contract-bypass rather than exfiltration — but it silently invalidates the quota and single-writer designs that several docs assert are in force.
+
+**Fix:** Decide, per subcollection, who the writer is, and make the rules match reality:
+- If engagement is genuinely client-computed, the rule must say so explicitly (`allow create, update: if isOwner(userId) && validEngagementShape()`) **and** the server must stop being a second writer (BUG-2).
+- If recommendations/career_coach/ai_insights remain CF-only, the catch-all must not grant them (see SEC-1 fix).
+
+Because a `write:false` rule and the catch-all can never coexist safely, fix SEC-1 first; SEC-2 then falls out automatically once the catch-all is narrowed.
+---
+
+## 3. Bugs & Logical Errors
+
+### BUG-1 [HIGH] — AI-chat retention never deletes `ai_interactions` (field-name mismatch)
+
+**Files:** `functions/ai/chatDelete.js` (`cleanupExpiredAIConversations`), `functions/ai/chat.js` (`askAI`)
+
+`askAI` writes both chat turns to `users/{uid}/ai_interactions` with the field **`timestamp`**:
+
+```js
+// askAI (user turn) and (assistant turn)
+.add({ role, message, timestamp: admin.firestore.FieldValue.serverTimestamp(), ... })
+```
+
+`cleanupExpiredAIConversations` (daily) queries the same collection by **`createdAt`**:
+
+```js
+.collectionGroup("ai_interactions")
+.where("createdAt", "<", cutoff)   // ← no document has `createdAt`
+.limit(5000).get();
+```
+
+No `ai_interactions` document carries `createdAt`, so the query always returns empty and **the retention window (default 90 days) is never enforced** — chat history grows without bound, and the documented “delete ONLY expired ai_interactions” behaviour does not happen. The v8.8.3 HIGH-4 note (“both exactly match the fields askAI writes”) is therefore **incorrect**: the legacy `ai_conversations` branch does use `timestamp` (matching), but that collection is no longer written — IMP-11 removed the `ai_conversations` writes — so **neither** branch deletes anything in practice.
+
+**Fix:** change the `ai_interactions` filter to `where("timestamp", "<", cutoff)` (and either drop the dead `ai_conversations` branch or keep it purely for the transition window). Add a Functions test that seeds an old `timestamp` doc and asserts deletion.
+
+### BUG-2 [HIGH] — Engagement has two writers with divergent algorithms (flicker + double-count + per-login cost)
+
+**Files:** `lib/services/firestore/engagement_service.dart` (`recomputeEngagement`), `lib/providers/engagement_provider.dart` (`initWithUser`), `functions/helpers/shared.js` (`logUserActivity`), `functions/helpers/engagement.js` (`recomputeEngagementSummary`), `functions/triggers/index.js`
+
+`users/{uid}/engagement_summary/summary` is written by **both** the client and the server:
+
+- **Server** — `logUserActivity` maintains the materialized aggregate (`activityPoints`/`dailyStreak`/`streakLastActiveKey`/`lastActiveAt`) atomically, and `recomputeEngagementSummary` (daily scheduler + the `onProfileUpdatedRefreshAI` / `onResumeReviewCreatedRefreshMatches` triggers) rewrites the score/badges from those aggregates.
+- **Client** — `EngagementService.recomputeEngagement` runs on **every login** (`EngagementProvider.initWithUser` → `await _service.recomputeEngagement(...)`) and, in a `try/catch` that swallows failures, `.set()`s a freshly computed summary (via the SEC-2 rule hole).
+
+The two computations **disagree**:
+
+1. **Points double-count (client side).** A resume review writes **two** `activities` docs (client `logActivity` at 5 pts + the server trigger’s `logUserActivity` at 5 pts — see the note in §4). The server keeps a running aggregate and only increments once per `logUserActivity`, so the *server* summary stays consistent. But the client recomputes `activityPoints` by **summing the newest 200 activity docs**, which now includes both docs → the client-computed score is ~2× the server’s for that event. The displayed score therefore changes depending on **who wrote last**, and the `active_student`/`networking_pro` badges (thresholds 50/100) can flip earned↔locked between a login and the next daily recompute.
+2. **Streak uses different clocks.** The client builds “consecutive days” from **local** calendar days (`DateTime.now()` bucketing) and requires the streak to include today, otherwise it breaks to 0; the server uses **UTC** day keys with a materialized pointer (`dayKey`/`previousDayKey`). In IST (UTC+5:30) the two disagree for ~5.5 h of every day, so `dailyStreak` can differ by one and the “Consistency Champion” progress wobbles.
+3. The client recompute also **overwrites the server’s materialized aggregate** with a scan-derived value (`activityPoints`/`dailyStreak` are written, `streakLastActiveKey` is not), defeating the IMP-9 optimisation that was supposed to stop scanning activity docs — the next `logUserActivity` then increments from the client-clobbered base.
+
+**Cost:** on every login the client reads up to 200 activity docs and writes the summary — a pure waste given the server already owns the value.
+
+**Fix:** pick **one** writer. Recommended: the server is the single writer (it already maintains the aggregate and badges atomically); delete/retire `EngagementService.recomputeEngagement` from the login path and have the client only *read* `engagement_summary` (the stream already exists: `engagementSummaryStream`). Also remove the redundant client `resumeReviewed` activity write so the points are logged once. If the client must stay a writer, then (a) the rules must explicitly permit it (SEC-2) and (b) both engines must share one algorithm (same clock, same aggregation source).
+
+### BUG-3 [MEDIUM] — Duplicate apply overwrites the “immutable” resume snapshot
+
+**File:** `functions/placements.js` (`logPlacementApplication`)
+
+The snapshot copy runs **before** the idempotency transaction:
+
+```js
+// copies latest.pdf → snapshots/app_{applicationId}.pdf  ← runs unconditionally
+if (resumeStoragePath) { await bucket.file(resumeStoragePath).copy(bucket.file(snapshotPath)); ... }
+
+await admin.firestore().runTransaction(async (tx) => {
+  const existingApp = await tx.get(existingAppRef);
+  if (existingApp.exists) { isNewApplication = false; return; }   // ← idempotent no-op, no writes
+  ...
+});
+```
+
+`logPlacementApplication` is idempotent by design (“safe to call multiple times”), but the snapshot copy is **not** gated by the idempotency check. A second call for the same `applicationId` re-copies the **current** `resumes/{uid}/latest.pdf` over the existing snapshot. If the student replaced their resume between the two calls, the snapshot the teacher later reviews is the **new** resume, not the one submitted at apply time — silently defeating the v8.4.2 S2a/H1 “immutable snapshot so bytes survive re-uploads” contract. It also costs a Storage copy + a `getSignedUrl` on every duplicate attempt.
+
+**Fix:** move the snapshot copy **inside** the transaction path, immediately before `isNewApplication = true`, or short-circuit the copy with a pre-check `bucket.file(snapshotPath).exists()` and reuse the existing snapshot/URL when it already exists.
+### BUG-4 [MEDIUM] — Placement callables have no `timeoutSeconds`; snapshot work runs on the default 60 s ceiling
+
+**File:** `functions/placements.js`
+
+`logPlacementApplication` is declared `onCall({cors: false, maxInstances: 100})` and `updateApplicationStatus` `onCall({cors: false, maxInstances: 20})` — neither sets `timeoutSeconds`. The default callable timeout is 60 s, and `logPlacementApplication` performs a Storage `copy` **plus** a `getSignedUrl` (both network round-trips to GCS) before it even opens the Firestore transaction. Under load or a slow bucket, the copy + signed-URL path can exceed the default budget, failing the apply with an `internal` error even though nothing is wrong with the data. Every sibling callable in the codebase (`askAI`, `reviewResume`, `deleteAIHistory`, `generateResumeAnalysis`, `refreshRecommendations`) sets an explicit timeout; these two do not.
+
+**Fix:** add an explicit `timeoutSeconds` (e.g. 60 for `updateApplicationStatus`, 120 for `logPlacementApplication` given the Storage work) and cap `maxInstances` sensibly. (Folded into BUG-3's fix, which also removes the duplicate-call copy.)
+
+### BUG-5 [MEDIUM] — Teacher “Resume Review Insights” are the teacher’s own reviews, not the students’
+
+**File:** `lib/views/teacher/student_analytics_view.dart` (`_buildOverviewMetrics`, `_buildResumeInsights`)
 
 ```dart
-final placedCount = placements.placements.where((p) => p.isActive).length;
-final placementRate = totalStudents > 0 ? ((placedCount / totalStudents) * 100).round() : 0;
+final reviews = resumeProvider.history;                  // ResumeReviewProvider.history
+final totalReviews = reviews.length;
+final avgReviewScore = reviews.isNotEmpty ? ... : 0.0;   // "Avg Review Score"
 ```
 
-`placementRate` is **active-drives ÷ students** — it can exceed 100%, and it is not a placement rate at all. V9.1 wired *real* placed counts into the `PlacementPipeline` widget (`analytics.pipelinePlaced`) but **left `QuickStatistics` and `DepartmentOverview` on the old fake metric**. This is the clearest example of V9.1 not fully propagating through the whole app.
+`ResumeReviewProvider.history` is loaded by `ResumeHistoryService.fetchHistory(userId)` from the **signed-in user's own** `users/{uid}/resumeReviews`. On the **teacher** analytics screen this is the teacher's personal review history (almost always empty), yet it is rendered as “Resume Reviews”, “Avg Review Score” (Overview Metrics) and “Resume Review Insights → Total Reviews / Avg Score”.
 
-**Fix:** use `analytics.pipelinePlaced` for the rate numerator (and `DepartmentOverview` similarly), falling back gracefully.
+The same screen, lower down, renders the **correct** cross-student values from `TeacherAnalyticsProvider` (`_buildResumeAggregates` → `provider.totalReviews` / `provider.averageScore`, sourced from the `resumeReviews` collectionGroup scan). So the screen shows two contradictory sets of numbers with the same labels — e.g. “Resume Reviews: 0 / Avg: N/A” directly above “Total Reviews: 312 / Avg: 74”. This is the teacher equivalent of the BUG-D (v9.1) “wrong source for a dashboard metric” class, and it survives V9.2.
 
-### BUG-E [LOW] — `logPlacementApplication` destructures `request.data` before null-check
-**File:** `functions/placements.js`
+**Fix:** drive both sections from `TeacherAnalyticsProvider` (`totalReviews`, `averageScore`), or remove the duplicate “Resume Review Insights” section entirely (it already exists as `Resume Review Analytics`).
+
+### BUG-6 [MEDIUM] — `updateApplicationStatus` re-creates a partial mirror + does a redundant placement read
+
+**File:** `functions/placements.js` (`updateApplicationStatus`)
+
+When the mirror is missing, the transaction re-creates it as a **partial** document:
 
 ```js
-const {placementId, resumeUrl, company} = request.data;   // throws on null
+transaction.set(mirrorRef, {
+  userId: studentId, studentId, placementId, status,
+  createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  // ← no resume / resumeStoragePath / appliedAt / resumeVersion / atsScoreAtApplication
+});
 ```
 
-If a client calls with no payload, a raw `TypeError` is wrapped as `internal` rather than a friendly `invalid-argument`. Robustness nit — the Flutter provider always sends an object.
-
-### BUG-F [LOW] — Stale applicant counts after status change
-`PlacementApplicantsView` does not call `loadApplicantCounts()` after a successful `updateApplicationStatus`. The **count** itself is distinct-students (unchanged by status), so no visible number is wrong today — but the badge won't reflect a new application that arrives while the user sits on the applicants screen.
-
-### BUG-G [LOW] — Text-paste applications produce a broken "Resume" button for teachers
-When a student has no uploaded resume, the fallback path stores the **pasted text** in `resumeUrl`. `_openResume` then calls `launchUrl(Uri.parse(text))`, which throws `FormatException` → caught → "Could not open resume". Not a crash, but a dead-feeling button. Consider storing `appliedWithTextResume: true` and showing the text, or a "No PDF resume" label.
-
-### BUG-H [LOW] — `Application` model doc comment is stale
-`lib/models/application.dart` still documents `status: applied | shortlisted | rejected` — missing `interviewed | placed` added by V9.1.
-
----
-
-## 3. Security Findings
-
-### SEC-1 [HIGH] — Unrestricted placement write access (DoS + malformed-data crash vector)
-**File:** `firestore.rules`
-
-```
-match /placements/{placementId} {
-  allow read: if isAuthenticated();
-  allow create, update, delete: if canManagePlacements();   // no ownership, no schema
-}
-```
-
-`canManagePlacements()` = `role == teacher || role == alumni`. There is **no `createdBy == request.auth.uid` check** on `update`/`delete`, and **no validation of the written document**. Consequences:
-
-- Any teacher/alumni can **delete every placement** (`collection('placements').doc(id).delete()` — no rule blocks it).
-- Any teacher/alumni can **write a malformed placement** (e.g. `deadline` as a String, `postedAt` missing). `Placement.fromFirestore` does `(data['deadline'] as Timestamp).toDate()` — a hard cast — which **throws for every user rendering the placements list**. This is a one-line remote crash for the whole placements feature (client-side DoS).
-
-**Fix:** `allow create: if canManagePlacements() && request.resource.data.createdBy == request.auth.uid;` `allow update: if canManagePlacements() && resource.data.createdBy == request.auth.uid;` `allow delete: if canManagePlacements() && resource.data.createdBy == request.auth.uid;` — plus a schema validation helper (deadline is Timestamp, required string fields non-empty, etc.). Also make `Placement.fromFirestore` null/tolerant.
-
-### SEC-2 [HIGH] — Students can forge application documents (the v9.1 threat-model gap)
-**File:** `firestore.rules`
-
-```
-match /applications/{applicationId} {
-  allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-  ...
-}
-match /placements/{placementId}/applications/{appUserId} {
-  allow create: if isOwner(appUserId);
-  ...
-}
-```
-
-The V9.1 design comment says *"application docs are locked client-side (`update: false` on both paths)"* — but **`create` is NOT locked on either path**, and `create` payloads are unvalidated. A student can directly write:
-
-- `applications/{uid}_{placementId}` with **`status: 'placed'`**, arbitrary `placementId`, arbitrary `appliedAt`, arbitrary `resumeUrl` (e.g. a phishing URL).
-- The mirror `placements/{placementId}/applications/{uid}` with the same.
-
-Effects:
-
-1. A student can **self-promote to 'placed' / 'shortlisted'** — appears in the teacher applicants list, pipeline counts, and any future placement reports.
-2. A student can **forge applications to placements they never applied to** (pollutes `getApplicationsForPlacement`, `getApplicantCounts`, `getApplicationPipelineCounts`).
-3. **Exploit chain:** a forged `resumeUrl` = `http://evil.example` → teacher taps "Resume" → `launchUrl` opens the attacker's site. Social-engineering/phishing vector.
-
-**Fix:** set `allow create: if false;` on **both** application paths — `logPlacementApplication` uses the Admin SDK and bypasses rules, so clients never need direct create. This closes the whole hole and matches the stated single-writer contract.
-
-### SEC-3 [HIGH] — `updateApplicationStatus`: no authorship check + no transition validation
-**File:** `functions/placements.js`
+So a recovered mirror is missing `resume`/`appliedAt` that the canonical doc (and the applicants UI) rely on — the mirror exists but is not equivalent to a canonical write. Separately, after the transaction the function re-reads the placement to build the notification:
 
 ```js
-const actorRole = await _getUserRole(uid);
-if (actorRole !== "teacher" && actorRole !== "alumni") { throw ... }
+const placementDoc = await db.collection("placements").doc(placementId).get();   // already read inside the txn
 ```
 
-- **No check that the actor created the placement** (`placements/{placementId}.createdBy == uid`) or belongs to the same college/department. Any teacher in the system can shortlist/place/reject applicants on any placement.
-- **No transition state machine.** `APPLICATION_STATUSES.includes(status)` accepts any of the four values, so a direct call can move `applied → placed` in one step, or `placed → rejected`, *or* `rejected → shortlisted`. The UI's `_StatusActions._availableActions` state machine is **client-side only** — the server is callable directly.
-- No per-actor rate limit on the callable.
+That is one redundant document read per status update (and a read that could race a concurrent edit).
 
-**Fix:** (a) verify the actor authored the placement (or is otherwise authorized); (b) enforce a transition map server-side — e.g. `applied→[shortlisted,rejected]`, `shortlisted→[interviewed,rejected]`, `interviewed→[placed,rejected]`, terminal states `[]`; (c) consider a per-min rate limit like the Career Coach pattern (`checkCareerCoachRateLimit`).
+**Fix:** (a) copy the resume fields from the canonical doc (`canonicalData`) into the re-created mirror so the two stay equivalent; (b) capture `placementData` (already fetched in the transaction) and pass it to `_notifyStatusChange` instead of re-reading.
 
-### SEC-4 [HIGH] — `logPlacementApplication` accepts applications to non-existent/closed placements
-**File:** `functions/placements.js`
+### BUG-7 [LOW] — `generateResumeAnalysis` destructures `request.data` unguarded
 
-The function validates `placementId` is a non-empty string but **never reads the placement document** to check `exists`, `isActive == true`, or `deadline > now`. Combined with the open `create` rules, students can (via the callable) create application docs for arbitrary or expired placement IDs. Teachers' collectionGroup queries and pipeline counts then include garbage.
+**File:** `functions/ai/deepAnalysis.js`
 
-**Fix:** inside (or before) the transaction, `transaction.get(placementRef)`; reject when missing/inactive/past-deadline with `failed-precondition`/`invalid-argument`.
+```js
+const { reviewId, resumeText, targetRole } = request.data;   // throws if request.data is undefined
+```
 
-### SEC-5 [MEDIUM] — `isOwner(appId)` on the collectionGroup rule never matches canonical docs
-**File:** `firestore.rules` (`match /{path=**}/applications/{appId} { allow read: if isTeacher() || isAlumni() || isOwner(appId); }`)
+Every other callable in the tree now null-guards (`const { … } = request.data || {}` — see `askAI`, `logPlacementApplication`, `updateApplicationStatus`, `logPlacementView`). A callable invoked with no body here throws a raw `TypeError`, surfaced to the client as `internal` instead of a friendly `invalid-argument`.
 
-Canonical doc IDs are `{uid}_{placementId}`, so `appId != request.auth.uid` and `isOwner(appId)` is always false for them. The intended "owner can read own canonical doc via collectionGroup" path silently never grants. It does not break anything today (the global `applications/{applicationId}` rule covers owner reads of canonical docs; teachers/alumni read via role), but it is a latent correctness trap — e.g. a future `collectionGroup` query a student runs on their own docs would fail. Use `resource.data.userId == request.auth.uid` instead.
+**Fix:** `= request.data || {}`.
 
-### SEC-6 [LOW] — `placementApplicantsRoute` is not role-gated
-**File:** `lib/main.dart` — `placementApplicantsRoute: (context) => const PlacementApplicantsView()`.
+### BUG-8 [LOW] — `LoadDedupe.begin` leaves an error future unhandled
 
-Any signed-in user can deep-link `/placements/applicants`. Data itself is protected (the collectionGroup rule denies students), so the student sees a generic "Failed to load applicants" error instead of a proper denied state. **UX security smell** — follow the existing `_guardStudentPortfolio` / `_guardAlumniGroupChat` pattern.
+**File:** `lib/utilities/load_dedupe.dart`
 
-### SEC-7 [LOW — pre-existing] — No App Check (still open)
-`docs/todo.md` SEC-3 / IMP-6 remains open. Given SEC-1/SEC-2 above, App Check (Play Integrity / DeviceCheck / reCAPTCHA) would materially reduce the "modified client writes directly to Firestore" attack class.
+```dart
+void begin(Future<void> future) {
+  _active = future;
+  future.whenComplete(() { if (identical(_active, future)) _active = null; });
+}
+```
+
+`whenComplete` returns a **new** future carrying the same error; that future is discarded. If the guarded load ever completes with an error, this becomes an unhandled async error (a zone-level crash in tests / red screen in debug). In practice `_runLoad` catches everything, so it is latent — but `LoadDedupe` is documented as a general-purpose reusable gate, so it should not have an unhandled-error path.
+
+**Fix:** `future.whenComplete(...).catchError((_) {});` or store/await the returned future.
+
+### BUG-9 [LOW] — One-shot profile sync leaves `PlacementsProvider` eligibility stale mid-session
+
+**File:** `lib/main.dart` (`AuthGuard.build`)
+
+`_profileSynced` makes `placementsProvider.updateUserProfile(profile)` run **once per session**. If the user later edits their profile (skills/CGPA/department) during the same session, `PlacementsProvider` keeps the old snapshot for eligibility checks until the next login. Low impact (eligibility is re-checked server-side at apply time), but the client-side pre-filter can disagree with the server.
+
+**Fix:** re-run `updateUserProfile` when `ProfileProvider` signals a profile change (e.g. watch a `profileVersion`/`updatedAt`), or drop the client-side pre-filter and rely on the server.
+
+### BUG-10 [LOW] — `EngagementProvider.trackActivity` is dead and would be rule-denied
+
+**Files:** `lib/providers/engagement_provider.dart`, `firestore.rules`
+
+`EngagementProvider.trackActivity` (→ `EngagementService.logActivity`) has **no callers** in `lib/` (verified by search). Were it used with any event type other than `resumeReviewed`/`points == 5`, the `activities` create rule would reject it (`allow create: if isOwner(userId) && eventType == 'resumeReviewed' && points == 5`), and `EngagementService.logActivity` swallows the error with a `debugPrint`. The only active client activity write is the `resumeReviewed`/5 one in `ResumeReviewProvider` — which is itself redundant with the server trigger (BUG-2).
+
+**Fix:** delete `trackActivity` (and the client `logActivity` call in `ResumeReviewProvider`) so all activity/points flow through the server's `logUserActivity`.
+
+### INT-1 [LOW] — Placement snapshot objects are unreachable via Storage rules
+
+**Files:** `storage.rules`, `functions/placements.js`
+
+`storage.rules` grants access via `match /resumes/{userId}/{fileName}` — a **single**-segment wildcard. The snapshot the apply flow writes lives at `resumes/{uid}/snapshots/app_{applicationId}.pdf` (two segments after `uid`), so it does **not** match and falls through to the deny-all. It happens to work today only because the apply flow stores a **signed URL** (`getSignedUrl({expires: "01-01-2035"})`) in the application doc and the UI opens that URL (signed URLs bypass Storage rules). So the snapshot is readable **only** through that long-lived URL; any code path that tries to read it by path (or if the URL is rotated/removed) gets `permission-denied`.
+
+**Fix:** either add `match /resumes/{userId}/snapshots/{fileName}` with the same read rule, or keep the signed-URL design and document that snapshots are URL-only. (Signed URLs valid to 2035 are also a long-lived capability that should be reviewed — see §8.)
+
+### TEST-1 [LOW] — Functions test coverage is thin
+
+**File:** `functions/package.json`
+
+```json
+"test": "node --test test/quota.test.js test/schedulers.test.js"
+```
+
+Only the unified-quota and scheduler tests run (13 tests). `placements.js`, `ai/chat.js`, `ai/resumeReview.js`, `ai/deepAnalysis.js`, `careerCoach.js` and `triggers/index.js` have **no** tests — which is precisely why BUG-1 (the `createdAt`/`timestamp` mismatch) and BUG-3 (snapshot overwrite) went unnoticed: both are cheap to assert. Task §20 explicitly asks for placement/resume/AI-quota/Career-Coach trigger coverage.
+
+**Fix:** add focused `node --test` files (shared fakes already exist in `functions/test/firestore_fake.js` / `setup.js`) for: retention deletion (BUG-1), duplicate-apply snapshot immutability (BUG-3), status transition state machine, and `logUserActivity` aggregate idempotency.
+
+### BUG-11 [MEDIUM] — "Career match" cards are offered for roles the student did not choose
+
+**File:** `functions/recommendations/engine.js` (`buildRoleRecommendations`, `isDeclaredRole`)
+
+The student dashboard's "Recommended for You" section renders server-authored `type: 'role'` recommendations titled **"Career match: {role}"**. The v8.9.1 portfolio-first gate and the v9.1.1 "declared-role" de-dupe were meant to keep these relevant, but the de-dupe only suppressed the **exact** role the student declared:
+
+```js
+const declaredRoleIds = new Set(
+  CAREER_ROLES.filter((role) => isDeclaredRole(role, u)).map((role) => role.id),
+);
+const matches = CAREER_ROLES
+  .map((role) => matchRole(role, {...}))
+  .filter((match) => match.score >= ROLE_MATCH_THRESHOLD)   // 20
+  .filter((match) => !declaredRoleIds.has(match.roleId))    // ← only the declared role
+  .sort((a, b) => b.score - a.score)
+  .slice(0, 2);
+```
+
+So a student who has already told the app their goal — e.g. `careerInterest: "App Development"` (which claims `mobile_developer`) — still receives the **next-best non-declared** role as a "Career match" card. Reproduced against the engine with the user's own profile shape:
+
+```
+A declared "App Development" + web skills: roleCards: 0      ← after fix
+```
+
+Before the fix it emitted `Career match: Web Developer (26% role fit)` — a role the student never chose, at a weak score, contradicting the goal they explicitly declared. `isDeclaredRole` matches the declared phrase only when the phrase is a *superset* of the role keyword's tokens (`"web"` is not in `{"app","development"}`), which is why `web_developer` survived the de-dupe while `mobile_developer` was correctly hidden. This is product-noise: once a student has committed to a path, "here is a different career you barely match" is not a recommendation.
+
+**Fix (shipped this pass):** when the student has declared **any** career interest that maps to a known role (`declaredRoleIds.size > 0`), `buildRoleRecommendations` returns `[]`. Role discovery cards are preserved for students who have **not** declared an interest, so the discovery use case still works. Verified: declared-goal profiles → 0 role cards; same skills with no declared goal → still 2 discovery cards (`Web Developer 53%`, `Software Developer 21%`). The client already tolerates an empty role list (the section simply shows its other types / empty state), so no client change is required — but the Dashboards "Recommended for You" empty state should be re-checked once this deploys.
+
+**Deploy note:** this is a Cloud Functions change (`functions/recommendations/engine.js`) — it takes effect only after `firebase deploy --only functions` and the next recommendation refresh (`onResumeReviewCreatedRefreshMatches` / `refreshRecommendations`), since existing `recommendations/*` docs are already materialized. Consider a one-off re-refresh of active students, or filtering stale role cards client-side until they age out. The Dart mirror `test/career_role_matching_test.dart` tests scoring only (not the de-dupe), so it is unaffected — but it also means **no test guards the suppression** (add one: declared interest ⇒ zero role cards).
 
 ---
 
 ## 4. Firebase Rules, Functions & Indexes
 
-### Rules (beyond SEC-1/SEC-2)
-- **`userRole()`/`canManagePlacements()` fail closed** when the actor's doc is missing — ✅ correct.
-- **Activities rule** restricts client writes to `resumeReviewed`/`points == 5` — ✅ still correct.
-- **Chat rules** — update limited to messaging metadata; create allows any authenticated user who includes their uid in `participantIds` (pre-existing spam vector, documented in earlier audits; unchanged in V9.1). ✅ no regression.
-- **`public_profiles` create/update** — key/uid binding verified. ✅
-- **Notifications** — owner-only create/update/delete; Admin SDK writes bypass rules so `updateApplicationStatus` notifications still work. ✅
-- **Global `applications` vs the `/{path=**}/applications/{appId}` wildcard** — overlap is benign because Firestore ORs matching `allow` statements; owner reads of canonical docs succeed via the global rule. ✅ (note: see SEC-5).
+### 4.1 Firestore rules — per-collection verdict
 
-### Functions
-- **`updateApplicationStatus`** — transactional dual-mirror write ✅ (except BUG-A mirror-missing), notification + analytics after commit ✅, friendly HttpsErrors ✅, role gate ✅ (except SEC-3 authorship). **Missing:** placement ownership, transition state machine, per-actor rate limit.
-- **`logPlacementApplication`** — transactional idempotent create ✅, resume snapshot copy with ownership/range validation (`resumes/{uid}/` prefix ✅, ATS range ✅), non-fatal snapshot failure ✅. **Missing:** placement-existence validation (SEC-4), `null`-data guard (BUG-E). Note: **no `maxInstances`** on this callable.
-- **Registration/re-export in `index.js`** ✅ (`exports.updateApplicationStatus = placements.updateApplicationStatus`).
-- **`logPlacementView`** — onCall (SEC-1 fix from v9.0) ✅; only validates `placementId` presence.
+`firestore.rules` is `rules_version = '2'`. The recursive catch-all under `users/{userId}` (`match /{subcollection=**}`) is the defect behind SEC-1/SEC-2 and is analysed there; the table below records the effective state of every other path.
 
-### Indexes
-- `firestore.indexes.json` has the needed **collectionGroup `applications` (userId ASC, appliedAt DESC)** composite index — ✅ covers `getUserApplicationsOnce` (a root `applications` query is covered by the collectionGroup composite) and `getApplicationsForPlacement` single-field `placementId` filters use auto single-field indexes (**no missing composite for V9.1**).
-- Unused/legacy index entries (e.g. `notifications type+createdAt` both directions, multiple `opportunities` combos) add deploy weight but are harmless.
-- **Deployment dependency:** V9.1 requires deploying `firestore.indexes.json` + updated rules + the new function together; a partial deploy silently breaks `getUserApplicationsOnce` or the rules' alumni reads.
+| Path | Declared | Effective | Notes |
+|---|---|---|---|
+| `users/{uid}` (doc) | `isOwner && canWriteRole` | owner (role **unchecked**) + teacher/alumni read | **SEC-1**: catch-all overrides `canWriteRole`. |
+| `users/{uid}/notifications/*` | owner read/create/update/delete | owner | OK (system writes via Admin SDK). |
+| `users/{uid}/ai_insights/*` | owner read; `write:false` | **owner write** | SEC-2. |
+| `users/{uid}/ai_interactions/*` | owner read/create/delete; `update:false` | **owner update** | SEC-2 (append-only intent void). |
+| `users/{uid}/recommendations{,_meta}/*` | owner read; `write:false` | **owner write** | SEC-2. |
+| `users/{uid}/engagement_summary/*` | owner/teacher read; `write:false` | **owner write** | SEC-2; the client writes it (BUG-2). |
+| `users/{uid}/activities/*` | owner read; create only `resumeReviewed`+5 pts; no update/delete | **any payload** | SEC-2: the MED-5 points guard is void. |
+| `users/{uid}/resumeReviews/*` | owner read/create/update/delete; teacher read | owner | **Tamper risk — see below.** |
+| `users/{uid}/career_coach/*` | owner read; `write:false` | **owner write** | SEC-2; AI + quota bypass. |
+| `placements/*` | auth read; manager create/update/delete **with schema + `createdBy` binding** | managers (authored only) | Good (v9.1 SEC-1). |
+| `placements/*/applications/*` | read owner/alumni/teacher; `create/update/delete:false` | client read-only | Good (v9.1 SEC-2). Mirror doc-id = `studentId`, so the owner branch is valid. |
+| `applications/*` | read owner; all writes `false` | owner read only | Good (v9.1 SEC-2). |
+| `notes/*` | auth read; teacher CRUD | as declared | OK. |
+| `{path=**}/resumeReviews`, `{path=**}/recommendations` | teacher read | teacher | OK. |
+| `{path=**}/applications` | teacher/alumni read; owner via `resource.data.userId` | as declared | Good (v9.1 SEC-5 — the old doc-id `isOwner` was always false). |
+| `mentorship_requests/*` | participant read; student create; participant diff-limited update | as declared | OK. |
+| `opportunities/*` | auth read; author write | OK. | |
+| `public_profiles/*` | public read; author write | OK. | |
+| `chats/*` → `messages/*` | participant read/write | see below | **Any participant may delete any message.** |
+| `alumni_group_messages/*` | alumni read; sender-bound create/update/delete | OK. | |
+| `user_ai_quotas`,`ai_usage`,`resume_usage`,`career_coach_usage`,`ai_analysis_usage`,`ai_rate_limits`,`ai_spam_check`,`ai_conversations`,`announcements`,`analytics_events` | owner read (where applicable); `write:false` | owner read | Good. |
 
+**Two further rules observations (same root cause family as SEC-2 — “who owns each field”):**
+
+- **`resumeReviews` is fully owner-writable.** A student can `create`/`update` their own `users/{uid}/resumeReviews/{id}` with a hand-written `atsScore`, `aiAnalysis`, `strengths`/`weaknesses`, etc. Teachers read these docs directly **and** roll them up via the `{path=**}/resumeReviews` collectionGroup, so a forged review pollutes the teacher analytics and the student’s own insights. Fix by making the server the writer of the AI/score fields (or shape-validating owner writes), exactly as for the SEC-2 subcollections.
+- **Chat messages are deletable by any participant.** `match /messages/{messageId} { allow read, write: if <participant> }` grants `delete` to every chat participant, so one participant can delete another’s message — there is no `senderId == request.auth.uid` binding (unlike `alumni_group_messages`). Low impact, but an ownership/moderation gap.
+
+### 4.2 Storage rules
+
+`storage.rules` is `rules_version = '2'`. Access is granted via `match /resumes/{userId}/{fileName}` — a **single**-segment wildcard — plus teacher/alumni/owner read branches.
+
+- **INT-1:** the immutable snapshot written by `logPlacementApplication` lives at `resumes/{uid}/snapshots/app_{applicationId}.pdf` (two segments after `uid`) and therefore **does not match** that rule; it falls through to the deny-all `match /{allPaths=**}`. It works today only because the apply flow stores a `getSignedUrl({expires:"01-01-2035"})` URL in the application doc and the UI opens that URL (signed URLs bypass rules). Any path-based read — or a rotated/removed URL — is `permission-denied`.
+- A signed URL valid until **2035** is itself a long-lived bearer capability: anyone who obtains the URL can read the resume for a decade. Prefer short expiries plus on-demand signing by an authenticated teacher/alumni callable.
+
+### 4.3 Cloud Functions inventory & contracts
+
+`functions/index.js` is a thin re-exporter (v9.0 ARCH-2). Deployed surface:
+
+- **Callables (9):** `generateCareerCoachAnalysis`, `askAI`, `reviewResume`, `generateResumeAnalysis`, `deleteAIHistory`, `refreshRecommendations`, `logPlacementView`, `logPlacementApplication`, `updateApplicationStatus`.
+- **Triggers (6):** `onProfileUpdatedRefreshAI`, `onResumeReviewCreatedRefreshMatches`, `onOpportunityPostedNotifyStudents`, `onMentorshipRequestCreated`, `onMentorshipRequestResponseNotifyStudent`, `onChatMessageCreated`.
+- **Scheduled (5):** `cleanupExpiredAIConversations` (retention — BUG-1), `autoExpireOpportunities` (60 min), `sendInactivityReminders` (daily 09:00), `recomputeEngagementScores` (daily 01:00; cursor-paginated 50 users/page), `compensateStaleAIQuotas` (daily 04:00; v9.2 3→1 consolidation). All `us-central1`, `timeZone: UTC`.
+
+Observations:
+
+- **Duplicate engagement write (feeds BUG-2):** `onResumeReviewCreatedRefreshMatches` calls `logUserActivity(userId, "resumeReviewed", 5, …)` **and** `ResumeReviewProvider.submitReview` writes its own 5-pt `activities` doc — two docs, one aggregate increment, two point-paths. Keep one.
+- **BUG-4:** `updateApplicationStatus`, `logPlacementApplication` and `logPlacementView` set `maxInstances` but **no `timeoutSeconds`** (default 60 s). `logPlacementApplication` performs a Storage `copy` + `getSignedUrl` *before* opening the Firestore transaction — all on the default ceiling. Every other callable (`askAI`, `reviewResume`, `generateResumeAnalysis`, `refreshRecommendations`) sets an explicit timeout.
+- **Placement pipeline is otherwise solid:** `updateApplicationStatus` verifies actor role, actor-authorship of the placement, a server-side transition state machine (`applied→[shortlisted,rejected]`; terminal `placed`/`rejected`), and per-actor rate limiting; `logPlacementApplication` validates placement existence/active/deadline inside the create transaction. BUG-3 and BUG-6 are the remaining gaps.
+
+### 4.4 Indexes
+
+`firestore.indexes.json` declares no `fieldOverrides` and **no `ai_interactions` entry**. Verified against the queries in the tree:
+
+- **Covered:** `opportunities` (`isActive+applicationDeadline` for `autoExpireOpportunities`; `isActive+postedAt`, `company/jobType/location+isActive+postedAt`, `alumniId+postedAt`), `mentorship_requests` (`status+createdAt` asc/desc for the reminder sweep; `studentId/alumniId+createdAt`; `studentId+alumniId+status`), `chats` (`participantIds CONTAINS + lastMessageAt DESC`), `applications` (`userId+appliedAt`, COLLECTION scope, for the student feed), `placements` (`isActive+postedAt`, `company+isActive+postedAt`), `notifications` (`type+createdAt` asc/desc), `notes` (`uploadedBy+uploadedAt`).
+- **Gap (ties to BUG-1):** the retention query is `collectionGroup("ai_interactions").where("createdAt","<",cutoff)`. A **collection-group** range query needs a collection-group-scoped single-field index; none is declared. The job therefore either returns empty (the field is never written — BUG-1’s root cause) or fails `FAILED_PRECONDITION`. Fixing BUG-1 requires the field-name change **and** this index.
+- **Confirm-on-deploy:** `recomputeEngagementScores` runs `users.where("profileCompleted","==",true).orderBy(FieldPath.documentId())`. Equality + `__name__` ordering is usually served without a composite index, but verify against the deployed project.
+
+### 4.5 Functions tests
+
+`functions/package.json` → `"test": "node --test test/quota.test.js test/schedulers.test.js"` (13 tests). Covered: the unified-quota reserve/refund logic and the scheduler envelope. **Not covered:** `placements.js`, `ai/chat.js`, `ai/resumeReview.js`, `ai/deepAnalysis.js`, `careerCoach.js`, `triggers/index.js`. BUG-1 (retention) and BUG-3 (snapshot overwrite) are precisely the kind of pure-logic defect a small `node --test` file would catch — and the fakes already exist (`test/firestore_fake.js`, `test/setup.js`). This is **TEST-1**.
 ---
 
-## 5. Routing & Integration Audit
+## 5. Routing & Integration
 
-| Check | Verdict |
-|-------|---------|
-| `placementApplicantsRoute` registered in `main.dart` routes map; `_placementId` reads `ModalRoute..settings.arguments` — works with `pushNamed(route, arguments: placementId)` | ✅ |
-| `_ApplicantSummaryButton` → `Navigator.pushNamed(placementApplicantsRoute, arguments: placementId)` | ✅ |
-| `portfolioReadOnlyRoute` from applicants view passes `userId` String — matches `PortfolioReadOnlyView` arg contract | ✅ |
-| `onGenerateRoute` fallbacks (`chatRoute`/`chatDetailRoute`/`completeMentorshipRoute`) untouched by V9.1 | ✅ |
-| Provider wiring in `main.dart` (`PlacementsProvider`) ✅; `AuthGuard` logout resets PlacementsProvider (safety net) ✅ | ✅ |
-| **INT-1 [GAP]** Alumni granted `canManagePlacements` everywhere (rules, callable, `PlacementsListView` add-button) but **the Alumni dashboard (`AlumniDashboardView`) has no placements tab, quick action, or card** — alumni cannot reach the placements list/applicants view except by deep link. Teacher quick-action ("Placement Reports") and student dashboard are the only entries. **Half-integrated role.** | ⚠️ |
-| **INT-2 [OK]** `PlacementsListView.build` triggers one-time `loadApplicantCounts` only when `canManagePlacements`; role is immutable so mid-session role change is impossible; widget state is recreated on re-login. | ✅ |
-| **INT-3 [OK]** Teacher dashboard `PlacementPipeline` shows real status counts via `pipelineShortlisted/Interviewed/Placed` | ✅ |
-| **INT-4 [BUG]** `QuickStatistics`/`DepartmentOverview` still use drives÷students (BUG-D) | ⚠️ |
-| INT-5 [NOTE] `docs/todo.md` V9.1 checklist was all `- [ ]` while pubspec is `9.1.0+97` — checklist/version drift; corrected in this consolidation. | ⚠️ |
-| INT-6 [NOTE] Notifications from `updateApplicationStatus` use the `statusChange` shape (`data: {placementId, company, role, status}`) matching `NotificationsService.notifyStatusChange`/`AppNotification.statusChange` — render path consistent. | ✅ (verify 1 line) |
+### 5.1 Route registry
+
+All route names are constants in `lib/constants/routes.dart`; the router is `MaterialApp` in `lib/main.dart` (`home: AuthGuard`, a `routes:` map plus an `onGenerateRoute` for argument-carrying routes). Registration is complete — every constant has a builder, and `flutter analyze` is clean, so no unresolved route names.
+
+- **Dynamic (`onGenerateRoute`):** `resumeReviewDetailRoute`, `chatRoute`/`chatDetailRoute`, `completeMentorshipRoute`. Each falls back to a safe list view when its argument is missing.
+- **Guarded (`routes:` wrappers):** `placementApplicantsRoute` → `_guardPlacementApplicants` (teacher/alumni), `alumniGroupChatRoute` → `_guardAlumniGroupChat` (alumni), the six portfolio editing routes → `_guardStudentPortfolio` (non-alumni), `profileRoute` → `_RoleAwareProfileView` (teacher vs student/alumni).
+- **Argument via `ModalRoute`:** `placements_list_view.dart` navigates to `placementApplicantsRoute` with a `String` `placementId`; `PlacementApplicantsView` reads it with `ModalRoute.of(context)?.settings.arguments` (not a constructor arg), so the plain `routes:` builder is correct. Same pattern for `portfolioReadOnlyRoute`.
+
+### 5.2 Auth & role dispatch
+
+`AuthGuard` (v6.3/V6.6/V7.1) drives the tree: unauthenticated → `LoginView`; authenticated-but-unverified → `VerifyEmailView`; verified but `!isProfileCompleted` → `ProfileSetupView`; otherwise `_buildDashboardForRole` (alumni / teacher / student). Providers are (re)initialised in `addPostFrameCallback`s guarded by `_providerInitScheduled` / `_profileSynced` / `_ecosystemInitScheduled` (v9.2 P1 — each runs at most once per session, reset on logout/re-login), and every provider is reset on logout. The only state gap is BUG-9 (one-shot profile sync).
+
+### 5.3 Integration completeness (is the new code reachable?)
+
+| Feature | Entry point(s) | Verdict |
+|---|---|---|
+| Placement list | student dashboard (×3), alumni dashboard (quick action), teacher dashboard sections, activity feed | **Reachable** |
+| Applicant review (`placementApplicantsRoute`) | `placements_list_view.dart` (managers) | **Reachable**; role-gated (v9.1 SEC-6) |
+| Portfolio read-only (from applicants) | `PlacementApplicantsView._openPortfolio` | **Reachable** |
+| Alumni Community (group chat) | alumni dashboard → guarded route | **Reachable**; alumni-only |
+| AI Career Coach | `careerCoachRoute` (dashboard + coach screen) | **Reachable** |
+| All 9 callables / 6 triggers / 5 schedulers | registered in `functions/index.js` | **Wired** |
+
+**Resolved v9.1 carry-overs confirmed in the tree:**
+- **INT-1 (v9.1, “alumni dashboard has no placements entry”):** now resolved — `alumni_dashboard_view.dart:602` adds a fifth quick action to `placementsListRoute`.
+- **BUG-D (fake dashboard metric):** resolved — placement rate from `analytics.pipelinePlaced` (`teacher_dashboard_sections.dart` 234/438/696).
+- **BUG-F (stale applicant counts):** resolved — `PlacementApplicantsView._updateStatus` calls `loadApplicantCounts()` after a status change.
+- **BUG-G (dead text-resume button):** resolved — `isTextResume` opens a text dialog instead of `launchUrl`.
+- **SEC-6 (unguarded applicants route):** resolved — `_guardPlacementApplicants`.
+
+### 5.4 Remaining integration gaps
+
+- **INT-1 (this report, storage):** the placement snapshot path is not covered by `storage.rules`; the app depends on the 2035 signed URL. Integration works by accident, not by rule (see §4.2).
+- **SEC-2 integration coupling:** because the *client* legitimately writes `engagement_summary` and `recommendations`, tightening the catch-all (SEC-1 fix) without moving those writes server-side (BUG-2 fix) will break the app. These must ship together — this is the one non-local fix in the report.
+- **`notesRoute`** maps to `StudentDashboardView` (legacy compat shim); it is intentional but misleading — worth deleting once nothing links to it.
 
 ---
 
 ## 6. Edge Cases & Boundary Problems
 
-| Case | Assessment |
-|------|------------|
-| Mirror doc missing in `updateApplicationStatus` | **BUG-A** — transaction aborts. |
-| Legacy mirror doc without `userId` | **BUG-B** — hard cast crash. |
-| Application to a closed/expired/non-existent placement | SEC-4 — no server check; UI hides the button but the callable is open. |
-| Forged `status` value (e.g. `"hacked"`) | Renders as "Applied" chip; not counted in shortlisted/interviewed/placed, but **counts in `appliedStudents`** (`studentStatuses.length`) — pollution persists. |
-| 2 (two) status values on one student across placements | Correctly bucketed at the highest stage (`contains('placed')` → placed+interviewed+shortlisted). ✅ |
-| Rejected-only student | Counts in `appliedStudents` — semantically correct (they did apply). ✅ |
-| Multiple children apply with same uid to same placement | Dedupe by `userId` prefers canonical (`resumeUrl`) — ✅ matches test `application_applicants_test.dart`. |
-| `getApplicantCounts` with >10 placements | Batched `whereIn` chunks of 10 — ✅. |
-| Teacher taps "Resume" on text-pasted application | Broken (BUG-G). |
-| Counts load failure | `loadApplicantCounts` non-fatal; cards show 0 applied — graceful. ✅ |
-| Empty applicants list | `EmptyState` "No applicants yet" — ✅. |
-| No ATS score / no resume version | Chips omitted — ✅. |
-| `getApplicationPipelineCounts` collectionGroup failure | Degrades to all-zero pipeline silently; dashboard copy says "Applications collection is empty" — misleading on permission/index failure (minor). |
-
+- **Duplicate apply (BUG-3):** the immutable snapshot is re-copied on a repeat `logPlacementApplication` call because the copy precedes the idempotency check. Two rapid taps on Apply can also race two copies before either transaction commits.
+- **Unguarded body (BUG-7):** `generateResumeAnalysis` throws `TypeError` on an empty payload (→ `internal`); every sibling callable null-guards.
+- **Canonical/mirror drift (BUG-6):** a mirror re-created by `updateApplicationStatus` omits `resume`/`resumeStoragePath`/`appliedAt`/`resumeVersion`/`atsScoreAtApplication`, so the mirror and canonical doc are no longer equivalent, and the applicants UI (which reads the mirror) shows a resume-less applicant.
+- **Legacy status default:** `updateApplicationStatus` reads `canonicalData.status || "applied"`, so any legacy application doc without a `status` starts from `applied` — correct, but it means a doc that is *actually* terminal but missing `status` could be advanced. Low risk (all new docs set `status`).
+- **Snapshot copy is non-fatal:** if the Storage copy fails, `logPlacementApplication` keeps the original `resumeStoragePath`/`resumeUrl` and still creates the application — so the teacher may later open a resume that has since been re-uploaded (the immutability guarantee silently degrades). Consider failing the apply, or flagging the application as “no snapshot”.
+- **`atsScoreAtApplication` coercion:** non-numbers and out-of-range values are nulled; non-integers are rounded. Good, but the clamp range (0–100) is duplicated from `deepAnalysis.js` — a shared constant would prevent drift.
+- **Text-resume detection:** `Application.isTextResume` (client heuristic) must stay in sync with how `logPlacementApplication` stores text vs URL vs storage path; a mismatched heuristic re-introduces BUG-G (dead link button).
+- **Timezone streak (BUG-2):** client local-day bucketing vs server UTC day keys disagree for ~5.5 h/day in IST; the streak can differ by one and the badge progress wobbles.
+- **Applicants N+1:** `PlacementApplicantsView._load` sequentially `await`s `ProfileService.getProfile(app.userId)` per applicant — a placement with 200 applicants issues 200 serial reads. `Future.wait` (bounded) would remove the serial latency.
+- **No-placement guard:** `PlacementApplicantsView` shows a safe “No placement selected.” error when the argument is absent — good.
+- **Notification failure is non-fatal:** `updateApplicationStatus` logs and continues if the student notification write fails — correct, but the student silently misses the status update; a retry/queue would be more robust.
+- **`activities` rule fields:** the MED-5 create rule requires `userId == request.auth.uid` *and* `eventType == 'resumeReviewed'` *and* `points == 5`. If the client `logActivity` ever omits `userId`, the write is denied and swallowed — a latent fragility once SEC-2 is fixed (the catch-all no longer masks it).
+- **Alumni group-chat stream:** activated only after the role resolves (`setRoleForStream`), so non-alumni never subscribe — this correctly avoids a guaranteed `permission-denied` stream per session (v8.8.2 B).
+- **One-shot profile sync (BUG-9):** in-session profile edits leave `PlacementsProvider`’s eligibility snapshot stale.
 ---
 
-## 7. Performance / Scale Concerns
+## 7. Performance, Scale & Cost
 
-- **`getApplicationPipelineCounts`** does an **unbounded `collectionGroup('applications').get()`** on every teacher analytics load — O(all applications ever, both mirrors).
-- **`getResumeReviewStats` / `getSkillGapAnalysis`** similarly scan all `resumeReviews` (limit present only on some).
-- **`getDepartmentAnalytics` / `getStudentResumeData`** are N+1 per student (`_getLatestReview` ×2 + count per user).
-- `PlacementApplicantsView._load` does N+1 `getProfile` per applicant (usually small, but unbounded).
-- **Recommendation:** cursor/paginated aggregation and/or materialized pipeline counters (matches carried-over IMP-8 / IMP-9).
+The V9.2 workstream removed a large amount of duplicate work (the `TeacherAnalyticsService` load-scoped cache and the scheduler consolidation are real wins), but several **unbounded** reads and one remaining N+1 survive. Numbers below are per load cycle unless stated.
 
+### 7.1 Teacher analytics load (PERF-1) — the dominant cost
+
+`TeacherAnalyticsProvider.loadAnalytics()` drives `TeacherAnalyticsService`, which for a roster of **N** students issues:
+
+| Read | Volume | Bounded? | Note |
+|---|---|---|---|
+| `users.where(role=='student').get()` (`_studentDocs`) | **N** docs | ❌ unbounded | Shared once per cycle (was 4× before v9.2). Entire roster, no `limit`. |
+| `collectionGroup('resumeReviews').get()` (`_resumeReviewDocs`) | **R** docs (all reviews, all students) | ❌ **deliberately unbounded** | Comment says capping would under-count; correctness > reads. |
+| `collectionGroup('applications').get()` (`_applicationDocs`) | **A** docs | ❌ unbounded | Pipeline counts. |
+| **Per-student** `users/{uid}/engagement_summary/summary` `get()` (`getEngagementAggregates`) | **N** reads | ❌ | **N+1**: one dedicated document read **per student**, in a serial `for` loop. This is the N+1 the v9.2 notes did **not** remove — they removed the *latest-review* and *review-count* N+1s (now derived in memory from the shared review scan), but the engagement aggregate still fans out per student. |
+| `collectionGroup('recommendations').limit(800).get()` (`getRecommendationAggregates`) | ≤800 docs | ✅ (800) | Hard cap, but reads up to 800 docs/load. |
+| `users.where(role=='alumni').count()` | 1 aggregation | ✅ | Cheap; cached per cycle. |
+
+So a single teacher dashboard load ≈ **N (roster) + R (reviews) + A (applications) + N (engagement) + min(800, recs)** document reads. Concretely, for 500 students / 1 500 reviews / 800 applications / 500 recommendation docs that is **~3 800 reads per load** — and `loadAnalytics` is not throttled, so a teacher tapping Refresh repeatedly multiplies it. On a department-wide basis (every teacher loading concurrently) this is the app's largest Firestore cost line.
+
+**Fixes:**
+- **Kill the engagement N+1.** Either (a) `getAll()` the `engagement_summary/summary` refs in one batched round trip (chunked to ≤500), or (b) maintain a teacher-scoped materialized aggregate (e.g. written by `recomputeEngagementScores` into a single `analytics/teacher` doc) and read that one doc. Option (b) also removes the need to read the full roster for engagement.
+- **Bound the scans.** `_resumeReviewDocs` / `_applicationDocs` should be paginated + date-windowed (the trend query already applies a `pastMonths` window client-side — push it server-side as a `where('createdAt','>=',start)` so the scan ships fewer docs). The roster scan should page.
+- Cache/aggregate: the whole screen is a candidate for a scheduled `analytics/teacher_snapshot` document so the read is O(1) per load instead of O(N + R + A + 800).
+
+### 7.2 Engagement dual-writer on every login (BUG-2)
+
+Each login runs `EngagementService.recomputeEngagement`, which reads up to the newest **200 `activities`** docs and writes `engagement_summary/summary`. For a cohort that logs in daily this is **200 reads + 1 write per user per day**, all to produce a value the server already maintains (and then clobbers it). Removing the client recompute (the BUG-2 fix) eliminates both the reads and the write.
+
+### 7.3 Applicant review N+1
+
+`PlacementApplicantsView._load` `await`s `ProfileService.getProfile(app.userId)` **sequentially** per applicant. A placement with 200 applicants = **200 serial round-trips** (plus the applicant list). Wrap in a bounded `Future.wait` (chunks of ~20–30) to collapse serial latency into a few concurrent waves; better, have `logPlacementApplication` persist the denormalized applicant snapshot the UI already needs so the list is one read.
+
+### 7.4 Unbounded collectionGroup scans elsewhere
+
+`getApplicationPipelineCounts` (student) and the pipeline mirror read are unbounded collectionGroup scans of `applications`. Combined with §7.1 the `applications` collectionGroup is scanned twice per teacher load path and once per student dashboard. Consider a maintained counter (`analytics/pipeline`) updated by `updateApplicationStatus`, or a scheduled aggregate.
+
+### 7.5 AI chat growth (BUG-1) compounds cost
+
+Because `cleanupExpiredAIConversations` deletes nothing (BUG-1), every student's `ai_interactions` grows forever. Each `askAI` call reads the recent transcript for context, so an unbounded history slowly raises the per-call read cost and the storage bill, and makes the (intended) 90-day retention unenforceable. Fixing the field name + adding the collection-group index removes a permanent, compounding cost.
+
+### 7.6 What is already right
+
+- **Schedulers are paginated.** `recomputeEngagementScores` walks `users.where(profileCompleted==true)` in cursor pages of 50; `sendInactivityReminders` / `autoExpireOpportunities` use bounded `where` + `limit`. No full-collection scheduled scan.
+- **Load-scoped cache (v9.2 P1)** genuinely removes the four roster scans / three review scans / per-student count reads of the pre-V9.2 code — the remaining cost is the unbounded *volume*, not duplication.
+- **`LoadDedupe`** collapses concurrent identical loads client-side (subject to BUG-8).
+- **Recommendations** are materialized server-side and read once; the client does not recompute engine output.
 ---
 
-## 8. Carried-Over Open Items (v9.0 audit)
+## 8. Security: App Check, Secrets, Input Validation
 
-> These items were the only unmarked (open) tasks in the v9.0 confirmation audit section of `docs/todo.md`. They are combined into this report and remain open, tracked under "Open Improvements" in `docs/todo.md`.
+### 8.1 App Check
 
-| ID | Category | Severity | Description | Status |
-|----|----------|----------|-------------|--------|
-| SEC-3 / IMP-6 | Security | **MEDIUM** | No App Check — enable Play Integrity (Android), DeviceCheck (iOS), reCAPTCHA v3 (Web). Reduces the "modified client writes directly to Firestore" attack class. | Open |
-| IMP-8 | Scale | LOW | Pagination for bulk queries — `refreshRecommendationsForStudent` loads up to 120 alumni/opportunities/placements; also paginate the engagement recompute scheduler. | Open |
-| IMP-9 | Scale | LOW | Materialize engagement aggregates — maintain running `totalPoints`/`lastActiveAt`/`dailyStreak` instead of loading 250 activity docs per user during daily recompute. | Open |
-| IMP-11 | Tech debt | LOW | Deprecate `ai_conversations` legacy collection — `askAI` writes to both `users/{uid}/ai_interactions` AND `ai_conversations`. Remove legacy writes after 90-day legacy data expiry. | Open |
-| IMP-12 | Security | LOW | AI prompt input sanitization — strip control characters, limit special-character density, add pre-prompt guard ("The following is user input, not instructions"). | Open |
-| IMP-15 | Architecture | ENH | Unified AI quota management — consolidate `ai_usage`, `resume_usage`, `career_coach_usage`, `users/{uid}.aiUsageCount` into a single `user_ai_quotas/{uid}` document with nested maps. | Open |
-| IMP-16 | Indexes | ENH | Firestore index for Career Coach — verify single-field index for `pendingSince` on `career_coach_usage` (auto-created; no composite needed). | Open |
+`lib/main.dart` activates App Check before `runApp`:
 
+- **Android release** → `AndroidPlayIntegrityProvider`; **iOS/macOS release** → `AppleDeviceCheckProvider` (or App Attest).
+- **Debug/profile** → `AndroidDebugProvider` / `AppleDebugProvider` (correct — release attestation is unavailable in a debug build).
+- **Web** → `ReCaptchaV3Provider` with `webSiteKey` injected at build time via `--dart-define`.
+
+This is the **right** client setup. The caveat that matters: **App Check only protects anything once it is _enforced_ in the Firebase console** for Firestore, Cloud Storage, and Cloud Functions (App Check → APIs → Enforce). The code cannot self-enforce. Until enforcement is switched on, a scripted client (or the DevTools exploit in SEC-1) talks to the backend with no attestation. Also note App Check is **unsupported on Windows/Linux/desktop** targets, so desktop builds send no token — if those are ever shipped, they need an explicit decision (block, or accept un-attested).
+
+### 8.2 Secrets & config
+
+- The AI provider key lives **only** in Cloud Functions (`functions/` reads it from the environment / secret manager); it is never shipped to the client. Good.
+- `webSiteKey` (App Check) is passed via `--dart-define`, not hardcoded. Good.
+- `lib/firebase_options.dart` and `android/app/google-services.json` are committed — standard for Flutter and **not** secret material (the Firebase API key is a public project identifier). What matters is that the key is **restricted in Google Cloud** (HTTP-referrer / app restrictions) so it cannot be abused outside the app; verify that restriction exists in the project console.
+- No service-account JSON, private key, or Admin SDK credential is present in `lib/` or the repo root (checked) — the Admin SDK is used only inside `functions/`.
+
+### 8.3 Rules-level exposure (see §2)
+
+- **SEC-1 (CRITICAL)** and **SEC-2 (HIGH)** are the dominant security findings — both are Firestore-rules defects exploitable by any authenticated user. SEC-1 turns a normal account into a teacher/alumni (full PII + analytics + applications read). §2 has the exploit and fixes.
+- **`resumeReviews` owner-write tamper** and **chat-message delete by any participant** are the two smaller rules issues (§4.1).
+- **INT-1 / long-lived signed URL:** the placement snapshot is served via a signed URL valid to **2035**. That URL is a bearer capability — whoever holds it (logs, analytics, a shared device, a screenshot of the network tab) can fetch the resume for a decade, and it bypasses Storage rules entirely. Prefer short-lived URLs minted on demand by an authenticated teacher/alumni callable, or a path covered by Storage rules.
+
+### 8.4 Rate limiting & quotas
+
+- **AI quotas** are enforced server-side in the unified `user_ai_quotas` store (monthly per feature) with a `compensateStaleAIQuotas` reconciliation job — solid. The **daily** AI-chat limit is **soft** (advisory; it does not hard-block), which the code documents; acceptable, but note it is not a security control.
+- **Status updates** are rate-limited per actor in `updateApplicationStatus`. Good.
+- **Placement apply** validates existence/active/deadline inside the create transaction. Good.
+- **Client-side-only throttles** (e.g. resume retry throttle) are UX, not security — the server must be (and is) the authority.
+
+### 8.5 Input validation & authorization inside callables
+
+The callables are the trust boundary and are generally well-guarded:
+
+- `generateResumeAnalysis` / `reviewResume` verify the `reviewId` **belongs to the caller** (`users/{uid}/resumeReviews/{reviewId}`) before analyzing — no IDOR. (BUG-7 is only about an unguarded empty body, not authorization.)
+- `sanitizeAIInput` + length caps bound the AI prompt surface (defense against prompt-injection and cost abuse).
+- `logPlacementApplication` checks the `resumeStoragePath` is under the caller's own prefix before snapshotting.
+- `updateApplicationStatus` checks actor role, actor-authorship, and a transition state machine.
+- `isValidPlacementData` + `createdBy` binding gate placement writes.
+
+The gaps are the ones already listed: **BUG-4** (missing `timeoutSeconds`), **BUG-3/BUG-6** (snapshot/mirror correctness), and the rules defects (SEC-1/SEC-2).
+
+### 8.6 Summary
+
+The **application-layer** security (callable guards, quotas, validation, App Check wiring, secret handling) is in good shape. The **data-layer** security (Firestore/Storage rules) is where the serious defects are, and the single most important action in this entire report is to fix the `users/{userId}` catch-all (SEC-1) — one `role` write is currently a full privilege-escalation primitive.
 ---
 
 ## 9. Improvements (priority-ordered)
 
-### Must fix (HIGH)
-1. **Lock application `create` rules** on both canonical and mirror paths (SEC-2) — 2-line rules change, closes self-promotion + phishing-resume chain.
-2. **Add `createdBy` ownership + schema validation** to the placements write rule (SEC-1) and make `Placement.fromFirestore` tolerant of malformed fields (defense in depth against the same DoS).
-3. **Guard the mirror in the `updateApplicationStatus` transaction** (BUG-A).
-4. **Enforce the status transition state machine + placement authorship in `updateApplicationStatus`** (SEC-3).
-5. **Validate placement existence/active/deadline in `logPlacementApplication`** (SEC-4).
+Ordered by risk-reduction-per-hour. P0 is a security emergency; P1–P2 are correctness/cost; P3 is hygiene.
 
-### Should fix (MEDIUM)
-6. Fix `Application.fromFirestore` userId fallback (BUG-B).
-7. Replace fake `QuickStatistics`/`DepartmentOverview` metrics with `pipelinePlaced` (BUG-D).
-8. Role-gate `placementApplicantsRoute` (SEC-6).
-9. **Add "Placements" entry for Alumni** — a quick-action/tab in `AlumniDashboardView` pointing at `placementsListRoute` (INT-1), or deliberately drop alumni from `canManagePlacements` if placement management is teacher-only.
-10. Fix collectionGroup owner rule to use `resource.data.userId == request.auth.uid` (SEC-5).
-11. Rate-limit `updateApplicationStatus` per actor (career-coach pattern).
+### P0 — Security (ship immediately)
 
-### Nice to have (LOW)
-12. Null-guard `request.data` in `logPlacementApplication` (BUG-E).
-13. Refresh applicant counts after status update (BUG-F).
-14. Show "text resume" state in applicants view instead of a dead Resume button (BUG-G).
-15. Fix stale comments (`Application` status doc, `pipelineTotalPlacements` dead getter, `_pipelineStep` N/A branch) (BUG-H).
-16. Implement App Check (SEC-7 / carried-over IMP-6).
-17. Paginate/aggregate the teacher-analytics collectionGroup scans (carried-over IMP-8/9).
+**1. Fix SEC-1: remove the `users/{userId}` catch-all.** The one-line change that closes the privilege-escalation primitive:
 
----
+```rules
+match /users/{userId} {
+  // The user document itself — `canWriteRole` now actually governs it.
+  allow read: if isOwner(userId) || isTeacher() || isAlumni();
+  allow write: if isOwner(userId) && canWriteRole(userId);
 
-## 10. Severity Matrix (combined)
+  // Enumerate the genuinely client-writable subcollections EXPLICITLY…
+  match /notifications/{notificationId} { allow read, write: if isOwner(userId); }
+  match /resumeReviews/{reviewId}       { allow read, write: if isOwner(userId); allow read: if isTeacher(); }
+  match /activities/{activityId}        { allow read: if isOwner(userId); allow create: if isOwner(userId) && request.resource.data.eventType == 'resumeReviewed' && request.resource.data.points == 5; }
+  // …and grant NOTHING else to the client (ai_insights, career_coach,
+  // ai_interactions, recommendations, recommendations_meta,
+  // engagement_summary stay server-only).
 
-> Status updated 2026-08-20 — the V9.1 audit-fix sprint has RESOLVED the first 9 items (Phases 1–3, see [§12](#12-resolution-status-2026-08-20)); the rest remain OPEN. V9.1 findings are targeted in the `docs/todo.md` "v9.1 — Audit Fixes" section; carried-over items are in the "Open Improvements" section.
+  // DELETE:  match /{subcollection=**} { allow read, write: if isOwner(userId); }
+}
+```
 
-| ID | Category | Severity | Description | Status |
-|----|----------|----------|-------------|--------|
-| SEC-1 | Security | **HIGH** | Unrestricted placement write access (no createdBy, no schema) | ✅ **RESOLVED** |
-| SEC-2 | Security | **HIGH** | Students can forge application docs (create open on both paths) | ✅ **RESOLVED** |
-| SEC-3 | Security | **HIGH** | No placement authorship + no transition state machine in updateApplicationStatus | ✅ **RESOLVED** |
-| SEC-4 | Security | **HIGH** | Applications accepted for non-existent/closed/exceeded-deadline placements | ✅ **RESOLVED** |
-| BUG-A | Bug | **HIGH** | Mirror-missing crash rolls back canonical update | ✅ **RESOLVED** |
-| BUG-B | Bug | MEDIUM | Hard cast on userId crashes whole applicants query | ✅ **RESOLVED** |
-| BUG-D | Bug | MEDIUM | Fake Placement Rate / Active-per-Student metrics on teacher dashboard | ⏳ Open (Phase 4) |
-| SEC-5 | Security | MEDIUM | isOwner(appId) never matches canonical docs | ✅ **RESOLVED** |
-| SEC-6 | Security | LOW | placementApplicantsRoute not role-gated | ⏳ Open (Phase 4) |
-| SEC-7 | Security | LOW | No App Check (pre-existing) | ⏳ Open (IMP-6) |
-| INT-1 | Integration | MEDIUM | Alumni placements entry point missing | ⏳ Open (Phase 4) |
-| BUG-E | Bug | LOW | logPlacementApplication null-data guard | ✅ **RESOLVED** |
-| BUG-F | Bug | LOW | Stale applicant counts after status change | ⏳ Open (Phase 4) |
-| BUG-G | Bug | LOW | Broken "Resume" button for text-paste applications | ⏳ Open (Phase 4) |
-| BUG-H | Bug | LOW | Stale Application model doc comment | ✅ **RESOLVED** |
-| IMP-6 / SEC-3 (v9.0) | Security | MEDIUM | App Check (Play Integrity / DeviceCheck / reCAPTCHA) | Carried over |
-| IMP-8 | Scale | LOW | Pagination for bulk queries | Carried over |
-| IMP-9 | Scale | LOW | Materialize engagement aggregates | Carried over |
-| IMP-11 | Tech debt | LOW | Deprecate ai_conversations legacy collection | Carried over |
-| IMP-12 | Security | LOW | AI prompt input sanitization | Carried over |
-| IMP-15 | Architecture | ENH | Unified AI quota management | Carried over |
-| IMP-16 | Indexes | ENH | Firestore index for career_coach_usage pendingSince | Carried over |
+Then add the rules-unit-test (or a documented manual check) that `update({role:'teacher'})` is **denied**.
 
----
+**2. Fix SEC-2 by making the rules state the real writer per collection.** Once the catch-all is gone, decide explicitly:
+- `engagement_summary` & `recommendations`: if the client must keep writing them (today it does), grant `isOwner` **and** write a shape validator; if not, keep `write:false` and do step 3.
+- `career_coach`, `ai_insights`, `recommendations_meta`: server-only (no client grant) — this restores the AI+quota contract the rules claim.
 
-## 11. Verdict
+**3. Fix BUG-2: make the server the sole engagement writer.** Remove `EngagementService.recomputeEngagement` from `EngagementProvider.initWithUser`, have the client **read** `engagementSummaryStream`, and drop the redundant client `resumeReviewed` activity write. This is the change that lets the SEC-2 rules stay strict — SEC-2 and BUG-2 must ship together.
 
-**V9.1 as shipped (`9.1.0+97`) is NOT production-safe** because of SEC-1/SEC-2 (rules) and SEC-3/SEC-4 (functions) — all four are cheaply fixable in a sprint (items 1–5 in §9). The data model, dedupe algorithm, transactional mirroring, and UI flow are otherwise correct and well-tested. The main whole-app integration gaps are: alumni placement-management UI missing (INT-1) and the leftover fake teacher-dashboard metrics (BUG-D).
+### P1 — High-severity correctness
 
-Once items 1–11 in §9 are applied, V9.1 can be re-audited and closed out. The carried-over items (§8) remain tracked for future scale/security sprints.
+**4. Fix BUG-1: retention field name + index.** `functions/ai/chatDelete.js`: query `ai_interactions` by `timestamp` (what `askAI` writes), drop or transition-window the dead `ai_conversations` branch, and add a **collection-group** single-field index for `timestamp` to `firestore.indexes.json`. Add the unit test.
 
-> **Post-audit update (2026-08-20):** items 1–6, 10, 12 and 15 in §9 are now applied on disk (SEC-1..SEC-4, SEC-5, BUG-A, BUG-B, BUG-E, BUG-H). Remaining: items 7–9, 11, 13, 14 (BUG-D, SEC-6, INT-1, BUG-F, BUG-G) — see §12.
+**5. Deploy + test BUG-11 (already coded).** `firebase deploy --only functions`, then re-refresh active students' recommendations (or client-filter stale role cards). Add a test asserting a declared interest yields zero role cards.
 
----
+### P2 — Medium correctness, integrity & cost
 
-## 12. Resolution Status (2026-08-20)
+**6. Fix BUG-3: gate the snapshot copy behind the idempotency check** — move it inside the transaction path (or `exists()`-short-circuit), so a duplicate apply never overwrites the submitted resume.
+**7. Fix BUG-4: add `timeoutSeconds`** to `logPlacementApplication` (120) and `updateApplicationStatus` (60).
+**8. Fix BUG-5: source the teacher "Resume Review" metrics from `TeacherAnalyticsProvider`**, not the teacher's own `ResumeReviewProvider.history` (delete the duplicate section).
+**9. Fix BUG-6: copy `resume`/`resumeStoragePath`/`appliedAt` into the re-created mirror** and pass the already-read `placementData` to the notifier (drop the redundant read).
+**10. Fix PERF-1 (cost):** batch the per-student `engagement_summary` reads with a chunked `getAll()`, or (better) publish a single `analytics/teacher_snapshot` from `recomputeEngagementScores` and read one document per load. Bound the roster/resume-review/application scans with pagination + date windows.
+**11. Fix the `resumeReviews` field-ownership tamper (§4.1):** make the server the writer of `atsScore`/`aiAnalysis` (or shape-validate owner writes so a student cannot forge their own score into the teacher analytics).
 
-> Status of every V9.1 audit finding after the audit-fix sprint so far. Phases 1–3 of `docs/todo.md` are complete — the changes were verified on disk in `firestore.rules`, `functions/placements.js`, `functions/index.js`, `lib/models/application.dart` and `lib/models/placement.dart`. Phase 4 (UI/Integration), Phase 5 (tests) and Phase 6 (validate) remain.
+### P3 — Low-severity hygiene
 
-| ID | Status | Resolution |
-|----|--------|------------|
-| SEC-1 | ✅ **RESOLVED** | `firestore.rules` — placements `create/update/delete` now require `createdBy == request.auth.uid`; new `isValidPlacementData()` schema helper (deadline/postedAt are Timestamps, isActive is bool, company/role/description/eligibility/salary non-empty strings) applied to create + update. `Placement.fromFirestore` made tolerant of malformed `deadline`/`postedAt` (defense in depth). |
-| SEC-2 | ✅ **RESOLVED** | `firestore.rules` — application `create: if false` locked on BOTH canonical `applications/{applicationId}` and mirror `placements/{placementId}/applications/{appUserId}` paths; `logPlacementApplication` (Admin SDK) is the only writer. Closes self-promotion + phishing-resume chain. |
-| SEC-3 | ✅ **RESOLVED** | `functions/placements.js` — `updateApplicationStatus` verifies the actor authored the placement (`placements/{id}.createdBy == uid`), enforces the server-side `STATUS_TRANSITIONS` state machine (applied→[shortlisted,rejected], shortlisted→[interviewed,rejected], interviewed→[placed,rejected], terminal states []), and rate-limits per actor (`_checkStatusRateLimit`, 20/min, career-coach pattern). |
-| SEC-4 | ✅ **RESOLVED** | `functions/placements.js` — `logPlacementApplication` reads the placement doc inside the create transaction and rejects missing (`not-found`) / inactive / past-deadline (`failed-precondition`) placements. |
-| SEC-5 | ✅ **RESOLVED** | `firestore.rules` — collectionGroup owner rule changed from `isOwner(appId)` to `resource.data.userId == request.auth.uid` (works for canonical `{uid}_{placementId}` doc IDs). |
-| BUG-A | ✅ **RESOLVED** | `functions/placements.js` — mirror doc is `transaction.get`-checked inside `updateApplicationStatus`; a missing mirror is re-created via `transaction.set` so the canonical update no longer rolls back. |
-| BUG-B | ✅ **RESOLVED** | `lib/models/application.dart` — `userId: data['userId'] as String? ?? data['studentId'] as String? ?? ''` (no null-unsafe cast crash on legacy mirror docs). |
-| BUG-E | ✅ **RESOLVED** | `functions/placements.js` — `logPlacementApplication` null-guards `request.data` before destructuring (friendly `invalid-argument` instead of a wrapped TypeError). |
-| BUG-H | ✅ **RESOLVED** | `lib/models/application.dart` — status doc comment updated to `applied \| shortlisted \| interviewed \| placed \| rejected`. |
-| BUG-D | ⏳ OPEN | `lib/views/dashboards/widgets/teacher_dashboard_sections.dart` — `QuickStatistics`/`DepartmentOverview` still use activeDrives÷students; use `analytics.pipelinePlaced`. (todo.md Phase 4) |
-| BUG-F | ⏳ OPEN | `lib/views/placements/placement_applicants_view.dart` — refresh applicant counts after a successful status update. (todo.md Phase 4) |
-| BUG-G | ⏳ OPEN | `lib/views/placements/placement_applicants_view.dart` — show a "text resume" state instead of a dead Resume button for text-paste applications. (todo.md Phase 4) |
-| SEC-6 | ⏳ OPEN | `lib/main.dart` — role-gate `placementApplicantsRoute` (teacher/alumni-only guard, `_guardStudentPortfolio`/`_guardAlumniGroupChat` pattern). (todo.md Phase 4) |
-| INT-1 | ⏳ OPEN | `lib/views/dashboards/alumni_dashboard_view.dart` — add a "Placements" entry (quick action/tab) pointing at `placementsListRoute`. (todo.md Phase 4) |
-| SEC-7 / IMP-6 | ⏳ OPEN | App Check (Play Integrity / DeviceCheck / reCAPTCHA) — carried over to the security sprint. |
-| IMP-8/9/11/12/15/16 | ⏳ OPEN | Carried-over improvements — see §8 and `docs/todo.md` "Open Improvements". |
+**12.** BUG-7: `request.data || {}` in `deepAnalysis.js`.
+**13.** BUG-8: `.catchError((_) {})` (or store the future) in `LoadDedupe.begin`.
+**14.** BUG-9: re-sync `PlacementsProvider.updateUserProfile` on profile change, or drop the client pre-filter.
+**15.** BUG-10: delete `EngagementProvider.trackActivity` (and the client `logActivity` call).
+**16.** INT-1: add `match /resumes/{userId}/snapshots/{fileName}` to `storage.rules` **or** document the signed-URL-only design, and shorten the signed-URL expiry (2035 → minutes/hours, minted on demand).
+**17.** Chat messages: bind `delete` to `resource.data.senderId == request.auth.uid` (parity with `alumni_group_messages`).
+**18.** TEST-1: add the four `node --test` files (retention, snapshot immutability, status transitions, `logUserActivity` idempotency) — the fakes already exist.
+
+### Architecture bets (bigger, do after P0–P2)
+
+- **Materialize the teacher dashboard.** One scheduled `analytics/teacher_snapshot` doc turns a ~N+R+A+800-read load into a single read and removes the N+1 and the unbounded scans at once.
+- **Bound every collectionGroup scan** (`resumeReviews`, `applications`, `recommendations`) with pagination + date windows; push `pastMonths` server-side.
+- **One writer per document, everywhere.** SEC-2/BUG-2 are the same root cause; a short "who owns each collection" table (like §4.1) should live next to `firestore.rules` and be enforced by tests.
+- **Retire the legacy quota/collection shims** (`ai_usage`, `resume_usage`, `career_coach_usage`, `ai_analysis_usage`, `ai_conversations`) once the unified store has run clean for a release, so retention/cost reasoning stays simple.
 
 ---
 
-## Version History
+## 10. Carried-Over Open Items
 
-| Version | Date | Key Changes |
-|---------|------|-------------|
-| v9.1.1+98 | 2026-08-20 (in progress) | V9.1 audit fixes — Phases 1–3 complete (rules/functions/models: SEC-1..SEC-5, BUG-A/B/E/H); Phases 4–6 pending (UI, tests, validate) |
-| v9.1.0+97 | 2026-08-20 | Teacher Applicant Review / Placement Pipeline (this audit) |
-| v9.0.0+96 | 2026-08-18 | AI Career Coach + audits (see `docs/todo.md` History) |
-| v8.9.3+95 | 2026-08-18 | Recommendations fixes, portfolio-first gate |
-| v8.9.0+92 | 2026-08-16 | Recommendation engine, career roles |
-| v8.8.x | 2026-08-15 | AI chat, resume review, crash-safe quotas |
-| v8.4–8.7 | 2026-08-07..09 | Resume portfolio system, single-writer restoration, AI migration |
+**Resolved this cycle (confirmed in the tree — do not re-open):**
+
+| Item | Where it came from | Status |
+|---|---|---|
+| BUG-D — fake dashboard metric (hard-coded placement rate) | v9.1 report | **Fixed** — `analytics.pipelinePlaced` (`teacher_dashboard_sections.dart` 234/438/696) |
+| BUG-F — stale applicant counts after status change | v9.1 report | **Fixed** — `loadApplicantCounts()` re-run on status change |
+| BUG-G — dead “view text resume” button | v9.1 report | **Fixed** — `isTextResume` opens the text dialog |
+| SEC-6 — unguarded applicants route | v9.1 report | **Fixed** — `_guardPlacementApplicants` |
+| INT-1 (v9.1) — no placements entry on alumni dashboard | v9.1 report | **Fixed** — quick action at `alumni_dashboard_view.dart:602` |
+| v9.1 SEC-1…SEC-5, BUG-A/B/E/H | v9.1 report | **Resolved** |
+
+**Still open (carried forward):**
+
+- **App Check enforcement** must be switched on in the Firebase console for Firestore/Storage/Functions — the client code is correct but cannot self-enforce (§8.1).
+- **Signed-URL expiry** for placement snapshots is 2035 — a decade-long bearer token (§4.2, §8.3).
+- **Bounded reads / pagination** across teacher analytics and the pipeline scans (PERF-1, §7.4).
+- **Legacy collection retirement** (the old per-feature quota stores and `ai_conversations`).
+- **Functions test coverage** for placements/AI/triggers (TEST-1).
+- **`notesRoute`** legacy shim → `StudentDashboardView` (§5.4).
+
+---
+
+## 11. Verdict & Version History
+
+### Overall
+
+The **V9.2 optimization workstream is well done** — its client-side wins (lazy tabs, `LoadDedupe`, listener lifecycle, scheduler consolidation 7→5, unified quota store) are real and internally consistent, and `flutter analyze` is clean. **But V9.2 changed no security rules, and the rules contain a CRITICAL, exploitable defect** (SEC-1) that lets any signed-in user self-elevate to teacher/alumni and read the entire user base's PII, every resume review, every engagement summary, and every application. A second rules defect (SEC-2) silently voids five `write:false` guards and the points/append-only contracts. Two HIGH functional bugs (BUG-1 retention, BUG-2 dual engagement writer) produce wrong/expanding data.
+
+None of these is large. **Every finding in this report is a small, local fix.** The only non-local one is the SEC-2↔BUG-2 coupling (tightening the rule requires moving the engagement write server-side in the same change).
+
+### Ship order (one line each)
+
+1. **SEC-1** — delete the `users/{userId}` catch-all, enumerate the writable subcollections. *(emergency)*
+2. **BUG-2 + SEC-2 together** — server becomes the sole engagement writer; rules state the real writer per collection.
+3. **BUG-1** — retention field name + collection-group index.
+4. **BUG-11** — deploy the shipped engine fix (+ re-refresh, + test).
+5. **BUG-3 / BUG-4 / BUG-5 / BUG-6** — snapshot idempotency, timeouts, teacher-metric source, mirror fields.
+6. **PERF-1** — batch/materialize the teacher analytics reads.
+7. **BUG-7…BUG-10, INT-1, chat-delete, TEST-1** — hygiene.
+
+### Severity tally
+
+**1 CRITICAL · 3 HIGH · 6 MEDIUM · 7 LOW** (SEC-1; SEC-2, BUG-1, BUG-2; BUG-3, BUG-4, BUG-5, BUG-6, BUG-11, PERF-1; BUG-7, BUG-8, BUG-9, BUG-10, INT-1, TEST-1, chat-delete).
+
+### Version history
+
+| Version | Report | Highlights |
+|---|---|---|
+| V9.0 | `docs/v8_workspace_tracker.md` | Architecture pass: function re-export layout (ARCH-2), unified quota work begins. |
+| V9.1 | prior `docs/confirmation.md` | Closed SEC-1…SEC-5 (v9.1), BUG-A/B/E/H; left BUG-D/F/G + SEC-6 + INT-1 open. |
+| V9.2 | this report | Optimization workstream verified; **BUG-D/F/G, SEC-6, INT-1 confirmed fixed**. New: SEC-1, SEC-2, BUG-1, BUG-2, BUG-3, BUG-4, BUG-5, BUG-6, PERF-1, INT-1(storage), TEST-1, plus **BUG-11 (fixed in code this pass)**. |
+
+*Method note:* rule semantics were verified against the Firebase documentation (*Structuring Cloud Firestore Security Rules*, “Version 2” recursive wildcards and “Overlapping match statements”), and the BUG-11 fix was executed and observed (`node` harness: declared-goal profile → 0 role cards; undeclared profile → 2 discovery cards). Where a claim depends on the deployed project rather than source (App Check enforcement, the `profileCompleted` index), it is marked “confirm-on-deploy” rather than asserted.

@@ -55,6 +55,14 @@ service cloud.firestore {
     // This closes the privilege-escalation hole where a signed-in student
     // could set their own `role` to 'teacher'/'alumni' and thereby gain read
     // access to every user document (PII), every resume and all analytics.
+    //
+    // v9.2 audit (SEC-1): this guard only actually RUNS because the recursive
+    // catch-all that used to sit under `users/{userId}` has been deleted (see
+    // the note inside that match block). While it existed it granted the owner
+    // an unconditional `write` on the parent path — under `rules_version = '2'`
+    // a `{subcollection=**}` wildcard matches zero segments, so it overlapped
+    // the user document itself and, because Firestore rules are additive with
+    // no deny precedence, silently overrode this function entirely.
     function canWriteRole(userId) {
       return !exists(/databases/$(database)/documents/users/$(userId))
           || !('role' in resource.data)
@@ -90,9 +98,15 @@ service cloud.firestore {
     // USERS COLLECTION (with subcollections)
     // ===============================================
     match /users/{userId} {
-      // Users can always read/write their own profile, except their
-      // immutable `role` field (canWriteRole guard — see F1 above).
-      allow read, write: if isOwner(userId) && canWriteRole(userId);
+      // Users can always READ their own profile.
+      allow read: if isOwner(userId);
+      // ...and write it, EXCEPT the immutable `role` field (canWriteRole
+      // guard — see F1/SEC-1 above). v9.2 audit (SEC-1): read and write are
+      // split so that `canWriteRole` is no longer also gating reads (a
+      // non-existent/partial doc can never deny the owner access to their own
+      // profile) and so the write rule is unambiguously the only owner-write
+      // grant on this path.
+      allow write: if isOwner(userId) && canWriteRole(userId);
       // v8.1: Teachers can read any user profile for analytics
       allow read: if isTeacher();
       // v8.4: Alumni read-only access to student portfolios
@@ -110,7 +124,7 @@ service cloud.firestore {
       allow read: if isAuthenticated() &&
         resource.data.role == 'alumni' &&
         resource.data.profileCompleted == true;
-      
+
       // Notifications subcollection
       // v7.3: Enhanced - allow system notifications creation
       // F7 (security): creation is owner-only. System notifications
@@ -126,7 +140,7 @@ service cloud.firestore {
         allow create: if isOwner(userId);
         allow delete: if isOwner(userId);
       }
-      
+
       // v6.5: AI Insights (read-only, Cloud Functions write)
       match /ai_insights/{insightId} {
         allow read: if isOwner(userId);
@@ -139,6 +153,10 @@ service cloud.firestore {
       // Identity is `request.auth.uid` (isOwner), so another user's
       // ai_interactions can never be deleted. update stays false — history
       // is append-only; edits go through the delete+resave path.
+      //
+      // v9.2 audit (SEC-2): `update: false` is only actually enforced because
+      // the `users/{userId}` catch-all is gone; while it existed the owner
+      // could rewrite their own chat turns.
       match /ai_interactions/{interactionId} {
         allow read, create: if isOwner(userId);
         allow delete: if isOwner(userId);
@@ -146,9 +164,20 @@ service cloud.firestore {
       }
 
       // v7.4: Recommendation feed (Cloud Functions managed)
+      //
+      // v9.2 audit (SEC-2): the client does NOT author recommendation
+      // documents — `recommendations/engine.js` is the single writer. The ONE
+      // legitimate client write is interaction tracking
+      // (`RecommendationService.markRecommendationInteracted` →
+      // `metadata.interactedAt`), so update is narrowed to that single key
+      // and create/delete stay server-only (previously the catch-all made the
+      // whole collection client-writable, defeating both the single-writer
+      // contract and the fabricated-score protection).
       match /recommendations/{recommendationId} {
         allow read: if isOwner(userId);
-        allow write: if false;
+        allow update: if isOwner(userId) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['metadata']);
+        allow create, delete: if false;
       }
 
       // v7.4: Recommendation metadata (Cloud Functions managed)
@@ -157,39 +186,56 @@ service cloud.firestore {
         allow write: if false;
       }
 
-      // v7.4: Engagement score summary (Cloud Functions / service managed)
+      // v7.4: Engagement score summary (Cloud Functions managed)
       // v8.2: Teachers can read any student's engagement summary for analytics
+      //
+      // v9.2 audit (SEC-2 + BUG-2): the client recompute that used to write
+      // this document on every login is removed — the server's
+      // `logUserActivity` (aggregates) + `recomputeEngagementSummary`
+      // (score/badges) are now the SOLE writers, so `write: false` is both
+      // accurate and enforceable. Clients only read the summary stream.
       match /engagement_summary/{summaryId} {
         allow read: if isOwner(userId) || isTeacher();
         allow write: if false;
       }
 
       // v7.4: User activity log
-      // v8.8.3 (MED-5): create is OWNER-ONLY AND restricts the payload to the
-      // sole legitimate client write — the Resume Reviewer logs a
-      // `resumeReviewed` activity worth exactly 5 points (ResumeReviewProvider
-      // on success). A client forging arbitrary `points` or event types
-      // (e.g. 99999 points, or many `chatMessageSent` events) can no longer
-      // self-award the Active Student / Networking Pro badges. The server's
-      // own `logUserActivity` uses the Admin SDK and bypasses rules, so the
-      // engagement/recommendation pipeline is unaffected.
+      //
+      // v9.2 audit (BUG-2/BUG-10): activities are now written EXCLUSIVELY by
+      // the server's `logUserActivity` (Admin SDK, bypasses rules) — the
+      // redundant client `resumeReviewed` write in ResumeReviewProvider was
+      // removed and the dead `EngagementProvider.trackActivity` deleted.
+      // Clients therefore have NO legitimate create path, so the previous
+      // MED-5 points guard (which only ever whitelisted the client's own
+      // 5-point write) is replaced by a hard deny: the double-count is fixed
+      // at its source instead of being policed.
       match /activities/{activityId} {
         allow read: if isOwner(userId);
-        allow create: if isOwner(userId) &&
-          request.resource.data.userId == request.auth.uid &&
-          request.resource.data.eventType == 'resumeReviewed' &&
-          request.resource.data.points == 5;
-        allow update, delete: if false;
+        allow create, update, delete: if false;
       }
-      
+
       // v6.8: Resume Review History
       // v6.95: Added aiAnalysis, aiGeneratedAt, aiProviderUsed fields
       //        (written by Cloud Function generateResumeAnalysis)
       // v8.1: Teachers can read any student's resume reviews for analytics
+      //
+      // v9.2 audit (§4.1, "resumeReviews is fully owner-writable"): the
+      // CREATE path is now server-only. `reviewResume` persists the review
+      // with the Admin SDK (which bypasses rules), and `generateResumeAnalysis`
+      // adds the AI deep-analysis fields afterwards — both are trusted writers.
+      // The client no longer writes this collection at all, so a student can no
+      // longer forge an `atsScore`/`strengths` document for the teacher
+      // analytics roll-ups. Owners keep read + delete of their own reviews.
+      //
+      // NOTE: the teacher collectionGroup read rule below must stay an
+      // UNCONDITIONAL `isTeacher()` check — a rule that referenced a document
+      // field (e.g. `verified`) would require the existing unbounded
+      // `collectionGroup('resumeReviews')` query to constrain that field, and
+      // Firestore would otherwise deny the whole query.
       match /resumeReviews/{reviewId} {
         allow read: if isOwner(userId) || isTeacher();
-        allow create: if isOwner(userId);
-        allow update, delete: if isOwner(userId);
+        allow create, update: if false;
+        allow delete: if isOwner(userId);
       }
 
       // v9.0: Career Coach analysis (Cloud Functions managed)
@@ -201,10 +247,29 @@ service cloud.firestore {
         allow write: if false;
       }
 
-      // All other subcollections under users/{uid}
-      match /{subcollection=**} {
-        allow read, write: if isOwner(userId);
-      }
+      // ===============================================
+      // v9.2 audit (SEC-1 / SEC-2): the recursive catch-all that used to live
+      // here is DELETED:
+      //
+      //   match /{subcollection=**} { allow read, write: if isOwner(userId); }
+      //
+      // Under `rules_version = '2'` a recursive wildcard matches ZERO OR MORE
+      // path items, so it also matched `/users/{userId}` ITSELF. Firestore
+      // rules are additive and have no deny precedence, so the owner branch
+      // granted the parent-document write regardless of `canWriteRole` — a
+      // one-line client write (`update({role:'teacher'})`) was a full
+      // privilege-escalation primitive — and simultaneously voided every
+      // `write: false` declared above (ai_insights, recommendations,
+      // recommendations_meta, engagement_summary, career_coach, the
+      // activities points guard and the ai_interactions `update: false`).
+      //
+      // The only safe fix is to not grant the access at all. Every genuinely
+      // client-writable subcollection is now enumerated EXPLICITLY above
+      // (notifications, resumeReviews owner-create/delete, recommendations
+      // interaction metadata). Everything else under `users/{uid}` — and any
+      // subcollection added in future — is reachable only through the Admin
+      // SDK (Cloud Functions), which bypasses rules.
+      // ===============================================
     }
 
     // ===============================================
@@ -433,12 +498,25 @@ service cloud.firestore {
                     request.auth.uid in request.resource.data.participantIds;
 
       // Chat messages subcollection
+      //
+      // v9.2 audit (§4.1, "Chat messages are deletable by any participant"):
+      // the previous `allow read, write` granted DELETE to every participant,
+      // so one participant could delete another's message — there was no
+      // sender binding (unlike `alumni_group_messages`). Reads and creates
+      // stay participant-scoped (create additionally binds `senderId` to the
+      // caller, so a forged sender cannot be written), while update/delete are
+      // now restricted to the message's OWN sender.
       match /messages/{messageId} {
-        // Only participants can read/write messages
-        allow read, write: if isAuthenticated() &&
-                            request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
+        // Only participants can read messages
+        allow read: if isAuthenticated() &&
+                    request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
+        // A participant may send a message, but only as themselves.
         allow create: if isAuthenticated() &&
-                      request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
+                      request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds &&
+                      request.resource.data.senderId == request.auth.uid;
+        // Only the sender may edit or delete their own message.
+        allow update, delete: if isAuthenticated() &&
+                              resource.data.senderId == request.auth.uid;
       }
     }
 
@@ -447,6 +525,11 @@ service cloud.firestore {
     // Allow teachers to query resume reviews across all users
     // for aggregate analytics (stats, skill gaps, trends).
     // ===============================================
+    // v9.2 audit (§4.1): the tamper is closed at the WRITE side (owner create
+    // is denied above; only the Admin SDK writes reviews) rather than by a
+    // `verified` field gate here — a field-referencing rule would force the
+    // existing unbounded `collectionGroup('resumeReviews')` analytics query to
+    // add a matching constraint, and Firestore would otherwise deny it.
     match /{path=**}/resumeReviews/{reviewId} {
       allow read: if isTeacher();
     }
@@ -457,8 +540,8 @@ service cloud.firestore {
     // aggregate intelligence (career goals, target roles, skill gaps,
     // placement match distribution). Recommendation docs contain only the
     // engine fields — role/targetRole, skills, reason, scores — never
-    // private resume text or full student profiles. Students remain the
-    // only writers (write:false everywhere) and owners retain read.
+    // private resume text or full student profiles. The server engine remains
+    // the only writer (`write: false` everywhere) and owners retain read.
     // ===============================================
     match /{path=**}/recommendations/{recommendationId} {
       allow read: if isTeacher();

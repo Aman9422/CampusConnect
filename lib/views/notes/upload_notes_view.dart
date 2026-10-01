@@ -49,13 +49,15 @@ class _UploadNotesViewState extends State<UploadNotesView> {
   }
 
   Future<void> _loadRecentUploads() async {
+    // v9.2: read the provider before the async gap so no BuildContext is
+    // used after an await.
+    final profile = context.read<ProfileProvider>().profile;
     try {
       // For now, use existing getAllNotes and filter client-side
       // In Phase 2, we'll add proper teacher-specific methods
       final allNotesSnapshot = await NotesService.instance()
           .getAllNotes()
           .first;
-      final profile = context.read<ProfileProvider>().profile;
 
       if (profile != null) {
         final teacherNotes = allNotesSnapshot
@@ -323,7 +325,7 @@ class _UploadNotesViewState extends State<UploadNotesView> {
 
           // Year dropdown
           DropdownButtonFormField<String>(
-            value: _selectedYear,
+            initialValue: _selectedYear,
             decoration: InputDecoration(
               labelText: 'Target Year *',
               border: OutlineInputBorder(
@@ -463,7 +465,8 @@ class _UploadNotesViewState extends State<UploadNotesView> {
         _subjectController.clear();
         _departmentController.clear();
         _descriptionController.clear();
-        _urlController.clear(); // v7.6: Clear URL field after successful submission
+        _urlController
+            .clear(); // v7.6: Clear URL field after successful submission
         setState(() {
           _selectedYear = '1';
         });

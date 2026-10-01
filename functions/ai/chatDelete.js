@@ -88,8 +88,16 @@ exports.deleteAIHistory = onCall(
  * v8.8 (P6): automatically remove expired AI conversation data.
  *
  * Runs daily and deletes ONLY:
- *   - users/{uid}/ai_interactions/* with createdAt < cutoff
- *   - ai_conversations/*            with timestamp < cutoff
+ *   - users/{uid}/ai_interactions/* with timestamp < cutoff
+ *   - ai_conversations/*            with timestamp < cutoff (legacy, empty)
+ *
+ * v9.2 audit (BUG-1): the `ai_interactions` filter previously used
+ * `createdAt`, but `askAI` writes the field **`timestamp`** — so the query
+ * matched zero documents and the 90-day retention window was never actually
+ * enforced (unbounded growth + a privacy-retention failure). The field is now
+ * `timestamp`, which is what `askAI` writes. This range query is a
+ * COLLECTION_GROUP query, so it also needs the collection-group single-field
+ * index declared in `firestore.indexes.json` (`fieldOverrides`).
  *
  * Retention period is configurable via AI_RETENTION_DAYS (default 90).
  */
@@ -115,9 +123,12 @@ exports.cleanupExpiredAIConversations = onSchedule(
       let deleted = 0;
 
       try {
+        // v9.2 audit (BUG-1): filter by `timestamp` (the field `askAI`
+        // actually writes) — the previous `createdAt` filter never matched
+        // and the retention window was silently never enforced.
         const interactionsSnapshot = await admin.firestore()
             .collectionGroup("ai_interactions")
-            .where("createdAt", "<", cutoff)
+            .where("timestamp", "<", cutoff)
             .limit(5000)
             .get();
         deleted += await deleteDocsInBatches(interactionsSnapshot.docs);

@@ -667,7 +667,7 @@ class _EditPortfolioScreenState extends State<EditPortfolioScreen> {
         ),
         const SizedBox(height: AppTheme.space8),
         DropdownButtonFormField<String>(
-          value: value,
+          initialValue: value,
           decoration: InputDecoration(
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
@@ -869,7 +869,7 @@ class _SkillDialogState extends State<_SkillDialog> {
             ),
             const SizedBox(height: AppTheme.space16),
             DropdownButtonFormField<String>(
-              value: _category,
+              initialValue: _category,
               decoration: const InputDecoration(labelText: 'Category'),
               items: SkillModel.suggestionCategories
                   .map(
@@ -885,7 +885,7 @@ class _SkillDialogState extends State<_SkillDialog> {
             ),
             const SizedBox(height: AppTheme.space16),
             DropdownButtonFormField<String>(
-              value: _proficiency,
+              initialValue: _proficiency,
               decoration: const InputDecoration(labelText: 'Proficiency'),
               items: SkillModel.proficiencyLevels
                   .map(

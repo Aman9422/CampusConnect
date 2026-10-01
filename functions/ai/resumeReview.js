@@ -11,7 +11,6 @@
  */
 
 const {onCall} = require("firebase-functions/v2/https");
-const {onSchedule} = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
 const crypto = require("crypto");
 // v8.5 (R2): server-side PDF → text extraction for the Resume Reviewer.
@@ -31,8 +30,6 @@ const quota = require("./quota");
 const RESUME_MONTHLY_LIMIT = 5; // Free reviews per month
 const RESUME_MAX_LENGTH = 5000; // Maximum resume characters
 const RESUME_MIN_LENGTH = 100; // Minimum resume characters
-/** v8.8.2 (A): age after which an un-cleared reservation is considered stale. */
-const RESUME_RESERVATION_STALE_HOURS = 24;
 
 // ===============================================
 // EXPORTS
@@ -124,7 +121,7 @@ exports.reviewResume = onCall(
         // stamps a per-request `pendingRequestId` / `pendingSince` on the
         // usage doc, so a 500/function-crash AFTER quota consumption but
         // BEFORE the AI-failure rollback no longer permanently burns a
-        // credit — the daily `compensateStaleResumeQuota` sweep refunds any
+        // credit — the daily `compensateStaleAIQuotas` sweep refunds any
         // reservation left stale for >24h. The reservation is cleared on
         // success (credit kept, review delivered) and on AI-failure rollback
         // (credit returned).
@@ -176,6 +173,22 @@ exports.reviewResume = onCall(
           );
         }
 
+        // v9.2 audit (§4.1, "resumeReviews is fully owner-writable"):
+        // persist the review SERVER-side. The client no longer has create or
+        // update access to `users/{uid}/resumeReviews` (firestore.rules), so
+        // this Admin SDK write is the only way a review enters the collection
+        // — a student can no longer hand-write an `atsScore` / `aiAnalysis`
+        // document into the teacher analytics roll-ups. Best-effort: the AI
+        // call already succeeded and the monthly credit is already spent, so
+        // a persistence failure must not fail the request (the caller still
+        // receives the review, it just will not appear in history).
+        let reviewId = null;
+        try {
+          reviewId = await persistResumeReview(userId, reviewResult, targetRole);
+        } catch (persistError) {
+          console.error("reviewResume: failed to persist review:", persistError);
+        }
+
         // Log analytics event
         await logAnalyticsEvent({
           eventType: "resume_review_completed",
@@ -190,10 +203,12 @@ exports.reviewResume = onCall(
           },
         });
 
-        // Return successful response (unchanged shape for the client).
+        // Return successful response. `reviewId` is the persisted document id
+        // (null when the best-effort persist failed).
         return {
           review: reviewResult,
           usage: usageData,
+          reviewId: reviewId,
         };
 
       } catch (error) {
@@ -206,62 +221,6 @@ exports.reviewResume = onCall(
             "internal",
             "Failed to analyze resume. Please try again later."
         );
-      }
-    }
-);
-
-/**
- * v8.8.2 (A, HIGH): daily sweep that refunds resume review credits whose
- * reservation was left stale by a crash/500 in `reviewResume`.
- *
- * If a function container dies AFTER `consumeResumeQuota` incremented the
- * count but BEFORE the AI-failure rollback could run, the usage doc carries a
- * `pendingRequestId` / `pendingSince` reservation with no one left to clear
- * it. This daily sweep refunds those credits so the user is never permanently
- * charged for a review that was never delivered.
- *
- * Safety contract:
- *   - Runs daily at 04:00 UTC (after the 03:00 AI-conversation cleanup).
- *   - Only touches docs where `pendingSince` is older than 24h — genuine
- *     in-flight requests (AI calls can take up to the 120s timeout) are
- *     never refunded out from under a running request.
- *   - Decrement + reservation clear happen atomically per user in a
- *     transaction (no double-refund: `clearResumeReservation` and
- *     `rollbackResumeUsage` clear the reservation too).
- *   - Never clears `monthlyCount` below 0 and never touches documents
- *     without a reservation.
- *   - Aggregate log only (userId + refunded count) — no review content.
- */
-exports.compensateStaleResumeQuota = onSchedule(
-    {
-      schedule: "every day 04:00",
-      region: "us-central1",
-      timeZone: "UTC",
-    },
-    async () => {
-      const cutoff = admin.firestore.Timestamp.fromMillis(
-          Date.now() - RESUME_RESERVATION_STALE_HOURS * 60 * 60 * 1000
-      );
-
-      console.log(
-          `compensateStaleResumeQuota: refunding reservations older than ` +
-          `${cutoff.toDate().toISOString()}`
-      );
-
-      // v9.0 (IMP-15): the unified `user_ai_quotas/{uid}` doc is now the
-      // authoritative quota store, so the sweep must refund BOTH the legacy
-      // `resume_usage/{uid}` mirror AND the unified doc atomically.
-      // `runFeatureSweep` queries the union of users with a stale reservation
-      // in either store and refunds each user once across both — no double
-      // refund, no unified/legacy divergence.
-      let compensated = 0;
-      try {
-        compensated = await quota.runFeatureSweep("resumeReview", cutoff);
-        console.log(
-            `compensateStaleResumeQuota: refunded ${compensated} stale credit(s)`
-        );
-      } catch (error) {
-        console.error("compensateStaleResumeQuota error:", error);
       }
     }
 );
@@ -397,7 +356,7 @@ async function getResumeUsage(userId) {
  * v8.8.2 (A, HIGH): the consumed credit is now a per-request RESERVATION.
  * `pendingRequestId` / `pendingSince` are stamped on the usage doc at
  * consumption time so a crash/500 between consumption and the AI-failure
- * rollback can be detected and refunded by `compensateStaleResumeQuota`.
+ * rollback can be detected and refunded by `compensateStaleAIQuotas`.
  * The reservation is cleared by [clearResumeReservation] on success and by
  * [rollbackResumeUsage] on AI failure.
  *
@@ -416,7 +375,7 @@ async function consumeResumeQuota(userId, requestId) {
  * Called after a successful review (credit is kept — the reservation is just
  * un-stamped so the compensation sweep never refunds a delivered review).
  * Idempotent and best-effort: a stale reservation is harmless because
- * [compensateStaleResumeQuota] refunds it.
+ * [compensateStaleAIQuotas] refunds it.
  *
  * @param {string} userId - User's Firebase Auth ID
  * @param {string} requestId - The request id that owns the reservation
@@ -446,4 +405,56 @@ async function clearResumeReservation(userId, requestId) {
  */
 async function rollbackResumeUsage(userId, requestId) {
   return quota.rollbackFeatureQuota(userId, "resumeReview", requestId);
+}
+/**
+ * v9.2 audit (§4.1, "resumeReviews is fully owner-writable"): persist a
+ * completed review to `users/{uid}/resumeReviews/{autoId}` with the Admin SDK.
+ *
+ * This is the ONLY writer of the collection (the owner create/update rules are
+ * `false`), so a client can no longer forge an `atsScore` / `aiAnalysis`
+ * document into the teacher analytics roll-ups.
+ *
+ * Field shape must stay in sync with `ResumeReviewHistory.fromFirestore`
+ * (`lib/models/resume_review.dart`) and `ResumeHistoryService.saveReview`
+ * (the deleted client writer).
+ *
+ * @param {string} userId - Authenticated user id (from request.auth.uid)
+ * @param {object} reviewResult - AI review payload
+ * @param {string|undefined} targetRole - Requested target role
+ * @returns {Promise<string>} The persisted document id
+ */
+async function persistResumeReview(userId, reviewResult, targetRole) {
+  const now = new Date();
+  // UTC month key — the server is the single writer, so the streak/month
+  // bucketing no longer has to agree with a client-local clock.
+  const monthKey =
+      `${now.getUTCFullYear()}-` +
+      `${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+
+  const ref = await admin.firestore()
+      .collection("users")
+      .doc(userId)
+      .collection("resumeReviews")
+      .add({
+        userId,
+        atsScore: typeof reviewResult.atsScore === "number" ?
+          reviewResult.atsScore : 0,
+        strengths: reviewResult.strengths || [],
+        missingKeywords: reviewResult.missingKeywords || [],
+        formatIssues: reviewResult.formatIssues || [],
+        bulletImprovements: reviewResult.bulletImprovements || [],
+        sectionAdvice: reviewResult.sectionAdvice || {},
+        overallAdvice: reviewResult.overallAdvice || "",
+        hireabilityVerdict: reviewResult.hireabilityVerdict || "",
+        targetRole: targetRole || null,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        monthKey,
+        // Marks this as a server-authored review (informational; the rules no
+        // longer gate on it because a field-referencing rule would break the
+        // unbounded teacher collectionGroup query).
+        source: "server",
+      });
+
+  console.log(`reviewResume: persisted review ${ref.id} for user ${userId}`);
+  return ref.id;
 }

@@ -494,6 +494,55 @@ function buildRoleReason(match) {
 }
 
 /**
+ * v9.1.1 (de-dupe): has the student ALREADY declared interest in a role?
+ *
+ * "Career match: Mobile Developer" shown to a student who explicitly chose
+ * "App Development" as their career interest is redundant — the app is
+ * re-offering a path the student already told the app they want. This
+ * helper reads ONLY the stated-intent signal set (careerPhrases /
+ * careerSignals: careerInterest, interests, preferredRoles, objective),
+ * NOT demonstrated evidence, and returns true when any of a role's keyword
+ * aliases overlaps the student's declaration.
+ *
+ *   - Exact phrase/token match: keyword "App Development" ∈ careerPhrases,
+ *     single-token keyword "Developer" ∈ careerSignals.
+ *   - STRICT full-token containment for multi-word keywords: every token of
+ *     the alias appears among the student's declared-interest tokens. This
+ *     maps a near-variant the student typed ("Full Stack Developer" ⇒ the
+ *     "Full Stack" alias) WITHOUT letting one shared word claim a role it
+ *     does not declare — "Web Development" sharing only "development" must
+ *     NOT match a student who declared "App Development".
+ *
+ * @param {object} role - A role from CAREER_ROLES
+ * @param {object} u - Output of extractUserSignals
+ * @returns {boolean} true when the student already declared this role
+ */
+function isDeclaredRole(role, u) {
+  const phraseSet = u.careerPhrases || new Set();
+  const careerSignals = u.careerSignals || new Set();
+
+  for (const keyword of role.keywords) {
+    const key = keyword.toLowerCase();
+    // Exact phrase/token: the student literally named this role alias
+    // ("App Development", "Web Development", or a single token like
+    // "Developer").
+    if (phraseSet.has(key) || careerSignals.has(key)) return true;
+
+    // STRICT full-token containment (deliberately NOT the matchRole majority
+    // rule): a majority overlap is fine for adding a small keyword bonus,
+    // but here the cost of a false positive is suppressing an entire card.
+    // Requiring ALL of a multi-word alias's tokens in the declared interest
+    // means "App Development" (tokens app, development) cannot claim the
+    // unrelated "Web Development" alias (tokens web, development).
+    const kwTokens = [...normalizeTokens([key])];
+    if (kwTokens.length <= 1) continue;
+    const allPresent = kwTokens.every((token) => careerSignals.has(token));
+    if (allPresent) return true;
+  }
+  return false;
+}
+
+/**
  * Build the top career-role recommendation documents.
  *
  * @returns {Array<object>} Role recommendation payloads (max 2)
@@ -506,6 +555,25 @@ function buildRoleRecommendations(u, userId) {
   // evidence, matchRole's keyword bonus alone would surface a role card
   // that is exactly the "Software Engineer still coming" report.
   if (!u.hasMeaningfulPortfolioContent) {
+    return [];
+  }
+
+  // v9.1.1 (de-dupe) + v9.2 (fix): the student's stated career interest
+  // already "claims" certain roles (e.g. "App Development" → Mobile
+  // Developer). v9.1.1 suppressed only the EXACT declared role, which still
+  // left a redundant "Career match: <other role>" card (e.g. "Web Developer
+  // · 26% role fit" shown to an App-Development student). v9.2: when the
+  // student has declared ANY career interest that maps to a known role, emit
+  // NO role cards at all — the student has already chosen their path, so
+  // re-offering career matches is noise. Students who have NOT declared an
+  // interest still receive up to two discovery role cards.
+  const declaredRoleIds = new Set(
+    CAREER_ROLES
+      .filter((role) => isDeclaredRole(role, u))
+      .map((role) => role.id),
+  );
+
+  if (declaredRoleIds.size > 0) {
     return [];
   }
 
@@ -758,4 +826,6 @@ module.exports = {
   classifyPlacementMatch,
   extractPortfolio,
   extractUserSignals,
+  // v9.1.1 (de-dupe): exported so the suppression rule is unit-testable.
+  isDeclaredRole,
 };

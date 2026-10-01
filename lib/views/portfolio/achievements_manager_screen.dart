@@ -359,7 +359,7 @@ class _AchievementFormScreenState extends State<_AchievementFormScreen> {
         ),
         const SizedBox(height: AppTheme.space8),
         DropdownButtonFormField<String>(
-          value: _category,
+          initialValue: _category,
           decoration: InputDecoration(
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),

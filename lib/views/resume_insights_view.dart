@@ -657,9 +657,9 @@ class _RoadmapPhase extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(AppTheme.space12),
       decoration: BoxDecoration(
-        color: color.withOpacity(isDark ? 0.1 : 0.05),
+        color: color.withValues(alpha: isDark ? 0.1 : 0.05),
         borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
-        border: Border.all(color: color.withOpacity(isDark ? 0.2 : 0.15)),
+        border: Border.all(color: color.withValues(alpha: isDark ? 0.2 : 0.15)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

@@ -188,7 +188,9 @@ class SkillsGrid extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(AppTheme.space12),
                   decoration: BoxDecoration(
-                    color: AppTheme.primaryBlue.withOpacity(isDark ? 0.2 : 0.1),
+                    color: AppTheme.primaryBlue.withValues(
+                      alpha: isDark ? 0.2 : 0.1,
+                    ),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(

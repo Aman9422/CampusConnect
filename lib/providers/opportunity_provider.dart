@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:campusconnect/models/opportunity.dart';
 import 'package:campusconnect/models/student_profile.dart';
 import 'package:campusconnect/services/firestore/opportunity_service.dart';
@@ -30,6 +32,13 @@ class OpportunityProvider extends ChangeNotifier {
   bool _isUpdating = false;
   String? _searchQuery;
   Map<String, String?> _activeFilters = {};
+
+  /// v9.2 (P2): retained real-time subscriptions. Previously
+  /// `startListeningTo*` created untracked [StreamSubscription]s that leaked
+  /// across logout / re-login (duplicate listeners + `WatchStream ... NOT
+  /// FOUND`). Cancelled in [reset] / [dispose].
+  StreamSubscription<List<Opportunity>>? _activeOpportunitiesSubscription;
+  StreamSubscription<List<Opportunity>>? _alumniOpportunitiesSubscription;
 
   // Getters
   List<Opportunity>? get opportunities => _opportunities;
@@ -443,7 +452,10 @@ class OpportunityProvider extends ChangeNotifier {
   /// Stream methods for real-time updates
   /// Start listening to active opportunities
   void startListeningToActiveOpportunities() {
-    _opportunityService.activeOpportunitiesStream().listen(
+    _activeOpportunitiesSubscription?.cancel();
+    _activeOpportunitiesSubscription = _opportunityService
+        .activeOpportunitiesStream()
+        .listen(
       (opportunities) {
         if (!_isDisposed) {
           _opportunities = opportunities;
@@ -462,7 +474,8 @@ class OpportunityProvider extends ChangeNotifier {
 
   /// Start listening to alumni's opportunities
   void startListeningToAlumniOpportunities(String alumniId) {
-    _opportunityService
+    _alumniOpportunitiesSubscription?.cancel();
+    _alumniOpportunitiesSubscription = _opportunityService
         .alumniOpportunitiesStream(alumniId)
         .listen(
           (opportunities) {
@@ -583,6 +596,13 @@ class OpportunityProvider extends ChangeNotifier {
   /// Reset provider (on logout)
   void reset() {
     _isDisposed = true;
+    // v9.2 (P2): cancel real-time subscriptions so no listener survives
+    // logout (prevents duplicate listeners + the `WatchStream ... NOT_FOUND`
+    // warning on the next login).
+    _activeOpportunitiesSubscription?.cancel();
+    _activeOpportunitiesSubscription = null;
+    _alumniOpportunitiesSubscription?.cancel();
+    _alumniOpportunitiesSubscription = null;
     _opportunities = null;
     _myOpportunities = null;
     _recentOpportunities = null;
@@ -597,5 +617,14 @@ class OpportunityProvider extends ChangeNotifier {
     _searchQuery = null;
     _activeFilters = {};
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    // v9.2 (P2): cancel any live subscriptions on provider disposal so no
+    // listener survives app teardown (reset() cancels them on logout).
+    _activeOpportunitiesSubscription?.cancel();
+    _alumniOpportunitiesSubscription?.cancel();
+    super.dispose();
   }
 }

@@ -257,7 +257,9 @@ class _CreateOpportunityViewState extends State<CreateOpportunityView> {
         color: isDark ? AppTheme.darkSurface : Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isDark ? AppTheme.gray700.withValues(alpha: 0.3) : AppTheme.gray200,
+          color: isDark
+              ? AppTheme.gray700.withValues(alpha: 0.3)
+              : AppTheme.gray200,
         ),
       ),
       child: Column(
@@ -350,7 +352,7 @@ class _CreateOpportunityViewState extends State<CreateOpportunityView> {
         ),
         const SizedBox(height: 8),
         DropdownButtonFormField<String>(
-          value: _selectedJobType,
+          initialValue: _selectedJobType,
           decoration: InputDecoration(
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),

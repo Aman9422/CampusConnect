@@ -1,8 +1,11 @@
 /**
  * CampusConnect — Scheduled Cloud Functions (cron jobs).
  *
- * All `onSchedule` functions live here EXCEPT the quota compensation sweeps
- * (those live next to their respective callable modules for cohesion).
+ * v9.2 (P1): this module now owns ALL scheduled functions, including the
+ * consolidated AI quota compensation sweep (`compensateStaleAIQuotas`).
+ * Previously the three per-feature sweeps lived next to their callable
+ * modules (careerCoach.js, ai/resumeReview.js, ai/deepAnalysis.js); they were
+ * consolidated into one job here that calls the same `quota.runFeatureSweep`.
  *
  * Extracted from `index.js` (v9.0 ARCH-2 refactor).
  */
@@ -11,12 +14,33 @@ const {onSchedule} = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
 const {recomputeEngagementSummary} = require("../helpers/engagement");
 const {maybeCreateNotification} = require("../helpers/shared");
+// v9.2 (P1): the three per-feature quota compensation sweeps were consolidated
+// into the single `compensateStaleAIQuotas` job below. It calls the SAME
+// unchanged `quota.runFeatureSweep(feature, cutoff)` the old jobs called, so
+// refund semantics, stale detection, cutoff, limits, reservations and
+// no-double-charge protection are preserved exactly.
+const quota = require("../ai/quota");
 
 // ===============================================
 // CONSTANTS
 // ===============================================
 
 const INACTIVITY_REMINDER_HOURS = 48;
+
+/**
+ * v9.2 (P1): age after which an un-cleared reservation is considered stale.
+ * Identical to the previous per-feature sweeps' 24h safety window (an AI call
+ * can take up to the 120s callable timeout, so 24h is generous for genuine
+ * in-flight requests and never refunds a live request).
+ */
+const QUOTA_RESERVATION_STALE_HOURS = 24;
+
+/**
+ * v9.2 (P1): the AI features whose stale reservations this consolidated sweep
+ * refunds. Order is deterministic; each feature is swept independently so one
+ * feature's failure cannot block the others.
+ */
+const QUOTA_SWEEP_FEATURES = ["resumeReview", "careerCoach", "aiAnalysis"];
 
 // ===============================================
 // EXPORTS
@@ -189,5 +213,55 @@ exports.recomputeEngagementScores = onSchedule(
       } catch (error) {
         console.error("recomputeEngagementScores error:", error);
       }
+    }
+);
+/**
+ * v9.2 (P1): CONSOLIDATED AI quota compensation sweep.
+ *
+ * Previously three separate Scheduler jobs existed:
+ *   - compensateStaleResumeQuota      (functions/ai/resumeReview.js)
+ *   - compensateStaleCareerCoachQuota (functions/careerCoach.js)
+ *   - compensateStaleAIAnalysisQuota  (functions/ai/deepAnalysis.js)
+ *
+ * They are consolidated here into ONE daily job that runs the SAME unchanged
+ * `quota.runFeatureSweep(feature, cutoff)` for each feature. This preserves
+ * refund/compensation behaviour, stale-request detection, cutoff semantics,
+ * quota limits, reservation logic, rollback behaviour and no-double-charge
+ * protection exactly — only the scheduling envelope changed (3 → 1).
+ *
+ * Each feature is swept in its own try/catch so a failure in one feature can
+ * never prevent compensation for the other two.
+ *
+ * Runs daily at 04:00 UTC (after recomputeEngagementScores @01:00, before
+ * sendInactivityReminders @09:00; no clash with the hourly expiry job).
+ */
+exports.compensateStaleAIQuotas = onSchedule(
+    {
+      schedule: "every day 04:00",
+      region: "us-central1",
+      timeZone: "UTC",
+    },
+    async () => {
+      const cutoff = admin.firestore.Timestamp.fromMillis(
+          Date.now() - QUOTA_RESERVATION_STALE_HOURS * 60 * 60 * 1000
+      );
+
+      let totalRefunded = 0;
+      for (const feature of QUOTA_SWEEP_FEATURES) {
+        try {
+          const refunded = await quota.runFeatureSweep(feature, cutoff);
+          totalRefunded += refunded;
+          console.log(
+              `compensateStaleAIQuotas(${feature}): refunded ${refunded} stale reservation(s)`
+          );
+        } catch (error) {
+          // Isolate feature failures — one feature must not block the others.
+          console.error(`compensateStaleAIQuotas(${feature}) error:`, error);
+        }
+      }
+
+      console.log(
+          `compensateStaleAIQuotas: sweep complete (${totalRefunded} total refunded)`
+      );
     }
 );

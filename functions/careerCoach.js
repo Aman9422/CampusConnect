@@ -5,7 +5,10 @@
  * module owns:
  *
  *   - `generateCareerCoachAnalysis`  — the callable the Flutter app calls
- *   - `compensateStaleCareerCoachQuota` — daily crash-safe refund sweep
+ *
+ * v9.2 (P1): the daily crash-safe refund sweep (`compensateStaleCareerCoachQuota`)
+ * was consolidated into `functions/schedulers/index.js`
+ * (`compensateStaleAIQuotas`), which calls the same `quota.runFeatureSweep`.
  *
  * Deterministic orchestration only (per docs/Task.md §5):
  *
@@ -28,7 +31,6 @@
  */
 
 const {onCall} = require("firebase-functions/v2/https");
-const {onSchedule} = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
 const crypto = require("crypto");
 
@@ -60,14 +62,6 @@ const CAREER_COACH_MONTHLY_LIMIT = parseInt(
     process.env.CAREER_COACH_MONTHLY_LIMIT || "3",
     10
 );
-
-/**
- * v9.0: age after which an un-cleared reservation is considered stale.
- * Same safety window as the Resume Review sweep (AI calls can take up to
- * the 120 s callable timeout, so 24 h is generous for genuine in-flight
- * requests).
- */
-const CAREER_COACH_RESERVATION_STALE_HOURS = 24;
 
 // ===============================================
 // v9.0: GENERATE CAREER COACH ANALYSIS (CALLABLE)
@@ -309,7 +303,7 @@ async function getCareerCoachUsage(userId) {
  * Atomically check the monthly limit AND increment the quota, stamping a
  * per-request reservation (`pendingRequestId` / `pendingSince`) so a
  * crash/500 after consumption but before the AI-failure rollback can be
- * refunded by `compensateStaleCareerCoachQuota`.
+ * refunded by `compensateStaleAIQuotas`.
  *
  * Mirrors `consumeResumeQuota` (functions/index.js) exactly.
  *
@@ -416,57 +410,8 @@ async function checkCareerCoachRateLimit(userId) {
   }
 }
 
-// ===============================================
-// v9.0: CRASH-SAFE QUOTA COMPENSATION (daily)
-// ===============================================
-
-/**
- * v9.0: refund career-coach credits whose reservation was left stale by a
- * crash/500 in `generateCareerCoachAnalysis`.
- *
- * If a function container dies AFTER `consumeCareerCoachQuota` incremented
- * the count but BEFORE the AI-failure rollback could run, the usage doc
- * carries a `pendingRequestId` / `pendingSince` reservation with no one left
- * to clear it. This daily sweep refunds those credits so the user is never
- * permanently charged for an analysis that was never delivered.
- *
- * Runs daily at 04:10 UTC (just after the Resume Review sweep at 04:00).
- * Safety contract mirrors `compensateStaleResumeQuota`:
- *   - Only touches docs where `pendingSince` is older than 24h.
- *   - Decrement + reservation clear happen atomically per user.
- *   - Never clears below 0; never touches docs without a reservation.
- *   - Aggregate log only (userId + refunded count) — never analysis content.
- */
-exports.compensateStaleCareerCoachQuota = onSchedule(
-    {
-      schedule: "every day 04:10",
-      region: "us-central1",
-      timeZone: "UTC",
-    },
-    async () => {
-      const cutoff = admin.firestore.Timestamp.fromMillis(
-          Date.now() - CAREER_COACH_RESERVATION_STALE_HOURS * 60 * 60 * 1000
-      );
-
-      console.log(
-          `compensateStaleCareerCoachQuota: refunding reservations older than ` +
-          `${cutoff.toDate().toISOString()}`
-      );
-
-      // v9.0 (IMP-15): the unified `user_ai_quotas/{uid}` doc is now the
-      // authoritative quota store, so the sweep must refund BOTH the legacy
-      // `career_coach_usage/{uid}` mirror AND the unified doc atomically.
-      // `runFeatureSweep` queries the union of users with a stale reservation
-      // in either store and refunds each user once across both — no double
-      // refund, no unified/legacy divergence.
-      let compensated = 0;
-      try {
-        compensated = await quota.runFeatureSweep("careerCoach", cutoff);
-        console.log(
-            `compensateStaleCareerCoachQuota: refunded ${compensated} stale credit(s)`
-        );
-      } catch (error) {
-        console.error("compensateStaleCareerCoachQuota error:", error);
-      }
-    }
-);
+// v9.2 (P1): the `compensateStaleCareerCoachQuota` scheduler was
+// consolidated into the single `compensateStaleAIQuotas` job in
+// `functions/schedulers/index.js`, which calls the same
+// `quota.runFeatureSweep("careerCoach", cutoff)`. Refund/compensation
+// semantics are unchanged.

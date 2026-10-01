@@ -706,6 +706,19 @@ class _AuthGuardState extends State<AuthGuard> {
   bool _isLoggedOut = false; // V6.3: Track logout to prevent race conditions
   bool _providerInitScheduled =
       false; // Prevent double-scheduling init callbacks
+  // v9.2 (P1): these callbacks were re-scheduled on EVERY rebuild while their
+  // condition held, re-running `updateUserProfile` and re-invoking
+  // `setRoleForStream`. Guarded so each runs at most once per session
+  // (reset on logout / re-login below).
+  //
+  // v9.2 audit (BUG-9): the profile-sync guard is now an IDENTITY check on the
+  // last-synced profile object, not a one-shot boolean. `ProfileProvider`
+  // replaces `_profile` with a NEW instance on every update/refresh, so an
+  // in-session profile edit (skills/CGPA/department) re-syncs
+  // `PlacementsProvider` — previously the one-shot flag left its eligibility
+  // snapshot stale until the next login. Still cleared on logout / re-login.
+  Object? _lastSyncedProfile;
+  bool _ecosystemInitScheduled = false;
 
   @override
   void initState() {
@@ -759,6 +772,8 @@ class _AuthGuardState extends State<AuthGuard> {
           if (_isLoggedOut) {
             _isLoggedOut = false;
             _providerInitScheduled = false; // Allow fresh init on re-login
+            _lastSyncedProfile = null;
+            _ecosystemInitScheduled = false;
           }
 
           if (user.isEmailVerified) {
@@ -809,20 +824,34 @@ class _AuthGuardState extends State<AuthGuard> {
                 }
 
                 // v6.5: Sync profile to placements provider for eligibility checks
-                // Use addPostFrameCallback to avoid calling during build
-                if (profileProvider.hasProfile) {
+                // Use addPostFrameCallback to avoid calling during build.
+                // v9.2 (P1): scheduled once per session (was re-scheduled on
+                // every rebuild, re-running updateUserProfile repeatedly).
+                // v9.2 audit (BUG-9): re-sync whenever the profile OBJECT
+                // changes, not once per session. The value is recorded at
+                // SCHEDULING time so a rebuild before the callback runs does
+                // not double-schedule.
+                final currentProfile = profileProvider.profile;
+                if (profileProvider.hasProfile &&
+                    currentProfile != null &&
+                    !identical(_lastSyncedProfile, currentProfile)) {
+                  _lastSyncedProfile = currentProfile;
                   WidgetsBinding.instance.addPostFrameCallback((_) {
                     if (!mounted || _isLoggedOut) return;
                     final placementsProvider = context
                         .read<PlacementsProvider>();
-                    placementsProvider.updateUserProfile(
-                      profileProvider.profile!,
-                    );
+                    placementsProvider.updateUserProfile(currentProfile);
                   });
                 }
 
-                // v7.2: Initialize ecosystem providers after role is loaded
-                if (profileProvider.hasProfile && roleProvider.hasRole) {
+                // v7.2: Initialize ecosystem providers after role is loaded.
+                // v9.2 (P1): scheduled once per session (was re-scheduled on
+                // every rebuild; per-provider isInitialized guards made the
+                // work idempotent but the scheduling itself was wasteful).
+                if (profileProvider.hasProfile &&
+                    roleProvider.hasRole &&
+                    !_ecosystemInitScheduled) {
+                  _ecosystemInitScheduled = true;
                   WidgetsBinding.instance.addPostFrameCallback((_) {
                     if (!mounted || _isLoggedOut) return;
                     final mentorshipProvider = context
@@ -859,10 +888,10 @@ class _AuthGuardState extends State<AuthGuard> {
                       );
                     }
                     if (!engagementProvider.isInitialized) {
-                      engagementProvider.initWithUser(
-                        user.id,
-                        profileProvider.profile!,
-                      );
+                      // v9.2 audit (BUG-2): the client no longer recomputes
+                      // the engagement summary — it only streams the
+                      // server-owned document.
+                      engagementProvider.initWithUser(user.id);
                     }
                     // v8.4: Initialize portfolio for students (loads empty portfolio for other roles)
                     if (!portfolioProvider.isInitialized) {
@@ -893,6 +922,8 @@ class _AuthGuardState extends State<AuthGuard> {
           if (!_isLoggedOut) {
             _isLoggedOut = true;
             _providerInitScheduled = false;
+            _lastSyncedProfile = null;
+            _ecosystemInitScheduled = false;
             // Safety net: reset providers in case logout didn't come from a view
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (!mounted || !_isLoggedOut) return;

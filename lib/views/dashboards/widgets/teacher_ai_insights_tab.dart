@@ -63,8 +63,10 @@ class _AIInsightsTabState extends State<AIInsightsTab> {
         // Body content
         Expanded(
           child: RefreshIndicator(
+            // v9.2 (P1): pull-to-refresh forces a fresh load (the plain
+            // loadAnalytics() is now idempotent and would be a no-op here).
             onRefresh: () =>
-                context.read<TeacherAnalyticsProvider>().loadAnalytics(),
+                context.read<TeacherAnalyticsProvider>().refresh(),
             child: SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.all(AppTheme.space16),

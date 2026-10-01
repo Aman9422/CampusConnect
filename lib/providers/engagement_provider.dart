@@ -1,11 +1,23 @@
 import 'dart:async';
 
 import 'package:campusconnect/models/badge.dart';
-import 'package:campusconnect/models/student_profile.dart';
-import 'package:campusconnect/models/user_activity.dart';
 import 'package:campusconnect/services/firestore/engagement_service.dart';
 import 'package:flutter/foundation.dart';
 
+/// v7.4: Engagement provider.
+///
+/// v9.2 audit (BUG-2): this provider is now a pure READ projection of the
+/// server-owned `users/{uid}/engagement_summary/summary` document. It no
+/// longer recomputes anything on the client — the server's `logUserActivity`
+/// (aggregates) + `recomputeEngagementSummary` (score/badges) are the sole
+/// writers, so the score, streak and badges can no longer flicker between two
+/// divergent engines and every login no longer costs up to 200 activity reads
+/// plus a summary write.
+///
+/// v9.2 audit (BUG-10): the dead `trackActivity` method (which had no callers
+/// and would have been rule-denied for any event other than the removed
+/// client `resumeReviewed` write) has been deleted — all activity/points flow
+/// through the server's `logUserActivity`.
 class EngagementProvider extends ChangeNotifier {
   final EngagementService _service;
 
@@ -13,7 +25,6 @@ class EngagementProvider extends ChangeNotifier {
     : _service = service ?? EngagementService.instance();
 
   String? _userId;
-  StudentProfile? _profile;
   bool _isLoading = false;
   bool _isInitialized = false;
   String? _error;
@@ -49,11 +60,11 @@ class EngagementProvider extends ChangeNotifier {
         .toList();
   }
 
-  Future<void> initWithUser(String userId, StudentProfile profile) async {
+  /// Start streaming the server-owned engagement summary for [userId].
+  Future<void> initWithUser(String userId) async {
     if (_isInitialized && _userId == userId) return;
 
     _userId = userId;
-    _profile = profile;
     _isDisposed = false;
     _isLoading = true;
     _error = null;
@@ -79,8 +90,6 @@ class EngagementProvider extends ChangeNotifier {
               notifyListeners();
             },
           );
-
-      await _service.recomputeEngagement(userId: userId, profile: profile);
     } catch (e) {
       if (_isDisposed) return;
       _isLoading = false;
@@ -90,26 +99,23 @@ class EngagementProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> refresh({StudentProfile? profile}) async {
-    if (_userId == null || _isDisposed) return;
-
-    if (profile != null) {
-      _profile = profile;
-    }
-    if (_profile == null) return;
+  /// Pull-to-refresh: take a fresh one-shot read of the server summary.
+  ///
+  /// The live stream already delivers updates, so this is only a manual
+  /// refresh affordance — it performs no computation and writes nothing.
+  Future<void> refresh() async {
+    final userId = _userId;
+    if (userId == null || _isDisposed) return;
 
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
-      _summary = await _service.recomputeEngagement(
-        userId: _userId!,
-        profile: _profile!,
-      );
+      _summary = await _service.getEngagementSummary(userId);
       _error = null;
     } catch (e) {
-      _error = 'Failed to recompute engagement';
+      _error = 'Failed to refresh engagement';
       debugPrint('EngagementProvider.refresh error: $e');
     } finally {
       _isLoading = false;
@@ -117,28 +123,11 @@ class EngagementProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> trackActivity({
-    required ActivityEventType eventType,
-    int points = 1,
-    String? sourceId,
-    Map<String, dynamic>? metadata,
-  }) async {
-    if (_userId == null || _isDisposed) return;
-    await _service.logActivity(
-      userId: _userId!,
-      eventType: eventType,
-      points: points,
-      sourceId: sourceId,
-      metadata: metadata,
-    );
-  }
-
   void reset() {
     _isDisposed = true;
     _summarySubscription?.cancel();
     _summarySubscription = null;
     _userId = null;
-    _profile = null;
     _isLoading = false;
     _isInitialized = false;
     _error = null;

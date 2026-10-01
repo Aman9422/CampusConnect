@@ -1,9 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:campusconnect/models/resume_review.dart';
-import 'package:campusconnect/models/user_activity.dart';
 import 'package:campusconnect/services/ai/resume_review_service.dart';
-import 'package:campusconnect/services/firestore/engagement_service.dart';
 import 'package:campusconnect/services/firestore/resume_history_service.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -21,7 +19,6 @@ import 'package:flutter/foundation.dart';
 class ResumeReviewProvider with ChangeNotifier {
   final ResumeReviewService _service;
   final ResumeHistoryService _historyService; // v6.8
-  final EngagementService _engagementService;
   final Connectivity _connectivity = Connectivity();
   // v8.6 (HIGH 2): keep the subscription so it can be cancelled on
   // reset()/dispose() — prevents leaks + duplicate notifyListeners across
@@ -34,11 +31,9 @@ class ResumeReviewProvider with ChangeNotifier {
   ResumeReviewProvider({
     required ResumeReviewService service,
     ResumeHistoryService? historyService, // v6.8
-    EngagementService? engagementService,
     this.userId,
   }) : _service = service,
-       _historyService = historyService ?? ResumeHistoryService.instance(),
-       _engagementService = engagementService ?? EngagementService.instance();
+       _historyService = historyService ?? ResumeHistoryService.instance();
 
   // === State ===
 
@@ -392,23 +387,22 @@ class ResumeReviewProvider with ChangeNotifier {
         'ResumeReviewProvider: Review complete. ATS Score: ${response.review.atsScore}',
       );
 
-      // v6.8: Save to history
+      // v6.8: Review history.
+      //
+      // v9.2 audit (BUG-2/BUG-10): the redundant client `resumeReviewed`
+      // activity write (5 points) was removed — the server trigger
+      // `onResumeReviewCreatedRefreshMatches` is the single writer of the
+      // activity + points (via `logUserActivity`).
+      //
+      // v9.2 audit (§4.1, resumeReviews tamper): the review document is now
+      // written SERVER-side by the `reviewResume` callable — the client has
+      // no create access to `users/{uid}/resumeReviews`. Refresh history so
+      // the newly persisted review appears immediately.
       if (userId != null) {
-        _saveToHistory(response.review, targetRole).catchError((e) {
-          debugPrint('Failed to save review to history: $e');
-          // Don't fail the operation if history save fails
+        refreshHistory().catchError((e) {
+          debugPrint('Failed to refresh review history: $e');
+          // Don't fail the operation if the history refresh fails.
         });
-
-        _engagementService
-            .logActivity(
-              userId: userId!,
-              eventType: ActivityEventType.resumeReviewed,
-              points: 5,
-              metadata: {'targetRole': targetRole},
-            )
-            .catchError((e) {
-              debugPrint('Failed to log resume review activity: $e');
-            });
       }
 
       notifyListeners();
@@ -526,26 +520,10 @@ class ResumeReviewProvider with ChangeNotifier {
     }
   }
 
-  /// Save current review to history
-  Future<void> _saveToHistory(ResumeReview review, String? targetRole) async {
-    if (userId == null) return;
-
-    try {
-      final reviewId = await _historyService.saveReview(
-        userId: userId!,
-        review: review,
-        targetRole: targetRole,
-      );
-
-      debugPrint('ResumeReviewProvider: Saved review to history: $reviewId');
-
-      // Refresh history to include new review
-      await refreshHistory();
-    } catch (e) {
-      debugPrint('ResumeReviewProvider: Failed to save to history: $e');
-      rethrow;
-    }
-  }
+  // v9.2 audit (§4.1, resumeReviews tamper): `_saveToHistory` was removed —
+  // `reviewResume` persists the review SERVER-side and the client has no
+  // create access to `users/{uid}/resumeReviews` (firestore.rules). The
+  // provider refreshes history instead of writing it.
 
   /// Delete a review from history
   Future<bool> deleteHistoryItem(String reviewId) async {

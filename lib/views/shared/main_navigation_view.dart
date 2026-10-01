@@ -45,10 +45,22 @@ class MainNavigationView extends StatefulWidget {
 class MainNavigationViewState extends State<MainNavigationView> {
   late int _selectedIndex;
 
+  /// v9.2 (P1): the set of tabs whose subtree has been built at least once.
+  ///
+  /// `IndexedStack` eagerly builds EVERY child, so switching to it meant the
+  /// first frame after login built all 5 heavy dashboards/tabs at once — the
+  /// dominant cause of the "Skipped 45 frames!" startup jank on the emulator.
+  /// Tabs are now built lazily on first visit (the selected tab is seeded here)
+  /// and, exactly as before, kept alive by `IndexedStack` afterwards, so tab
+  /// state (scroll position, controllers, in-flight loads) is preserved and the
+  /// visible UI is unchanged.
+  late final Set<int> _visitedTabs;
+
   @override
   void initState() {
     super.initState();
     _selectedIndex = widget.initialIndex;
+    _visitedTabs = <int>{_selectedIndex};
   }
 
   @override
@@ -58,7 +70,16 @@ class MainNavigationViewState extends State<MainNavigationView> {
     return Scaffold(
       body: IndexedStack(
         index: _selectedIndex,
-        children: widget.tabs.map((tab) => tab.widget).toList(),
+        children: [
+          for (var i = 0; i < widget.tabs.length; i++)
+            // v9.2 (P1): build a tab's subtree only once it has been visited.
+            // Unvisited tabs render a zero-cost placeholder, so the first
+            // frame only pays for the tab actually on screen.
+            if (_visitedTabs.contains(i))
+              widget.tabs[i].widget
+            else
+              const SizedBox.shrink(),
+        ],
       ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
@@ -102,6 +123,7 @@ class MainNavigationViewState extends State<MainNavigationView> {
           onTap: (index) {
             setState(() {
               _selectedIndex = index;
+              _visitedTabs.add(index); // v9.2 (P1): build on first visit
             });
             widget.onTabChanged?.call(index);
           },
@@ -116,6 +138,7 @@ class MainNavigationViewState extends State<MainNavigationView> {
     if (index >= 0 && index < widget.tabs.length) {
       setState(() {
         _selectedIndex = index;
+        _visitedTabs.add(index); // v9.2 (P1): build on first visit
       });
       widget.onTabChanged?.call(index);
     }

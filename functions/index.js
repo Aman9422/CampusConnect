@@ -58,18 +58,15 @@ const placements = require("./placements");
 
 // Career Coach
 exports.generateCareerCoachAnalysis = careerCoach.generateCareerCoachAnalysis;
-exports.compensateStaleCareerCoachQuota = careerCoach.compensateStaleCareerCoachQuota;
 
 // AI Chat
 exports.askAI = chat.askAI;
 
 // AI Resume Review
 exports.reviewResume = resumeReview.reviewResume;
-exports.compensateStaleResumeQuota = resumeReview.compensateStaleResumeQuota;
 
 // AI Deep Analysis
 exports.generateResumeAnalysis = deepAnalysis.generateResumeAnalysis;
-exports.compensateStaleAIAnalysisQuota = deepAnalysis.compensateStaleAIAnalysisQuota;
 
 // AI Chat Deletion + Retention
 exports.deleteAIHistory = chatDelete.deleteAIHistory;
@@ -87,6 +84,10 @@ exports.onChatMessageCreated = triggers.onChatMessageCreated;
 exports.autoExpireOpportunities = schedulers.autoExpireOpportunities;
 exports.sendInactivityReminders = schedulers.sendInactivityReminders;
 exports.recomputeEngagementScores = schedulers.recomputeEngagementScores;
+// v9.2 (P1): consolidated AI quota compensation sweep (was 3 jobs:
+// compensateStaleResumeQuota / compensateStaleCareerCoachQuota /
+// compensateStaleAIAnalysisQuota). See functions/schedulers/index.js.
+exports.compensateStaleAIQuotas = schedulers.compensateStaleAIQuotas;
 
 // Recommendations
 exports.refreshRecommendations = recommendationsRefresh.refreshRecommendations;

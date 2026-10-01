@@ -696,4 +696,14 @@ class PortfolioProvider extends ChangeNotifier {
     }
     return 'Failed to upload resume. Please try again.';
   }
+
+  @override
+  void dispose() {
+    // v9.2 (P2): cancel the live portfolio stream on provider disposal so no
+    // listener survives app teardown. `reset()` already cancels it on logout;
+    // this covers the disposal path (the provider previously had no dispose()
+    // override, so a teardown without a prior reset left the subscription).
+    _cancelStream();
+    super.dispose();
+  }
 }

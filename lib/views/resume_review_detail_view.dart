@@ -187,7 +187,7 @@ class _ResumeReviewDetailViewState extends State<ResumeReviewDetailView> {
     if (confirmed == true && mounted) {
       final success = await provider.deleteHistoryItem(widget.reviewId);
 
-      if (mounted) {
+      if (context.mounted) {
         if (success) {
           Navigator.of(context).pop(); // Go back to history list
           ScaffoldMessenger.of(context).showSnackBar(

@@ -22,18 +22,126 @@ class TeacherAnalyticsService {
   static final TeacherAnalyticsService _instance = TeacherAnalyticsService();
   factory TeacherAnalyticsService.instance() => _instance;
 
+  // ──────────────────────────────────────────────────────────────────────
+  // v9.2 (P1): load-scoped read cache.
+  //
+  // One `loadAnalytics()` cycle previously issued the SAME expensive queries
+  // several times:
+  //   • users(role == student)          — 4 separate full roster scans
+  //   • collectionGroup(resumeReviews)  — 3 separate scans
+  //   • per-student review count        — 1 count() read PER student
+  //   • getStudentResumeData()          — run twice (direct + prediction)
+  //
+  // [beginLoad] (called once by TeacherAnalyticsProvider at the start of a
+  // cycle) clears every cache below; each underlying query is then issued AT
+  // MOST ONCE and its result reused across the aggregate methods. Computed
+  // values are unchanged — only duplicate reads are removed.
+  // ──────────────────────────────────────────────────────────────────────
+  Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>>? _studentsFuture;
+  Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>>?
+  _resumeReviewsFuture;
+  Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>>?
+  _applicationsFuture;
+  Future<Map<String, int>>? _reviewCountsFuture;
+  Future<List<Map<String, dynamic>>>? _studentDataFuture;
+  Future<int>? _alumniCountFuture;
+  Future<Map<String, Map<String, dynamic>>>? _latestReviewByUserFuture;
+
+  /// v9.2 (P1): begin a fresh load cycle — drop every cached read so the next
+  /// `loadAnalytics()` fetches current data exactly once.
+  void beginLoad() {
+    _studentsFuture = null;
+    _resumeReviewsFuture = null;
+    _applicationsFuture = null;
+    _reviewCountsFuture = null;
+    _studentDataFuture = null;
+    _alumniCountFuture = null;
+    _latestReviewByUserFuture = null;
+  }
+
+  /// Shared `users(role == student)` roster — fetched once per load cycle.
+  Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _studentDocs() {
+    return _studentsFuture ??= _firestore
+        .collection('users')
+        .where('role', isEqualTo: 'student')
+        .get()
+        .then((snapshot) => snapshot.docs);
+  }
+
+  /// Shared `collectionGroup(resumeReviews)` result — fetched once per load
+  /// cycle and reused by the stats, skill-gap and trend aggregations. Kept
+  /// exact (unbounded) deliberately: capping it would under-count reviews, and
+  /// the v9.2 brief is explicit that correctness is not traded for fewer reads.
+  Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>>
+  _resumeReviewDocs() {
+    return _resumeReviewsFuture ??= _firestore
+        .collectionGroup('resumeReviews')
+        .get()
+        .then((snapshot) => snapshot.docs);
+  }
+
+  /// Shared `collectionGroup(applications)` result — fetched once per cycle.
+  Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _applicationDocs() {
+    return _applicationsFuture ??= _firestore
+        .collectionGroup('applications')
+        .get()
+        .then((snapshot) => snapshot.docs);
+  }
+
+  /// Latest review for a student — derived from the shared `resumeReviews`
+  /// scan (v9.2 P1).
+  ///
+  /// Previously this issued a per-student `orderBy('createdAt')` query (plus a
+  /// `reviewedAt` fallback query) for EVERY student — an N+1 read pattern that
+  /// dominated the load cost. The shared `collectionGroup('resumeReviews')`
+  /// scan already contains every review, so the per-student latest is now
+  /// computed in memory by [pickLatestReviewPerUser] with the SAME selection
+  /// rule (newest `createdAt`, else newest `reviewedAt`). No extra reads.
+  Future<_LatestReview?> _latestReviewFor(String userId) async {
+    final byUser = await (_latestReviewByUserFuture ??= _resumeReviewDocs()
+        .then(
+          (docs) => pickLatestReviewPerUser(
+            docs.map(
+              (doc) => (
+                uid: doc.reference.parent.parent?.id ?? '',
+                data: doc.data(),
+              ),
+            ),
+          ),
+        ));
+
+    final data = byUser[userId];
+    if (data == null) return null;
+    return _LatestReview(data: data, createdAt: _extractDate(data));
+  }
+
+  /// Per-student review count derived from the shared `resumeReviews` scan —
+  /// removes the previous count() read (with a full-get fallback) per student.
+  Future<int> _reviewCountFor(String userId) async {
+    final counts = await (_reviewCountsFuture ??= _resumeReviewDocs().then((
+      docs,
+    ) {
+      final byUser = <String, int>{};
+      for (final doc in docs) {
+        final uid = doc.reference.parent.parent?.id;
+        if (uid == null) continue;
+        byUser[uid] = (byUser[uid] ?? 0) + 1;
+      }
+      return byUser;
+    }));
+    return counts[userId] ?? 0;
+  }
+
   /// Get resume review aggregate statistics.
   Future<Map<String, dynamic>> getResumeReviewStats() async {
     try {
-      final reviewsQuery = await _firestore
-          .collectionGroup('resumeReviews')
-          .get();
+      final reviewDocs = await _resumeReviewDocs();
 
-      if (reviewsQuery.docs.isEmpty) {
+      if (reviewDocs.isEmpty) {
         return _emptyReviewStats();
       }
 
-      final scores = reviewsQuery.docs
+      final scores = reviewDocs
           .map((doc) => _extractScore(doc.data()))
           .where((score) => score >= 0)
           .toList();
@@ -65,41 +173,26 @@ class TeacherAnalyticsService {
   }
 
   /// Get student leaderboard data from latest resume score per student.
-  Future<List<Map<String, dynamic>>> getStudentResumeData() async {
+  ///
+  /// v9.2 (P1): cached per load cycle so `getPlacementPredictionIndicators`
+  /// (which derives from this same data) reuses it instead of scanning the
+  /// roster a second time.
+  Future<List<Map<String, dynamic>>> getStudentResumeData() {
+    return _studentDataFuture ??= _buildStudentResumeData();
+  }
+
+  Future<List<Map<String, dynamic>>> _buildStudentResumeData() async {
     try {
-      final usersQuery = await _firestore
-          .collection('users')
-          .where('role', isEqualTo: 'student')
-          .get();
+      final userDocs = await _studentDocs();
 
       final studentData = <Map<String, dynamic>>[];
 
-      for (final userDoc in usersQuery.docs) {
+      for (final userDoc in userDocs) {
         try {
-          final latestReview = await _getLatestReview(userDoc.id);
-
-          int reviewCount = 0;
-          try {
-            final totalReviewsQuery = await _firestore
-                .collection('users')
-                .doc(userDoc.id)
-                .collection('resumeReviews')
-                .count()
-                .get();
-            reviewCount = totalReviewsQuery.count ?? 0;
-          } catch (_) {
-            // count() requires a composite index — fallback to fetching docs
-            try {
-              final snapshot = await _firestore
-                  .collection('users')
-                  .doc(userDoc.id)
-                  .collection('resumeReviews')
-                  .get();
-              reviewCount = snapshot.docs.length;
-            } catch (_) {
-              reviewCount = 0;
-            }
-          }
+          final latestReview = await _latestReviewFor(userDoc.id);
+          // v9.2 (P1): derived from the shared resumeReviews scan — no
+          // per-student count() read (nor its full-get fallback).
+          final reviewCount = await _reviewCountFor(userDoc.id);
 
           // Every student enters the leaderboard, WITH or WITHOUT resume
           // reviews. A student who has never submitted a review is still a
@@ -155,14 +248,12 @@ class TeacherAnalyticsService {
   /// Returns list sorted by placement rate descending.
   Future<List<Map<String, dynamic>>> getDepartmentAnalytics() async {
     try {
-      final usersQuery = await _firestore
-          .collection('users')
-          .where('role', isEqualTo: 'student')
-          .get();
+      // v9.2 (P1): reuse the shared roster scan (was a second full scan).
+      final userDocs = await _studentDocs();
 
       // Group students by department
       final deptGroups = <String, List<Map<String, dynamic>>>{};
-      for (final userDoc in usersQuery.docs) {
+      for (final userDoc in userDocs) {
         final dept = _getStudentDepartment(userDoc.data());
         deptGroups.putIfAbsent(dept, () => []).add({
           'studentId': userDoc.id,
@@ -185,7 +276,8 @@ class TeacherAnalyticsService {
         for (final student in students) {
           final uid = student['studentId'] as String;
           try {
-            final latestReview = await _getLatestReview(uid);
+            // v9.2 (P1): shared with the leaderboard — at most one read.
+            final latestReview = await _latestReviewFor(uid);
             if (latestReview != null) {
               final score = _extractScore(latestReview.data);
               if (score >= 0) {
@@ -252,24 +344,11 @@ class TeacherAnalyticsService {
   /// Stages: Eligible -> Applied -> Shortlisted -> Interview -> Placed
   Future<PlacementPipelineData> getApplicationPipelineCounts() async {
     try {
-      // Get total student count — try aggregation first, fallback to get() if
-      // count() requires a composite index that hasn't been created yet
-      int totalStudents = 0;
-      try {
-        final countQuery = await _firestore
-            .collection('users')
-            .where('role', isEqualTo: 'student')
-            .count()
-            .get();
-        totalStudents = countQuery.count ?? 0;
-      } catch (_) {
-        // count() needs a composite index — fallback to fetching documents
-        final snapshot = await _firestore
-            .collection('users')
-            .where('role', isEqualTo: 'student')
-            .get();
-        totalStudents = snapshot.docs.length;
-      }
+      // v9.2 (P1): reuse the shared roster scan instead of a separate count()
+      // query. The roster was already fetched in full for the leaderboard /
+      // department / engagement aggregates, so this removes a duplicate scan
+      // (and the composite-index fallback path) with an identical count.
+      final totalStudents = (await _studentDocs()).length;
 
       // v9.1: bucket application STATUS into per-stage DISTINCT-student
       // counts. The collectionGroup matches BOTH mirrors (canonical
@@ -284,10 +363,10 @@ class TeacherAnalyticsService {
       //   - applied: any application doc at all
       final studentStatuses = <String, Set<String>>{};
       try {
-        final appsQuery = await _firestore
-            .collectionGroup('applications')
-            .get();
-        for (final doc in appsQuery.docs) {
+        // v9.2 (P1): shared `collectionGroup(applications)` scan — one read
+        // for the whole load cycle.
+        final appDocs = await _applicationDocs();
+        for (final doc in appDocs) {
           final data = doc.data();
           final studentId =
               data['userId'] as String? ?? data['studentId'] as String?;
@@ -340,42 +419,78 @@ class TeacherAnalyticsService {
   /// Queries engagement subcollection for aggregate metrics.
   Future<Map<String, dynamic>> getEngagementAggregates() async {
     try {
-      final usersQuery = await _firestore
-          .collection('users')
-          .where('role', isEqualTo: 'student')
-          .get();
+      // v9.2 (P1): reuse the shared roster scan (was a 4th full student scan).
+      final userDocs = await _studentDocs();
 
       int totalEngagement = 0;
       int totalProfileStrength = 0;
       int count = 0;
-      int activeAlumni = 0;
 
-      for (final userDoc in usersQuery.docs) {
+      // v9.2 audit (PERF-1): the per-student `engagement_summary/summary`
+      // read was an N+1 — one dedicated document read PER student, awaited
+      // SERIALLY inside the loop (≈N serial round trips on every teacher
+      // dashboard load, the single largest per-load latency line). The reads
+      // are now issued CONCURRENTLY in bounded chunks, so the whole fan-out
+      // costs a few waves of latency instead of N back-to-back round trips.
+      // Same documents, same aggregate values.
+      //
+      // NOTE: cloud_firestore 6.x does not expose `FirebaseFirestore.getAll`
+      // (removed from the public API), so this uses `Future.wait` over
+      // chunked refs — the batching primitive this SDK version provides. The
+      // chunk bound caps in-flight requests; each read is individually
+      // error-tolerant so one failed document never drops the whole chunk
+      // (the previous per-item `catch` semantics are preserved).
+      const int engagementBatchSize = 50;
+      for (var i = 0; i < userDocs.length; i += engagementBatchSize) {
+        final end = (i + engagementBatchSize) < userDocs.length
+            ? (i + engagementBatchSize)
+            : userDocs.length;
+        final chunk = userDocs.sublist(i, end);
+        if (chunk.isEmpty) continue;
+
         try {
-          final engagementDoc = await _firestore
-              .collection('users')
-              .doc(userDoc.id)
-              .collection('engagement_summary')
-              .doc('summary')
-              .get();
-          if (engagementDoc.exists) {
+          final snapshots = await Future.wait(
+            chunk.map((userDoc) async {
+              try {
+                return await _firestore
+                    .collection('users')
+                    .doc(userDoc.id)
+                    .collection('engagement_summary')
+                    .doc('summary')
+                    .get();
+              } catch (e) {
+                debugPrint(
+                  'TeacherAnalyticsService: engagement_summary read failed '
+                  'for ${userDoc.id}: $e',
+                );
+                return null;
+              }
+            }),
+          );
+          for (final engagementDoc in snapshots) {
+            if (engagementDoc == null || !engagementDoc.exists) continue;
             final data = engagementDoc.data() ?? {};
             totalEngagement += (data['engagementScore'] as num? ?? 0).round();
             totalProfileStrength += (data['profileStrength'] as num? ?? 0)
                 .round();
             count++;
           }
-        } catch (_) {}
+        } catch (e) {
+          debugPrint(
+            'TeacherAnalyticsService.getEngagementAggregates batch error: $e',
+          );
+        }
       }
 
-      // Count alumni
+      // Count alumni — cached per load cycle, read at most once.
+      int activeAlumni = 0;
       try {
-        final alumniQuery = await _firestore
+        activeAlumni = await (_alumniCountFuture ??= _firestore
             .collection('users')
             .where('role', isEqualTo: 'alumni')
             .count()
-            .get();
-        activeAlumni = alumniQuery.count ?? 0;
+            .get()
+            .then((snapshot) => snapshot.count ?? 0));
       } catch (_) {}
 
       return {
@@ -559,13 +674,12 @@ class TeacherAnalyticsService {
     int limit = 8,
   }) async {
     try {
-      final snapshot = await _firestore
-          .collectionGroup('resumeReviews')
-          .limit(400)
-          .get();
+      // v9.2 (P1): reuse the shared resumeReviews scan (exact — previously
+      // capped at 400 docs). One collectionGroup read for the whole cycle.
+      final reviewDocs = await _resumeReviewDocs();
 
       final frequency = <String, int>{};
-      for (final doc in snapshot.docs) {
+      for (final doc in reviewDocs) {
         final missing = (doc.data()['missingKeywords'] as List<dynamic>? ?? [])
             .whereType<String>()
             .map((s) => s.trim().toLowerCase())
@@ -601,22 +715,28 @@ class TeacherAnalyticsService {
       final startDate = DateTime.now().subtract(
         Duration(days: pastMonths * 30),
       );
-      final snapshot = await _firestore
-          .collectionGroup('resumeReviews')
-          .where(
-            'createdAt',
-            isGreaterThanOrEqualTo: Timestamp.fromDate(startDate),
-          )
-          .get();
+
+      // v9.2 (P1): reuse the shared resumeReviews scan and apply the date
+      // window client-side — same result as the previous where() query, but
+      // no second collectionGroup read. The window is applied to `createdAt`
+      // only (Timestamp or ISO string), matching the server-side filter.
+      final reviewDocs = await _resumeReviewDocs();
 
       final monthly = <String, List<int>>{};
-      for (final doc in snapshot.docs) {
+      for (final doc in reviewDocs) {
         final data = doc.data();
         final score = _extractScore(data);
         if (score < 0) continue;
 
-        final createdAt = _extractDate(data);
+        final rawCreatedAt = data['createdAt'];
+        DateTime? createdAt;
+        if (rawCreatedAt is Timestamp) {
+          createdAt = rawCreatedAt.toDate();
+        } else if (rawCreatedAt is String) {
+          createdAt = DateTime.tryParse(rawCreatedAt);
+        }
         if (createdAt == null) continue;
+        if (createdAt.isBefore(startDate)) continue;
         final monthKey =
             '${createdAt.year}-${createdAt.month.toString().padLeft(2, '0')}';
         monthly.putIfAbsent(monthKey, () => <int>[]).add(score);
@@ -692,49 +812,6 @@ class TeacherAnalyticsService {
     return null;
   }
 
-  Future<_LatestReview?> _getLatestReview(String userId) async {
-    try {
-      final createdAtQuery = await _firestore
-          .collection('users')
-          .doc(userId)
-          .collection('resumeReviews')
-          .orderBy('createdAt', descending: true)
-          .limit(1)
-          .get();
-
-      if (createdAtQuery.docs.isNotEmpty) {
-        final doc = createdAtQuery.docs.first;
-        return _LatestReview(
-          data: doc.data(),
-          createdAt: _extractDate(doc.data()),
-        );
-      }
-    } catch (_) {
-      // Fall through to reviewedAt fallback.
-    }
-
-    try {
-      final reviewedAtQuery = await _firestore
-          .collection('users')
-          .doc(userId)
-          .collection('resumeReviews')
-          .orderBy('reviewedAt', descending: true)
-          .limit(1)
-          .get();
-      if (reviewedAtQuery.docs.isNotEmpty) {
-        final doc = reviewedAtQuery.docs.first;
-        return _LatestReview(
-          data: doc.data(),
-          createdAt: _extractDate(doc.data()),
-        );
-      }
-    } catch (e) {
-      debugPrint('TeacherAnalyticsService._getLatestReview error: $e');
-    }
-
-    return null;
-  }
-
   String _getStudentName(Map<String, dynamic> userData) {
     if (userData['personal'] != null) {
       final personal = userData['personal'] as Map<String, dynamic>;
@@ -771,6 +848,64 @@ class TeacherAnalyticsService {
     }
     return 'Unknown';
   }
+}
+
+/// v9.2 (P1): pure selection of the latest review per student from the shared
+/// `resumeReviews` scan — replaces the previous per-student N+1 query.
+///
+/// Preserves the former query semantics exactly: prefer the doc with the
+/// newest `createdAt`; if a student has NO review carrying `createdAt`, fall
+/// back to the newest `reviewedAt`. A doc missing both fields is ignored (a
+/// Firestore `orderBy` would have excluded it too).
+///
+/// Extracted as a pure function so it is unit-testable without Firestore.
+@visibleForTesting
+Map<String, Map<String, dynamic>> pickLatestReviewPerUser(
+  Iterable<({String uid, Map<String, dynamic> data})> entries,
+) {
+  final byCreatedAt = <String, Map<String, dynamic>>{};
+  final createdAtMs = <String, int>{};
+  final byReviewedAt = <String, Map<String, dynamic>>{};
+  final reviewedAtMs = <String, int>{};
+
+  for (final entry in entries) {
+    if (entry.uid.isEmpty) continue;
+
+    final createdMs = _fieldMillis(entry.data['createdAt']);
+    if (createdMs != null) {
+      if (createdAtMs[entry.uid] == null ||
+          createdMs > createdAtMs[entry.uid]!) {
+        createdAtMs[entry.uid] = createdMs;
+        byCreatedAt[entry.uid] = entry.data;
+      }
+      continue;
+    }
+
+    final reviewedMs = _fieldMillis(entry.data['reviewedAt']);
+    if (reviewedMs != null) {
+      if (reviewedAtMs[entry.uid] == null ||
+          reviewedMs > reviewedAtMs[entry.uid]!) {
+        reviewedAtMs[entry.uid] = reviewedMs;
+        byReviewedAt[entry.uid] = entry.data;
+      }
+    }
+  }
+
+  final result = <String, Map<String, dynamic>>{};
+  for (final uid in {...byCreatedAt.keys, ...byReviewedAt.keys}) {
+    result[uid] = byCreatedAt[uid] ?? byReviewedAt[uid]!;
+  }
+  return result;
+}
+
+/// Millisecond value of a Firestore/Timestamp/date field, tolerant of the
+/// legacy ISO-string writers. Returns null when the field is absent/unusable.
+int? _fieldMillis(Object? raw) {
+  if (raw is Timestamp) return raw.millisecondsSinceEpoch;
+  if (raw is DateTime) return raw.millisecondsSinceEpoch;
+  if (raw is String) return DateTime.tryParse(raw)?.millisecondsSinceEpoch;
+  if (raw is num) return raw.toInt();
+  return null;
 }
 
 class _LatestReview {

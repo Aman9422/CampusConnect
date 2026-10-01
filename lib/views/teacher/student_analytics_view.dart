@@ -1,7 +1,6 @@
 import 'package:campusconnect/constants/routes.dart';
 import 'package:campusconnect/models/placement.dart';
 import 'package:campusconnect/providers/placements_provider.dart';
-import 'package:campusconnect/providers/resume_review_provider.dart';
 import 'package:campusconnect/providers/teacher_analytics_provider.dart'; // v7.3
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/views/widgets/empty_state_widget.dart';
@@ -32,12 +31,23 @@ class _StudentAnalyticsViewState extends State<StudentAnalyticsView> {
     });
   }
 
-  void _loadAnalytics() {
+  void _loadAnalytics({bool force = false}) {
     // Load data from existing providers
     context.read<PlacementsProvider>().refresh();
-    context.read<ResumeReviewProvider>().refreshHistory();
-    // v7.3: Load teacher analytics
-    context.read<TeacherAnalyticsProvider>().loadAnalytics();
+    // v9.2 audit (BUG-5): the screen no longer reads the teacher's OWN
+    // `ResumeReviewProvider` history — it was only used by the removed
+    // duplicate "Resume Review Insights" section. Cross-student resume
+    // metrics come from `TeacherAnalyticsProvider` instead.
+    // v9.2 (P1): on mount this is idempotent — the provider ignores it when
+    // analytics are already loaded/shared, so the three eager teacher tabs
+    // never fire duplicate analytics reads. An explicit user refresh forces
+    // a genuine reload.
+    final analytics = context.read<TeacherAnalyticsProvider>();
+    if (force) {
+      analytics.refresh();
+    } else {
+      analytics.loadAnalytics();
+    }
   }
 
   @override
@@ -61,109 +71,89 @@ class _StudentAnalyticsViewState extends State<StudentAnalyticsView> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
-            onPressed: _loadAnalytics,
+            onPressed: () => _loadAnalytics(force: true),
             tooltip: 'Refresh Analytics',
           ),
         ],
       ),
-      body:
-          Consumer3<
-            PlacementsProvider,
-            ResumeReviewProvider,
-            TeacherAnalyticsProvider
-          >(
-            builder:
-                (
-                  context,
-                  placementsProvider,
-                  resumeProvider,
-                  analyticsProvider,
-                  child,
-                ) {
-                  if (placementsProvider.isLoading ||
-                      resumeProvider.isLoading ||
-                      analyticsProvider.isLoading) {
-                    return _buildSkeletonLoader();
-                  }
+      body: Consumer2<PlacementsProvider, TeacherAnalyticsProvider>(
+        builder: (context, placementsProvider, analyticsProvider, child) {
+          if (placementsProvider.isLoading || analyticsProvider.isLoading) {
+            return _buildSkeletonLoader();
+          }
 
-                  return RefreshIndicator(
-                    onRefresh: () async => _loadAnalytics(),
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Overview metrics
-                          _buildOverviewMetrics(
-                            placementsProvider,
-                            resumeProvider,
-                            isDark,
-                          ),
-                          const SizedBox(height: 20),
+          return RefreshIndicator(
+            onRefresh: () async => _loadAnalytics(force: true),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Overview metrics
+                  _buildOverviewMetrics(
+                    placementsProvider,
+                    analyticsProvider,
+                    isDark,
+                  ),
+                  const SizedBox(height: 20),
 
-                          // Placement trends chart
-                          _buildPlacementTrends(placementsProvider, isDark),
-                          const SizedBox(height: 20),
+                  // Placement trends chart
+                  _buildPlacementTrends(placementsProvider, isDark),
+                  const SizedBox(height: 20),
 
-                          // Resume review insights
-                          _buildResumeInsights(resumeProvider, isDark),
-                          const SizedBox(height: 20),
+                  // v7.3: Resume Review Aggregates — the SINGLE
+                  // source of the cross-student resume metrics.
+                  // (BUG-5: the removed "Resume Review Insights"
+                  // section read the TEACHER's own review history.)
+                  _buildResumeAggregates(analyticsProvider, isDark),
+                  const SizedBox(height: 20),
 
-                          // v7.3: Resume Review Aggregates
-                          _buildResumeAggregates(analyticsProvider, isDark),
-                          const SizedBox(height: 20),
+                  // v7.3: Student Resume Leaderboard
+                  _buildStudentLeaderboard(analyticsProvider, isDark),
+                  const SizedBox(height: 20),
 
-                          // v7.3: Student Resume Leaderboard
-                          _buildStudentLeaderboard(analyticsProvider, isDark),
-                          const SizedBox(height: 20),
+                  // v7.4: Placement prediction indicators
+                  _buildPlacementPredictionSection(analyticsProvider, isDark),
+                  const SizedBox(height: 20),
 
-                          // v7.4: Placement prediction indicators
-                          _buildPlacementPredictionSection(
-                            analyticsProvider,
-                            isDark,
-                          ),
-                          const SizedBox(height: 20),
+                  // v7.4: Skill gap analysis
+                  _buildSkillGapSection(analyticsProvider, isDark),
+                  const SizedBox(height: 20),
 
-                          // v7.4: Skill gap analysis
-                          _buildSkillGapSection(analyticsProvider, isDark),
-                          const SizedBox(height: 20),
+                  // v7.4: Performance trends
+                  _buildPerformanceTrendSection(analyticsProvider, isDark),
+                  const SizedBox(height: 20),
 
-                          // v7.4: Performance trends
-                          _buildPerformanceTrendSection(
-                            analyticsProvider,
-                            isDark,
-                          ),
-                          const SizedBox(height: 20),
-
-                          // Department-wise breakdown
-                          _buildDepartmentBreakdown(placementsProvider, isDark),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-          ),
+                  // Department-wise breakdown
+                  _buildDepartmentBreakdown(placementsProvider, isDark),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 
   Widget _buildOverviewMetrics(
     PlacementsProvider placementsProvider,
-    ResumeReviewProvider resumeProvider,
+    TeacherAnalyticsProvider analyticsProvider,
     bool isDark,
   ) {
     final placements = placementsProvider.placements;
-    final reviews = resumeProvider.history;
 
     // Calculate meaningful analytics for teachers
     final totalOpportunities = placements.length;
     final activeOpportunities = placements
         .where((p) => p.isActive && !p.isDeadlinePassed)
         .length;
-    final totalReviews = reviews.length;
-    final avgReviewScore = reviews.isNotEmpty
-        ? reviews.map((r) => r.atsScore).reduce((a, b) => a + b) /
-              reviews.length
-        : 0.0;
+    // v9.2 audit (BUG-5): resume metrics now come from the CROSS-STUDENT
+    // `TeacherAnalyticsProvider` (collectionGroup scan), not the teacher's OWN
+    // `ResumeReviewProvider.history`. Previously this card showed the
+    // signed-in teacher's personal review counts (almost always 0) sitting
+    // directly above the correct "Resume Review Analytics" numbers.
+    final totalReviews = analyticsProvider.totalReviews;
+    final avgReviewScore = analyticsProvider.averageScore;
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -251,7 +241,7 @@ class _StudentAnalyticsViewState extends State<StudentAnalyticsView> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: color.withOpacity(isDark ? 0.15 : 0.08),
+        color: color.withValues(alpha: isDark ? 0.15 : 0.08),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: color.withValues(alpha: 0.2)),
       ),
@@ -400,68 +390,12 @@ class _StudentAnalyticsViewState extends State<StudentAnalyticsView> {
     );
   }
 
-  Widget _buildResumeInsights(
-    ResumeReviewProvider resumeProvider,
-    bool isDark,
-  ) {
-    final reviews = resumeProvider.history;
-    final totalReviews = reviews.length;
-    final avgRating = reviews.isNotEmpty
-        ? reviews.map((r) => r.atsScore).reduce((a, b) => a + b) /
-              reviews.length
-        : 0.0;
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: isDark ? AppTheme.darkSurface : Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDark
-              ? AppTheme.gray700.withValues(alpha: 0.3)
-              : AppTheme.gray200,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Resume Review Insights',
-            style: AppTheme.titleMedium.copyWith(
-              fontWeight: FontWeight.w600,
-              color: isDark ? Colors.white : AppTheme.gray900,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: _buildMetricCard(
-                  'Total Reviews',
-                  totalReviews.toString(),
-                  Icons.description_outlined,
-                  AppTheme.success,
-                  isDark,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildMetricCard(
-                  'Avg Score',
-                  totalReviews > 0
-                      ? '${avgRating.toStringAsFixed(1)}/100'
-                      : 'N/A',
-                  Icons.star_outline,
-                  AppTheme.warning,
-                  isDark,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
+  // v9.2 audit (BUG-5): `_buildResumeInsights` was REMOVED. It rendered
+  // "Resume Review Insights → Total Reviews / Avg Score" from the teacher's
+  // OWN `ResumeReviewProvider.history` (almost always empty), contradicting
+  // the correct cross-student numbers rendered by `_buildResumeAggregates`
+  // further down the same screen. `_buildResumeAggregates`, sourced from
+  // `TeacherAnalyticsProvider`, is now the single source of these metrics.
 
   Widget _buildDepartmentBreakdown(
     PlacementsProvider placementsProvider,
@@ -691,7 +625,9 @@ class _StudentAnalyticsViewState extends State<StudentAnalyticsView> {
               borderRadius: BorderRadius.circular(8),
               border: index < 3
                   ? Border.all(
-                      color: provider.getScoreColor(score).withValues(alpha: 0.3),
+                      color: provider
+                          .getScoreColor(score)
+                          .withValues(alpha: 0.3),
                     )
                   : null,
             ),

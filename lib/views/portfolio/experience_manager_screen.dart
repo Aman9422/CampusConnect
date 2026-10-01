@@ -19,7 +19,9 @@ class ExperienceManagerScreen extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: isDark ? AppTheme.darkBackground : const Color(0xFFF8FAFC),
+      backgroundColor: isDark
+          ? AppTheme.darkBackground
+          : const Color(0xFFF8FAFC),
       appBar: AppBar(
         title: Text(
           'Experience',
@@ -41,7 +43,8 @@ class ExperienceManagerScreen extends StatelessWidget {
       ),
       body: Consumer<PortfolioProvider>(
         builder: (context, portfolioProvider, child) {
-          final portfolio = portfolioProvider.portfolio ?? PortfolioModel.empty();
+          final portfolio =
+              portfolioProvider.portfolio ?? PortfolioModel.empty();
           final experience = portfolio.experience;
 
           if (experience.isEmpty) {
@@ -74,7 +77,11 @@ class ExperienceManagerScreen extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.work_history_outlined, size: 48, color: AppTheme.gray400),
+            Icon(
+              Icons.work_history_outlined,
+              size: 48,
+              color: AppTheme.gray400,
+            ),
             const SizedBox(height: AppTheme.space16),
             Text(
               'No experience yet',
@@ -112,7 +119,11 @@ class ExperienceManagerScreen extends StatelessWidget {
     return PortfolioSectionCard(
       title: exp.role.isEmpty ? 'Untitled Role' : exp.role,
       trailing: PopupMenuButton<String>(
-        icon: Icon(Icons.more_vert, size: 20, color: isDark ? AppTheme.gray400 : AppTheme.gray600),
+        icon: Icon(
+          Icons.more_vert,
+          size: 20,
+          color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+        ),
         onSelected: (value) {
           if (value == 'edit') {
             _openForm(context, experience: exp);
@@ -135,11 +146,17 @@ class ExperienceManagerScreen extends StatelessWidget {
                 color: isDark ? AppTheme.gray400 : AppTheme.gray600,
               ),
             ),
-          if (exp.startDate != null || exp.currentlyWorking || exp.endDate != null) ...[
+          if (exp.startDate != null ||
+              exp.currentlyWorking ||
+              exp.endDate != null) ...[
             const SizedBox(height: AppTheme.space4),
             Row(
               children: [
-                Icon(Icons.calendar_today_outlined, size: 14, color: isDark ? AppTheme.gray400 : AppTheme.gray500),
+                Icon(
+                  Icons.calendar_today_outlined,
+                  size: 14,
+                  color: isDark ? AppTheme.gray400 : AppTheme.gray500,
+                ),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
@@ -151,7 +168,10 @@ class ExperienceManagerScreen extends StatelessWidget {
                 ),
                 if (exp.currentlyWorking)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
                       color: AppTheme.success.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(AppTheme.radiusFull),
@@ -218,11 +238,18 @@ class ExperienceManagerScreen extends StatelessWidget {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete Experience'),
-        content: Text('Are you sure you want to delete "${exp.role}" at ${exp.company}?'),
+        content: Text(
+          'Are you sure you want to delete "${exp.role}" at ${exp.company}?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: Text('Cancel', style: TextStyle(color: isDark ? AppTheme.gray400 : AppTheme.gray600)),
+            child: Text(
+              'Cancel',
+              style: TextStyle(
+                color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+              ),
+            ),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
@@ -243,7 +270,9 @@ class ExperienceManagerScreen extends StatelessWidget {
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(success ? 'Experience deleted.' : 'Failed to delete experience.'),
+        content: Text(
+          success ? 'Experience deleted.' : 'Failed to delete experience.',
+        ),
         backgroundColor: success ? AppTheme.success : AppTheme.error,
       ),
     );
@@ -287,7 +316,9 @@ class _ExpFormScreenState extends State<_ExpFormScreen> {
     final exp = widget.experience;
     _roleController = TextEditingController(text: exp?.role ?? '');
     _companyController = TextEditingController(text: exp?.company ?? '');
-    _descriptionController = TextEditingController(text: exp?.description ?? '');
+    _descriptionController = TextEditingController(
+      text: exp?.description ?? '',
+    );
     if (exp != null) {
       _employmentType = exp.employmentType;
       _startDate = exp.startDate;
@@ -309,7 +340,9 @@ class _ExpFormScreenState extends State<_ExpFormScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: isDark ? AppTheme.darkBackground : const Color(0xFFF8FAFC),
+      backgroundColor: isDark
+          ? AppTheme.darkBackground
+          : const Color(0xFFF8FAFC),
       appBar: AppBar(
         title: Text(
           _isEdit ? 'Edit Experience' : 'Add Experience',
@@ -350,7 +383,9 @@ class _ExpFormScreenState extends State<_ExpFormScreen> {
                       hint: 'e.g. Software Development Intern',
                       isDark: isDark,
                       validator: (value) =>
-                          value == null || value.trim().isEmpty ? 'Role is required' : null,
+                          value == null || value.trim().isEmpty
+                          ? 'Role is required'
+                          : null,
                       textCapitalization: TextCapitalization.words,
                       maxLength: 200,
                     ),
@@ -361,7 +396,9 @@ class _ExpFormScreenState extends State<_ExpFormScreen> {
                       hint: 'e.g. Google',
                       isDark: isDark,
                       validator: (value) =>
-                          value == null || value.trim().isEmpty ? 'Company is required' : null,
+                          value == null || value.trim().isEmpty
+                          ? 'Company is required'
+                          : null,
                       textCapitalization: TextCapitalization.words,
                       maxLength: 200,
                     ),
@@ -405,19 +442,26 @@ class _ExpFormScreenState extends State<_ExpFormScreen> {
         ),
         const SizedBox(height: AppTheme.space8),
         DropdownButtonFormField<String>(
-          value: _employmentType,
+          initialValue: _employmentType,
           decoration: InputDecoration(
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: isDark ? AppTheme.gray600 : AppTheme.gray300),
+              borderSide: BorderSide(
+                color: isDark ? AppTheme.gray600 : AppTheme.gray300,
+              ),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: isDark ? AppTheme.gray600 : AppTheme.gray300),
+              borderSide: BorderSide(
+                color: isDark ? AppTheme.gray600 : AppTheme.gray300,
+              ),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: AppTheme.primaryBlue, width: 2),
+              borderSide: const BorderSide(
+                color: AppTheme.primaryBlue,
+                width: 2,
+              ),
             ),
             filled: true,
             fillColor: isDark ? AppTheme.darkBackground : AppTheme.gray50,
@@ -455,7 +499,9 @@ class _ExpFormScreenState extends State<_ExpFormScreen> {
                   isDark,
                   label: 'End Date',
                   date: _currentlyWorking ? null : _endDate,
-                  onTap: _currentlyWorking ? null : () => _pickDate(isStart: false),
+                  onTap: _currentlyWorking
+                      ? null
+                      : () => _pickDate(isStart: false),
                 ),
               ),
             ],
@@ -498,11 +544,15 @@ class _ExpFormScreenState extends State<_ExpFormScreen> {
           labelText: label,
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(10),
-            borderSide: BorderSide(color: isDark ? AppTheme.gray600 : AppTheme.gray300),
+            borderSide: BorderSide(
+              color: isDark ? AppTheme.gray600 : AppTheme.gray300,
+            ),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(10),
-            borderSide: BorderSide(color: isDark ? AppTheme.gray600 : AppTheme.gray300),
+            borderSide: BorderSide(
+              color: isDark ? AppTheme.gray600 : AppTheme.gray300,
+            ),
           ),
           filled: true,
           fillColor: isDark ? AppTheme.darkBackground : AppTheme.gray50,
@@ -510,7 +560,9 @@ class _ExpFormScreenState extends State<_ExpFormScreen> {
         child: Text(
           date != null ? DateFormat('MMM yyyy').format(date) : '—',
           style: AppTheme.bodyMedium.copyWith(
-            color: date != null ? (isDark ? Colors.white : AppTheme.gray900) : (isDark ? AppTheme.gray400 : AppTheme.gray500),
+            color: date != null
+                ? (isDark ? Colors.white : AppTheme.gray900)
+                : (isDark ? AppTheme.gray400 : AppTheme.gray500),
           ),
         ),
       ),
@@ -519,12 +571,16 @@ class _ExpFormScreenState extends State<_ExpFormScreen> {
 
   Future<void> _pickDate({required bool isStart}) async {
     final now = DateTime.now();
-    final firstDate = isStart ? DateTime(now.year - 10) : (_startDate ?? DateTime(now.year - 10));
+    final firstDate = isStart
+        ? DateTime(now.year - 10)
+        : (_startDate ?? DateTime(now.year - 10));
     final lastDate = isStart ? now : now;
 
     final picked = await showDatePicker(
       context: context,
-      initialDate: isStart ? (_startDate ?? now.subtract(const Duration(days: 30))) : (_endDate ?? now),
+      initialDate: isStart
+          ? (_startDate ?? now.subtract(const Duration(days: 30)))
+          : (_endDate ?? now),
       firstDate: firstDate,
       lastDate: lastDate,
       helpText: isStart ? 'Select start date' : 'Select end date',
@@ -580,13 +636,15 @@ class _ExpFormScreenState extends State<_ExpFormScreen> {
 
     setState(() => _isSaving = false);
     if (success) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Experience saved.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Experience saved.')));
       Navigator.pop(context);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to save experience. Please try again.')),
+        const SnackBar(
+          content: Text('Failed to save experience. Please try again.'),
+        ),
       );
     }
   }

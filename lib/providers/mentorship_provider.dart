@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:campusconnect/models/mentorship_request.dart';
 import 'package:campusconnect/models/student_profile.dart';
 import 'package:campusconnect/services/firestore/mentorship_service.dart';
@@ -24,6 +26,12 @@ class MentorshipProvider extends ChangeNotifier {
   String? _userId;
   bool _isSending = false;
   bool _isResponding = false;
+
+  /// v9.2 (P2): retained real-time request subscription. Previously
+  /// `startListeningTo*` created untracked `StreamSubscription`s that leaked
+  /// across logout → duplicate listeners and the `WatchStream ... NOT_FOUND`
+  /// warning on the next login. Now cancelled in [reset]/[dispose].
+  StreamSubscription<List<MentorshipRequest>>? _requestsSubscription;
 
   // Getters
   List<MentorshipRequest>? get requests => _requests;
@@ -302,7 +310,8 @@ class MentorshipProvider extends ChangeNotifier {
   /// Stream methods for real-time updates
   /// Start listening to student requests
   void startListeningToStudentRequests(String studentId) {
-    _mentorshipService
+    _requestsSubscription?.cancel();
+    _requestsSubscription = _mentorshipService
         .requestsStreamForUser(studentId)
         .listen(
           (requests) {
@@ -323,7 +332,8 @@ class MentorshipProvider extends ChangeNotifier {
 
   /// Start listening to alumni requests
   void startListeningToAlumniRequests(String alumniId) {
-    _mentorshipService
+    _requestsSubscription?.cancel();
+    _requestsSubscription = _mentorshipService
         .requestsStreamForAlumni(alumniId)
         .listen(
           (requests) {
@@ -393,6 +403,10 @@ class MentorshipProvider extends ChangeNotifier {
   /// Reset provider (on logout)
   void reset() {
     _isDisposed = true;
+    // v9.2 (P2): cancel the real-time subscription so no listener survives
+    // logout (prevents the `WatchStream ... NOT_FOUND` warning + duplicates).
+    _requestsSubscription?.cancel();
+    _requestsSubscription = null;
     _requests = null;
     _pendingRequests = null;
     _stats = null;
@@ -403,5 +417,11 @@ class MentorshipProvider extends ChangeNotifier {
     _isSending = false;
     _isResponding = false;
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _requestsSubscription?.cancel();
+    super.dispose();
   }
 }

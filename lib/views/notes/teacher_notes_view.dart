@@ -213,7 +213,7 @@ class _TeacherNotesViewState extends State<TeacherNotesView> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                value: _editYear,
+                initialValue: _editYear,
                 decoration: const InputDecoration(
                   labelText: 'Year',
                   border: OutlineInputBorder(),
@@ -292,7 +292,7 @@ class _TeacherNotesViewState extends State<TeacherNotesView> {
 
       if (dialogContext.mounted) Navigator.pop(dialogContext);
 
-      if (mounted) {
+      if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Note updated successfully'),
@@ -302,7 +302,7 @@ class _TeacherNotesViewState extends State<TeacherNotesView> {
         );
       }
     } catch (e) {
-      if (mounted) {
+      if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Failed to update note: $e'),
@@ -349,7 +349,7 @@ class _TeacherNotesViewState extends State<TeacherNotesView> {
 
       if (dialogContext.mounted) Navigator.pop(dialogContext);
 
-      if (mounted) {
+      if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Note deleted'),
@@ -358,7 +358,7 @@ class _TeacherNotesViewState extends State<TeacherNotesView> {
         );
       }
     } catch (e) {
-      if (mounted) {
+      if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Failed to delete note: $e'),
