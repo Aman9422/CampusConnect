@@ -8,10 +8,25 @@
  * the profile-update and resume-review triggers) is the ONLY component that
  * writes `users/{uid}/recommendations/*` and `recommendations_meta/summary`.
  *
+ * v9.2.2 (§2 — refresh deduplication): the orchestrator now computes a
+ * FINGERPRINT of everything the deterministic engine reads (user signals,
+ * resume-review inputs, applied placements, the candidate sets) and stores it
+ * on `recommendations_meta/summary`. When the same fingerprint is presented
+ * again — the profile trigger (S1) firing right after the client bootstrap
+ * callable (C1), or two concurrent callers — the work is SKIPPED instead of
+ * regenerating the identical set (engine + AI enrichment + a full rewrite).
+ *
+ * Regeneration is still guaranteed whenever a real input changes:
+ *   * any profile/portfolio/resume signal change alters the fingerprint;
+ *   * adding/removing a candidate (placement/opportunity/alumni) alters it;
+ *   * an EXPIRED active recommendation forces a regeneration;
+ *   * `force: true` (explicit user refresh) always runs.
+ *
  * Extracted from `index.js` (v9.0 ARCH-2 refactor).
  */
 
 const {onCall} = require("firebase-functions/v2/https");
+const crypto = require("crypto");
 const admin = require("firebase-admin");
 const {buildRecommendations, extractPortfolio} = require("./engine");
 const {enrichRecommendationExplanations} = require("./ai_explanations");
@@ -28,6 +43,119 @@ const RECOMMENDATION_CANDIDATE_PAGE_SIZE =
     parseInt(process.env.RECOMMENDATION_CANDIDATE_PAGE_SIZE || "100", 10);
 const RECOMMENDATION_CANDIDATE_MAX =
     parseInt(process.env.RECOMMENDATION_CANDIDATE_MAX || "200", 10);
+
+// v9.2.2 (§2): bump whenever the deterministic engine's OUTPUT shape/ranking
+// changes so previously-materialized fingerprints are treated as stale (the
+// engine must re-run once after a logic change). Keep in sync with
+// `docs/v9_2_2_optimization_report.md`.
+const RECOMMENDATION_ENGINE_VERSION = 2;
+
+// ===============================================
+// FINGERPRINT
+// ===============================================
+
+/**
+ * Deterministic JSON with SORTED object keys, so two structurally equal inputs
+ * always hash to the same string regardless of key insertion order.
+ *
+ * @param {*} value
+ * @returns {string}
+ */
+function stableStringify(value) {
+  if (value === null || value === undefined) return "null";
+  if (typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(",")}]`;
+  }
+  const keys = Object.keys(value).sort();
+  return `{${keys
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
+      .join(",")}}`;
+}
+
+/**
+ * The portfolio as it should participate in the fingerprint: identical to the
+ * document value but WITHOUT its own `metadata` sub-map, mirroring the
+ * `isPortfolioMetadataOnlyChange` rule in `helpers/shared.js`. A pure
+ * `portfolio.metadata.updatedAt` flutter must never invalidate a fingerprint.
+ *
+ * @param {*} portfolio
+ * @returns {*}
+ */
+function portfolioForFingerprint(portfolio) {
+  if (!portfolio || typeof portfolio !== "object" || Array.isArray(portfolio)) {
+    return portfolio === undefined ? null : portfolio;
+  }
+  const copy = {...portfolio};
+  delete copy.metadata;
+  return copy;
+}
+
+/**
+ * Compute the canonical fingerprint of every input the recommendation engine
+ * reads for one student. Pure and deterministic — exported so it is unit
+ * testable without Firestore.
+ *
+ * @param {object} params
+ * @param {object} params.userData Raw `users/{uid}` document
+ * @param {object} [params.options] `{resumeData}` passthrough
+ * @param {Array<string>} [params.candidateIds] ids of loaded candidates
+ * @param {Set<string>|Array<string>} [params.appliedPlacementIds]
+ * @returns {string} sha256 hex digest
+ */
+function computeRecommendationFingerprint({
+  userData = {},
+  options = {},
+  candidateIds = [],
+  appliedPlacementIds = [],
+} = {}) {
+  const resumeData = options && options.resumeData ? options.resumeData : null;
+  const applied = appliedPlacementIds instanceof Set
+    ? [...appliedPlacementIds]
+    : [...(appliedPlacementIds || [])];
+
+  const signals = {
+    v: RECOMMENDATION_ENGINE_VERSION,
+    skills: userData.skills || [],
+    careerInterest: userData.careerInterest ?? null,
+    career: userData.career ?? null,
+    department: userData.department ?? null,
+    graduationYear: userData.graduationYear ?? null,
+    academic: userData.academic ?? null,
+    portfolio: portfolioForFingerprint(userData.portfolio),
+    resumeReview: resumeData
+      ? {
+        atsScore: resumeData.atsScore ?? null,
+        missingKeywords: resumeData.missingKeywords || [],
+      }
+      : null,
+    applied: applied.slice().sort(),
+    candidates: candidateIds.slice().sort(),
+  };
+
+  return crypto
+      .createHash("sha256")
+      .update(stableStringify(signals))
+      .digest("hex");
+}
+
+/**
+ * True when any ACTIVE recommendation document has already expired. Used to
+ * never skip a regeneration while the materialized set would render empty for
+ * the client (the client filters out expired rows).
+ *
+ * @param {FirebaseFirestore.QuerySnapshot} snapshot
+ * @returns {boolean}
+ */
+function hasExpiredActiveRecommendation(snapshot) {
+  const now = Date.now();
+  return snapshot.docs.some((doc) => {
+    const expiresAt = doc.get("expiresAt");
+    return !!expiresAt &&
+        typeof expiresAt.toMillis === "function" &&
+        expiresAt.toMillis() <= now;
+  });
+}
 
 // ===============================================
 // EXPORTS
@@ -47,6 +175,11 @@ exports.refreshRecommendations = onCall(
         );
       }
 
+      // v9.2.2 (§2): an explicit client request may force a regeneration
+      // (the student dashboard refresh button). Implicit callers omit it so
+      // the fingerprint gate can collapse duplicates.
+      const force = request.data?.force === true;
+
       try {
         const userDoc = await admin.firestore()
             .collection("users")
@@ -59,8 +192,13 @@ exports.refreshRecommendations = onCall(
           );
         }
 
-        await refreshRecommendationsForStudent(userId, userDoc.data());
-        return {success: true};
+        const result = await refreshRecommendationsForStudent(
+            userId,
+            userDoc.data(),
+            {},
+            {force}
+        );
+        return {success: true, skipped: result.skipped === true};
       } catch (error) {
         if (error instanceof admin.functions.https.HttpsError) {
           throw error;
@@ -117,38 +255,94 @@ async function loadCandidates(
  * Called by the `refreshRecommendations` callable AND by the
  * `onProfileUpdatedRefreshAI` and `onResumeReviewCreatedRefreshMatches`
  * triggers.
+ *
+ * @param {string} userId
+ * @param {object} userData Raw `users/{uid}` document
+ * @param {object} [options] `{resumeData}` passthrough
+ * @param {object} [refreshOptions] `{force}` — bypass the fingerprint skip
+ * @returns {Promise<{skipped: boolean, fingerprint: string}>}
  */
-async function refreshRecommendationsForStudent(userId, userData, options = {}) {
-  const [alumniDocs, opportunityDocs, placementDocs, applicationSnapshot] =
-      await Promise.all([
-        loadCandidates(
-            admin.firestore().collection("users")
-                .where("role", "==", "alumni")
-                .where("profileCompleted", "==", true)
-        ),
-        loadCandidates(
-            admin.firestore().collection("opportunities")
-                .where("isActive", "==", true)
-        ),
-        loadCandidates(
-            admin.firestore().collection("placements")
-                .where("isActive", "==", true)
-        ),
-        admin.firestore()
-            .collection("applications")
-            .where("userId", "==", userId)
-            .get(),
-      ]);
+async function refreshRecommendationsForStudent(
+    userId,
+    userData,
+    options = {},
+    refreshOptions = {}
+) {
+  const force = refreshOptions.force === true;
+
+  const [
+    alumniDocs,
+    opportunityDocs,
+    placementDocs,
+    applicationSnapshot,
+    existingSnapshot,
+    metaSnapshot,
+  ] = await Promise.all([
+    loadCandidates(
+        admin.firestore().collection("users")
+            .where("role", "==", "alumni")
+            .where("profileCompleted", "==", true)
+    ),
+    loadCandidates(
+        admin.firestore().collection("opportunities")
+            .where("isActive", "==", true)
+    ),
+    loadCandidates(
+        admin.firestore().collection("placements")
+            .where("isActive", "==", true)
+    ),
+    admin.firestore()
+        .collection("applications")
+        .where("userId", "==", userId)
+        .get(),
+    admin.firestore()
+        .collection("users")
+        .doc(userId)
+        .collection("recommendations")
+        .where("isActive", "==", true)
+        .get(),
+    admin.firestore()
+        .collection("users")
+        .doc(userId)
+        .collection("recommendations_meta")
+        .doc("summary")
+        .get(),
+  ]);
 
   const appliedPlacementIds = new Set(
       applicationSnapshot.docs.map((doc) => doc.data().placementId).filter(Boolean)
   );
 
-  console.log(
-      `refreshRecommendationsForStudent: user=${userId} candidates=` +
-      `alumni=${alumniDocs.length} opportunities=${opportunityDocs.length} ` +
-      `placements=${placementDocs.length} applied=${appliedPlacementIds.size}`
-  );
+  const candidateIds = [
+    ...alumniDocs.map((doc) => doc.id),
+    ...opportunityDocs.map((doc) => doc.id),
+    ...placementDocs.map((doc) => doc.id),
+  ];
+
+  const fingerprint = computeRecommendationFingerprint({
+    userData,
+    options,
+    candidateIds,
+    appliedPlacementIds,
+  });
+
+  // v9.2.2 (§2): collapse duplicate regenerations for an unchanged state.
+  const storedFingerprint =
+      metaSnapshot.exists ? metaSnapshot.get("fingerprint") : null;
+  const fingerprintUnchanged =
+      typeof storedFingerprint === "string" &&
+      storedFingerprint.length > 0 &&
+      storedFingerprint === fingerprint;
+  const hasMaterializedSet = !existingSnapshot.empty;
+  const expired = hasExpiredActiveRecommendation(existingSnapshot);
+
+  if (!force && fingerprintUnchanged && hasMaterializedSet && !expired) {
+    console.log(
+        `refreshRecommendationsForStudent: SKIPPED (fingerprint unchanged) ` +
+        `user=${userId} active=${existingSnapshot.size}`
+    );
+    return {skipped: true, fingerprint};
+  }
 
   const {recommendations, summary} = buildRecommendations({
     userId,
@@ -172,13 +366,6 @@ async function refreshRecommendationsForStudent(userId, userData, options = {}) 
         ? admin.firestore.Timestamp.fromDate(r.expiresAt)
         : r.expiresAt || null,
   }));
-
-  const existingSnapshot = await admin.firestore()
-      .collection("users")
-      .doc(userId)
-      .collection("recommendations")
-      .where("isActive", "==", true)
-      .get();
 
   const regeneratedIds = new Set(storedRecommendations.map((r) => r.id));
 
@@ -205,10 +392,19 @@ async function refreshRecommendationsForStudent(userId, userData, options = {}) 
   batch.set(metaRef, {
     updatedAt: admin.firestore.Timestamp.now(),
     total: storedRecommendations.length,
+    // v9.2.2 (§2): the input fingerprint this materialized set corresponds to.
+    fingerprint,
     ...summary,
   }, {merge: true});
 
   await batch.commit();
+
+  console.log(
+      `refreshRecommendationsForStudent: REGENERATED user=${userId} ` +
+      `total=${storedRecommendations.length} ` +
+      `(alumni=${alumniDocs.length} opportunities=${opportunityDocs.length} ` +
+      `placements=${placementDocs.length} applied=${appliedPlacementIds.size})`
+  );
 
   const bestMentor = storedRecommendations.find((r) => r.type === "mentor");
   const bestJob = storedRecommendations.find((r) => r.type === "job");
@@ -234,9 +430,12 @@ async function refreshRecommendationsForStudent(userId, userData, options = {}) 
       priority: "high",
     });
   }
+
+  return {skipped: false, fingerprint};
 }
 
 module.exports = {
   refreshRecommendations: exports.refreshRecommendations,
   refreshRecommendationsForStudent,
+  computeRecommendationFingerprint,
 };

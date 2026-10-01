@@ -1,963 +1,414 @@
-# Version 9.2 — Whole-App Audit, Optimization & Stability
+# v9.2.2 — Runtime Performance & Recommendation Refresh Optimization
 
 ## Objective
 
-Perform a **complete technical audit of the current CampusConnect codebase** before making any UI/UX redesign changes.
+Perform a targeted optimization pass on CampusConnect based on the latest runtime log from the Google Pixel 9 Android 16 emulator.
 
-The goal is to identify and fix everything that can be improved across:
+The goal is to reduce startup jank, eliminate unnecessary recommendation regeneration, remove avoidable compatibility/refresh work, and keep the existing architecture, functionality, security model, and UI unchanged.
 
-* Flutter performance
-* Startup performance
-* Firebase usage
-* Firestore reads/writes
-* Cloud Functions
-* Cloud Scheduler
-* AI infrastructure
-* Quotas
-* Database architecture
-* Security
-* App Check
-* State management
-* Provider lifecycle
-* Memory usage
-* Network handling
-* Error handling
-* Code quality
-* Legacy/dead code
-* Cost efficiency
-* Production readiness
+## 1. Startup Performance — P0/P1
 
-**Do not start the v9.3 UI/UX redesign.**
+Investigate the remaining startup jank shown by:
 
-The existing UI should remain visually unchanged unless a UI change is required to fix a functional or performance issue.
+* `Skipped 77 frames`
+* `Skipped 30 frames`
+* `Skipped 32 frames`
 
----
+Do **not** guess the root cause.
 
-# 1. Full Codebase Audit
+### Requirements
 
-First inspect the entire repository before changing code.
+1. Profile the application in **Flutter Profile mode** using DevTools.
+2. Identify the actual startup functions/widgets/providers consuming the frame budget.
+3. Inspect:
 
-Audit:
+   * `main.dart`
+   * Firebase initialization
+   * App Check initialization
+   * `AuthGuard`
+   * `MultiProvider`
+   * provider constructors and `init/load` methods
+   * first dashboard construction
+   * profile loading
+   * recommendation initialization
+   * resume-history initialization
+   * teacher analytics initialization
+   * SharedPreferences/local storage
+   * image/font loading
+   * navigation initialization
+4. Move non-critical work out of the first-frame path where safe.
+5. Preserve Firebase/App Check correctness and authentication behaviour.
+6. Avoid introducing unnecessary delays solely to hide the jank.
+7. Add lightweight timing/debug instrumentation where useful, but never log secrets, tokens, or personal data.
 
-* `lib/`
-* `functions/`
-* Firebase configuration
-* Firestore rules
-* Storage rules
-* indexes
-* providers
-* services
-* repositories
-* models
-* navigation
-* authentication
-* Cloud Functions
-* scheduled functions
-* AI services
-* recommendation engine
-* Resume Review
-* Portfolio
-* Teacher Analytics
-* Alumni Chat
-* caching
-* local persistence
-* tests
-* documentation
-* configuration files
+### Acceptance
 
-Do not assume existing architecture is correct simply because tests currently pass.
-
-Create an inventory of:
-
-* duplicated logic
-* dead code
-* obsolete code
-* legacy compatibility code
-* unnecessary network calls
-* unnecessary Firestore operations
-* unnecessary rebuilds
-* duplicated listeners
-* duplicated initialization
-* expensive operations
-* possible memory leaks
-* unnecessary dependencies
-* unnecessary Cloud Functions
-* unnecessary scheduled jobs
-* security weaknesses
-* cost risks
+Document the actual startup bottleneck identified from profiling and the exact optimization applied.
 
 ---
 
-# 2. CRITICAL STARTUP PERFORMANCE INVESTIGATION
+## 2. Recommendation Refresh Deduplication — P1
 
-### Important existing problem
+The runtime log shows repeated:
 
-When launching the Flutter app in the Android emulator, the debug log previously showed approximately:
+`RecommendationService: server regenerated recommendations`
 
-```text
-Skipped 45 frames!
-```
+for the same authenticated session.
 
-and at other launches approximately:
+### Requirements
 
-```text
-Skipped 56 frames!
-```
+1. Trace every caller of recommendation regeneration.
+2. Identify whether duplicate calls originate from:
 
-This indicates startup/main-thread jank and must be investigated.
+   * `AuthGuard`
+   * Dashboard initialization
+   * providers
+   * Career Coach
+   * profile synchronization
+   * login/session lifecycle
+   * recommendation freshness checks
+3. Implement end-to-end refresh deduplication.
+4. Multiple concurrent callers for the same user/state must share one in-flight refresh instead of creating multiple server calls.
+5. A fresh recommendation set must not be regenerated simply because a widget/provider rebuilds.
+6. Preserve the existing recommendation fingerprint/cache architecture.
+7. Regeneration should still occur when relevant intelligence inputs actually change.
+8. Preserve:
 
-Do not simply suppress or ignore the message.
+   * unified recommendation writer
+   * deterministic eligibility/security logic
+   * recommendation metadata
+   * cache behaviour
+   * existing recommendation document structure
+9. Do not solve this by simply disabling recommendation refresh.
 
-Determine the actual root cause.
+### Acceptance
 
-Investigate:
+For one login/session, the same recommendation refresh request must result in **one effective server regeneration**, unless a legitimate fingerprint/state change explicitly requires another refresh.
 
-* `main()`
-* Firebase initialization
-* Firebase App Check initialization
-* authentication initialization
-* AuthGuard
-* Provider initialization
-* `MultiProvider`
-* dashboard initialization
-* Firestore listeners
-* profile loading
-* recommendation loading
-* analytics loading
-* synchronous work during startup
-* expensive JSON/model processing
-* SharedPreferences/local storage initialization
-* image loading
-* font loading
-* navigation initialization
-* unnecessary rebuilds
-* debug-only overhead
-* emulator-specific overhead
+Add regression tests for:
 
-Use Flutter performance profiling/devtools where appropriate.
-
-### Required result
-
-Identify exactly which startup operations are responsible for the frame skips.
-
-Then optimize them.
-
-Possible approaches include:
-
-* defer non-critical work
-* lazy initialization
-* parallelize independent asynchronous initialization
-* move expensive work away from the UI isolate
-* avoid duplicate provider initialization
-* delay analytics/recommendation loading until after first frame
-* avoid unnecessary startup Firestore queries
-* cache data appropriately
-* reduce widget rebuilds
-
-Do not hide the warning without fixing the underlying cause.
-
-### Validation
-
-Compare startup behaviour before and after optimization.
-
-Document:
-
-* initial frame performance
-* skipped frames
-* startup operations
-* root causes
-* changes made
-* resulting behaviour
+* concurrent refresh requests
+* repeated initialization
+* stale recommendations
+* changed intelligence fingerprint
+* logout/login lifecycle
 
 ---
 
-# 3. TeacherAnalyticsProvider Duplicate Loading
+## 3. Resume Review Provider Refresh Deduplication — P2
 
-Previous logs showed the following behaviour multiple times during startup/navigation:
+The log shows:
 
-```text
-Loaded 3 reviews, 1 students, 1 depts, 1 pipeline eligible, 1 engagement summaries
-```
+`Loaded 0 history items`
 
-appearing approximately three times consecutively.
+followed immediately by:
 
-Investigate whether:
+`Refreshed 0 history items`
 
-* Provider is instantiated multiple times
-* `initState()` triggers duplicate loading
-* AuthGuard triggers loading
-* Dashboard triggers loading
-* refresh methods are called automatically
-* listeners trigger repeated queries
-* navigation recreates the provider unnecessarily
+### Requirements
 
-Eliminate unnecessary duplicate loads.
+1. Trace the initialization path for `ResumeReviewProvider`.
+2. Determine whether `loadHistory()` and `refreshHistory()` are redundantly executed.
+3. Avoid duplicate Firestore reads when the existing data is already current.
+4. Preserve explicit user-triggered refresh functionality.
+5. Ensure the provider does not accidentally suppress legitimate updates after a new review.
 
-The final implementation should ensure that analytics data is loaded only when necessary.
+### Acceptance
+
+Normal page initialization should perform only the minimum required history read(s), while an explicit refresh still reloads data.
 
 ---
 
-# 4. Firestore Listener Lifecycle
+## 4. Portfolio Compatibility Cleanup — P2
 
-Previous logs also showed:
+The log repeatedly reports:
 
-```text
-WatchStream ... NOT_FOUND Target id not found
-```
+`detected flattened portfolio shape ... next save will use full (non-diff) write to reconstitute nested map`
 
-particularly around logout.
+### Requirements
 
-Investigate all Firestore listeners and streams.
+1. Inspect the current portfolio schema and compatibility handling.
+2. Identify existing flattened portfolio documents.
+3. Confirm the canonical structure remains:
 
-Check:
+`users/{uid}/portfolio`
 
-* listener creation
-* listener cancellation
-* Provider disposal
-* logout lifecycle
-* authentication changes
-* dashboard disposal
-* navigation changes
-* stream subscriptions
+with the intended nested fields.
+4. Implement a **safe, controlled migration** for legacy flattened portfolio data where appropriate.
+5. Do not delete valid portfolio information.
+6. Preserve backward compatibility during migration.
+7. After migration, normal portfolio updates should use the optimized nested/diff-write path.
+8. Migration must be idempotent and safe to rerun.
 
-Ensure listeners are correctly cancelled when no longer required.
+### Acceptance
 
-Do not leave Firestore listeners active after logout or screen disposal.
+After migration, previously affected accounts no longer require the flattened-shape compatibility path during normal login/save operations.
 
 ---
 
-# 5. Firebase App Check
+## 5. App Check Debug Configuration — P0 Validation
 
-Audit the current App Check implementation.
+The runtime log repeatedly shows:
 
-Verify:
+* `403 App attestation failed`
+* `Too many attempts`
+* `using placeholder token`
 
-* Android configuration
-* debug provider
-* production provider
-* Play Integrity configuration
-* token handling
-* initialization order
-* Firebase App Check enforcement
-* Firestore
-* Storage
-* Cloud Functions
-* Authentication integration where applicable
+### Requirements
 
-Ensure development/debug configuration does not accidentally become the production configuration.
+1. Verify the emulator is using the intended Firebase project.
+2. Verify the current App Check debug token is allowlisted for that exact project.
+3. Confirm debug App Check works correctly on the development emulator.
+4. Do not weaken production App Check enforcement.
+5. Do not hard-code or commit debug tokens.
+6. Verify release configuration still uses the intended production attestation provider.
+7. Avoid unnecessary repeated App Check requests/retries during a session where possible.
 
-Do not expose or commit debug tokens.
+### Acceptance
 
-Document the correct development and production setup.
+A debug emulator session should obtain a valid App Check token without repeated `403`/`Too many attempts` errors.
 
 ---
 
-# 6. Cloud Scheduler & Cloud Cost Audit
+## 6. Google Play Services / Emulator Diagnostics — P3
 
-There are currently multiple Cloud Scheduler jobs.
+The log contains repeated:
 
-Audit every scheduled function and map it back to the current source code.
+* `DeadObjectException`
+* `Phenotype.API is not available`
+* `Unknown calling package name 'com.google.android.gms'`
+* `DEVELOPER_ERROR`
 
-Known jobs include:
+### Requirements
 
-```text
-autoExpireOpportunities
-cleanupExpiredAIConversations
-compensateStaleAIAnalysisQuota
-compensateStaleCareerCoachQuota
-compensateStaleResumeQuota
-recomputeEngagementScores
-sendInactivityReminders
-```
+1. Determine whether these errors originate from CampusConnect or the Android Emulator/Google Play Services environment.
+2. Do not modify application logic merely to suppress external emulator noise.
+3. If the errors are environment-specific, document them separately.
+4. Verify Firebase Authentication and core Firebase operations still work normally.
 
-Do not delete anything blindly.
+### Acceptance
 
-For every scheduler determine:
+Clearly classify these messages as:
 
-1. What code creates it?
-2. Is the functionality still required?
-3. Is it still compatible with the current architecture?
-4. Is it legacy?
-5. Can it be merged with another maintenance job?
-6. Can its frequency be reduced?
-7. Does it produce unnecessary Firestore reads/writes?
-8. Does it create unnecessary Cloud Function execution?
-9. Does it generate cost without meaningful value?
-10. Can it be replaced by an event-driven approach?
+* application issue,
+* configuration issue, or
+* emulator/Google Play Services issue.
 
-Pay particular attention to:
-
-* old AI quota systems
-* unified `user_ai_quotas`
-* legacy `ai_conversations`
-* engagement recomputation
-* inactivity reminders
-* opportunity expiration
-
-Do not remove a scheduler until its dependencies and replacement behaviour are verified.
+No unnecessary application-code changes should be made for emulator-only noise.
 
 ---
 
-# 7. AI Quota Architecture Audit
+## 7. Teacher Analytics Regression Check
 
-Verify the migration toward:
+The latest log shows one Teacher Analytics load for the tested session:
 
-```text
-user_ai_quotas/{uid}
-```
+`Loaded 3 reviews, 1 students, 1 depts, 1 pipeline eligible, 1 engagement summaries`
 
-Audit all remaining quota systems, including:
+### Requirements
 
-* `ai_usage`
-* `resume_usage`
-* `career_coach_usage`
-* `ai_analysis_usage`
-
-Determine which are still actively required and which are legacy.
-
-Preserve:
-
-* request reservations
-* `pendingRequestId`
-* `pendingSince`
-* stale-request compensation
-* rollback
-* fallback behaviour
-* no-double-charge protection
-* existing limits
-
-The final architecture should avoid unnecessary duplicate quota systems.
+1. Confirm the previous load-deduplication fix remains active.
+2. Ensure no new duplicate loads are introduced by this optimization pass.
+3. Preserve the existing load-scoped cache and in-flight deduplication.
+4. Re-test tab navigation, retry, logout, and re-login.
 
 ---
 
-# 8. AI Provider & Cost Optimization
+## 8. Listener Lifecycle Regression Check
 
-Audit:
+The latest log contains multiple logout/login cycles and does not reproduce the previous Firestore `NOT_FOUND Target id not found` symptom.
 
-* Groq primary provider
-* Hugging Face fallback
-* GPT-OSS 20B
-* timeout handling
-* retry handling
-* fallback handling
-* usage tracking
-* quota reservation
-* duplicate AI requests
-* prompt size
-* response size
-* unnecessary AI calls
-* cached AI results
+### Requirements
 
-Do not change the AI model merely for experimentation.
+Verify that:
 
-Optimize the existing implementation for:
+* Opportunity listeners are cancelled correctly.
+* Alumni directory listeners are cancelled correctly.
+* Portfolio listeners are cancelled correctly.
+* Chat/notification/group-chat listeners remain lifecycle-safe.
+* Re-login does not create duplicate subscriptions.
 
-* reliability
-* latency
-* cost
-* quota correctness
+Do not rewrite working listener architecture without evidence.
 
 ---
 
-# 9. Recommendation Engine Audit
+## 9. Logging Improvements
 
-Audit the unified recommendation architecture.
+Keep useful diagnostics for optimization:
 
-Verify:
+* startup phase timings
+* provider initialization timing
+* recommendation refresh reason
+* recommendation refresh deduplication
+* cache hit/miss
+* expensive Firestore operations
 
-* single recommendation writer
-* recommendation cache
-* `recommendations_meta/summary`
-* Dashboard consumption
-* Career Coach consumption
-* Teacher Insights consumption
-* placement recommendations
-* career-role recommendations
-* engagement signals
-* pagination
-* deterministic eligibility/security logic
+Do **not** log:
 
-Investigate unnecessary recommendation refreshes.
-
-Do not create a second recommendation engine.
-
-Ensure all surfaces continue using the same underlying recommendation source.
-
----
-
-# 10. Career Role Recommendation Quality
-
-Audit the current career-match logic.
-
-Important distinction:
-
-### Career Interest
-
-User-declared intent such as:
-
-```text
-App Development
-```
-
-### Career Match
-
-Evidence-based role compatibility calculated from:
-
-* skills
-* projects
-* resume/ATS
-* other profile evidence
-
-Ensure these concepts are not presented as contradictory recommendations.
-
-If the student has already declared a career direction, avoid unnecessarily presenting the same role as an "alternative career match."
-
-Also investigate weak recommendations caused only by generic skills.
-
-Do not change the underlying scoring system without documenting the reason.
-
----
-
-# 11. Firestore Performance Audit
-
-Audit every major Firestore query.
-
-Check:
-
-* unnecessary reads
-* repeated reads
-* missing pagination
-* missing limits
-* collection scans
-* collectionGroup scans
-* unnecessary listeners
-* inefficient indexes
-* duplicate queries
-* stale cache usage
-* write amplification
-
-Pay particular attention to:
-
-* recommendations
-* placements
-* alumni/opportunities
-* engagement
-* teacher analytics
-* resume reviews
-* portfolios
-* AI history
-* chat
-
-Use cursor pagination where appropriate.
-
-Do not sacrifice correctness for fewer reads.
-
----
-
-# 12. Engagement Architecture
-
-Audit the existing materialized engagement approach.
-
-Determine whether:
-
-* running aggregates are sufficient
-* scheduled recomputation is still necessary
-* the 250-document scan is still required
-* aggregates can be trusted
-* recomputation can be event-driven
-* unnecessary daily reads can be removed
-
-Do not remove recomputation until data correctness has been verified.
-
----
-
-# 13. Legacy Data & Code Cleanup
-
-Identify remaining legacy architecture from previous versions.
-
-Especially investigate:
-
-```text
-ai_conversations
-old quota collections
-old recommendation logic
-old profile routes
-obsolete providers
-duplicate services
-unused models
-unused imports
-obsolete compatibility code
-```
-
-For every legacy component classify it as:
-
-```text
-KEEP
-MIGRATE
-DEPRECATE
-REMOVE
-```
-
-Do not remove compatibility code without verifying existing data dependencies.
-
----
-
-# 14. Flutter State Management Audit
-
-Audit:
-
-* Provider creation
-* Provider disposal
-* `ChangeNotifier`
-* `Consumer`
-* `Selector`
-* `context.watch`
-* `context.read`
-* `setState`
-* unnecessary rebuilds
-* duplicate listeners
-* navigation-triggered rebuilds
-
-Look for providers that:
-
-* initialize multiple times
-* fetch data multiple times
-* remain alive unnecessarily
-* perform expensive work during build
-
-Optimize without changing application behaviour.
-
----
-
-# 15. Memory & Resource Audit
-
-Investigate:
-
-* memory leaks
-* unclosed streams
-* timers
-* subscriptions
-* controllers
-* animation controllers
-* text controllers
-* image caching
-* large assets
-* PDF handling
-* chat history
-* large Firestore result sets
-
-Ensure all disposable resources are properly disposed.
-
----
-
-# 16. Network & Error Handling
-
-Audit:
-
-* timeout handling
-* retry logic
-* exponential backoff
-* duplicate requests
-* offline behaviour
-* transient Firebase errors
-* AI failures
-* Cloud Function failures
-* loading states
-* user-facing error messages
-
-Avoid retry storms.
-
-Avoid duplicate requests after transient failures.
-
----
-
-# 17. Security Audit
-
-Review:
-
-* Firestore rules
-* Storage rules
-* Cloud Functions authorization
-* role validation
-* student/alumni/teacher access
-* portfolio access
-* resume access
-* AI history access
-* chat access
-* quota manipulation
-* App Check
-* API key handling
-* client-side secrets
-
-Confirm that security-critical decisions are enforced server-side.
-
----
-
-# 18. Dependency Audit
-
-Review `pubspec.yaml` and Functions dependencies.
-
-Identify:
-
-* unused dependencies
-* duplicated dependencies
-* outdated dependencies
-* unnecessary packages
-* packages that increase application size or startup cost
-
-Do not blindly upgrade everything.
-
-Only upgrade dependencies when there is a clear compatibility, security, performance, or maintenance reason.
-
----
-
-# 19. Build & Application Size
-
-Audit:
-
-* debug build
-* profile build
-* release build
-* APK size
-* assets
-* fonts
-* unnecessary resources
-
-Identify obvious opportunities to reduce application size and startup overhead.
-
----
-
-# 20. Testing Audit
-
-Review the existing tests.
-
-Determine whether important flows are actually covered.
-
-Prioritize:
-
-* authentication
-* role access
-* recommendations
-* placements
-* Resume Review
-* AI quota
-* Career Coach
-* Portfolio
-* Teacher analytics
-* Alumni Chat
-* logout lifecycle
-* App Check-related behaviour
-* Firestore security rules
-* Cloud Functions
-
-Do not delete existing tests just to make the suite pass.
-
-Add tests for bugs discovered during the audit.
-
----
-
-# 21. Observability & Logging
-
-Audit debug logging.
-
-Remove or reduce:
-
-* excessive repeated logs
-* sensitive information
-* noisy production logs
-* duplicate logging
-
-Keep useful diagnostics for:
-
-* AI failures
-* Firebase errors
-* quota failures
-* security failures
-* scheduler failures
-* critical lifecycle problems
-
-Do not log:
-
-* API keys
-* tokens
 * passwords
-* sensitive personal information
-* debug App Check tokens
+* API keys
+* App Check debug tokens
+* Firebase ID tokens
+* private resume text
+* private user data
+
+Prefer structured/debug-only diagnostics where appropriate.
 
 ---
 
-# 22. Implementation Rules
+## 10. Testing
 
-Before changing code:
+Add or update automated tests for:
 
-1. Audit first.
-2. Produce a prioritized findings report.
-3. Identify root causes.
-4. Explain expected impact.
-5. Then implement fixes.
+### Flutter
 
-Prioritize:
+* startup/provider initialization
+* recommendation refresh deduplication
+* Resume Review initialization/refresh
+* portfolio migration handling
 
-```text
-P0 — crashes/security/data corruption
-P1 — startup/performance/cost problems
-P2 — correctness/reliability problems
-P3 — maintainability/cleanup
-P4 — optional improvements
-```
+### Firebase Functions
 
-Do not make unrelated UI redesign changes.
+* recommendation refresh behaviour where testable
+* idempotent recommendation writes
+* any affected callable/service logic
 
-Do not introduce major new features.
-
-Do not rewrite working architecture without evidence that it needs to change.
-
----
-
-# 23. Required Audit Report Before Implementation
-
-First provide:
-
-### Critical Findings
-
-| Priority | Area | Problem | Root Cause | Impact | Proposed Fix |
-| -------- | ---- | ------- | ---------- | ------ | ------------ |
-
-Include specific findings for:
-
-* startup frame skips
-* duplicate Teacher Analytics loading
-* Firestore listener lifecycle
-* Cloud Scheduler
-* AI quotas
-* recommendation engine
-* Firestore reads
-* Flutter rebuilds
-* security
-* legacy code
-* memory/resource usage
-
-### Cost Findings
-
-Identify:
-
-* current scheduled jobs
-* unnecessary jobs
-* expensive queries
-* unnecessary function executions
-* unnecessary AI usage
-* unnecessary Firestore operations
-
-### Performance Findings
-
-Identify:
-
-* startup bottlenecks
-* frame drops
-* duplicate initialization
-* expensive rebuilds
-* slow screens
-* unnecessary network operations
-
-### Security Findings
-
-Identify:
-
-* App Check issues
-* rule weaknesses
-* authorization issues
-* secret exposure
-* quota abuse possibilities
-
----
-
-# 24. Implementation
-
-After the audit:
-
-Implement the highest-priority fixes.
-
-For each change:
-
-* Explain the root cause.
-* Explain the change.
-* Keep the change focused.
-* Add/update tests.
-* Verify existing functionality.
-
-Do not perform a giant uncontrolled refactor.
-
----
-
-# 25. Validation
+### Existing validation
 
 Run:
 
 ```bash
 flutter analyze
 flutter test
+cd functions
+node --test
 ```
 
-Also run the relevant Functions/tests.
+For every changed JavaScript file:
 
-Build a release APK.
+```bash
+node --check <file>
+```
 
-Verify:
+Also build:
+
+```bash
+flutter build apk --release
+```
+
+---
+
+## 11. Manual Validation
+
+Test on the **Google Pixel 9 Android 16.0 emulator**.
 
 ### Startup
 
-* No unnecessary duplicate initialization.
-* Startup frame performance is improved.
-* No unexplained large frame skips during normal startup.
-* Firebase initialization remains correct.
-* App Check remains correct.
+* cold launch
+* first frame
+* login
+* dashboard opening
+* navigation to other tabs
 
-### Student
+### Recommendation
 
-* Login
-* Dashboard
-* Recommendations
-* Placements
-* Notes
-* AI
-* Resume Review
-* Portfolio
-* Profile
+* login
+* observe recommendation generation
+* navigate between Dashboard/Career Coach/Profile
+* verify no unnecessary duplicate regeneration
+* change a recommendation-driving profile field
+* verify legitimate regeneration occurs
 
-### Alumni
+### Resume Review
 
-* Login
-* Dashboard
-* Chat
-* Resume Review
-* Profile
+* open history
+* refresh manually
+* submit a review
+* reopen history
 
-### Teacher
+### Portfolio
 
-* Login
-* Dashboard
-* Analytics
-* Student portfolio read-only access
-* Profile
+* load an affected legacy portfolio
+* edit/save
+* reload
+* verify canonical nested structure
 
 ### Lifecycle
 
-* Login
-* Logout
-* Re-login
-* Navigation
-* App background/foreground
-* Provider disposal
-* Firestore listeners
+* login
+* navigate through listener-heavy screens
+* logout
+* login with another account
+* repeat
+* verify no duplicate listeners or stale callbacks
 
-### Backend
+### App Check
 
-* Scheduled functions
-* AI quotas
-* Recommendations
-* Firestore
-* Storage
-* Security rules
+* verify valid debug token acquisition
+* verify repeated attestation failures no longer occur in a correctly configured emulator
 
 ---
 
-# 26. Cost Verification
+## 12. Performance Measurement
 
-After changes, verify Google Cloud/Firebase usage.
+Do not claim optimization success based only on the absence of log warnings.
 
-Document:
+Capture before/after measurements where possible using Flutter DevTools Profile mode:
 
-* Scheduler jobs before/after
-* Function invocations
-* Firestore reads/writes
-* AI usage
-* Storage usage
-* Any expected cost reduction
+* first-frame timing
+* frame build/raster time
+* startup duration
+* number of recommendation refresh calls
+* unnecessary Firestore reads
+* provider initialization duration
 
-Do not claim cost savings without evidence.
+Document what was actually measured.
 
 ---
 
-# 27. Documentation
+## 13. Constraints
 
-Update:
+Do **not**:
 
-```text
-docs/Task.md
-```
+* redesign the UI
+* introduce new features
+* replace the existing Firebase architecture
+* replace Provider
+* replace the recommendation engine
+* disable recommendation generation
+* weaken App Check/security
+* remove required lifecycle listeners
+* change quota limits
+* expose API keys client-side
+* make speculative performance changes without profiling evidence
 
-and any relevant architecture/cost/performance documentation.
+The purpose of v9.2.2 is **targeted runtime optimization only**.
 
-Record:
+## 14. Documentation
 
-* audit findings
-* fixes
-* architecture changes
-* removed legacy components
-* scheduler changes
-* performance improvements
-* security improvements
-* cost improvements
+Update the optimization/audit documentation with:
+
+* problems discovered from the runtime log
+* root causes
+* files/components changed
+* before/after measurements
+* recommendation deduplication behaviour
+* portfolio migration result
+* App Check configuration result
+* emulator-only warnings
 * test results
+* remaining known issues
 
----
+## Definition of Done
 
-# 28. Final Acceptance Criteria
+v9.2.2 is complete when:
 
-v9.2 is complete when:
-
-* The whole application has been audited.
-* Major performance bottlenecks are identified and addressed.
-* Startup frame skips have a documented root cause and fix.
-* Duplicate initialization is removed where unnecessary.
-* Firestore listener lifecycle is correct.
-* Cloud Scheduler jobs have been audited.
-* Unnecessary scheduled work is removed or consolidated where safe.
-* AI quota architecture is consistent.
-* Recommendation architecture remains unified.
-* Firestore queries are optimized.
-* Flutter rebuilds are optimized.
-* Memory/resource lifecycle is correct.
-* Security is audited.
-* App Check is correctly configured.
-* Legacy code is classified and cleaned up where safe.
-* Existing functionality remains intact.
-* Tests pass.
-* `flutter analyze` passes.
-* Release build succeeds.
-* Cloud/Firebase cost drivers are documented.
-* No new major product features are introduced.
-
-## Important
-
-**Do not begin the v9.3 UI/UX redesign during this task.**
-
-The current UI should remain essentially unchanged.
-
-The purpose of v9.2 is:
-
-> **Make the existing CampusConnect application technically complete, stable, performant, secure, maintainable, and cost-efficient before redesigning its UI.**
-
-## Final Report
-
-Provide:
-
-1. Complete audit summary
-2. Critical findings
-3. Root causes
-4. Changes implemented
-5. Startup performance investigation
-6. Frame-skip root cause and fix
-7. Firebase/Firestore optimization
-8. Cloud Scheduler audit
-9. AI optimization
-10. Recommendation-engine audit
-11. Security audit
-12. Memory/resource improvements
-13. Legacy code removed/deprecated
-14. Tests added/updated
-15. `flutter analyze` result
-16. Release build result
-17. Cost-impact analysis
-18. Remaining issues
-19. Recommended next step: **v9.3 Modern UI/UX Redesign**
+* startup bottlenecks have been profiled and the confirmed expensive work has been optimized
+* recommendation regeneration is deduplicated
+* Resume Review redundant initialization is resolved where confirmed
+* legacy portfolio compatibility is reduced through safe migration
+* App Check debug configuration is working correctly
+* Teacher Analytics and listener lifecycle fixes remain stable
+* all automated tests pass
+* release APK builds successfully
+* before/after performance evidence is documented
+* no existing functionality, security controls, or architecture is unnecessarily changed.

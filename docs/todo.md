@@ -237,3 +237,113 @@ Every item below is a small, local fix except SEC-2↔BUG-2, which must ship tog
 
 - [ ] v9.3 UI/UX redesign — **NOT STARTED** (must remain untouched)
 - [ ] New product features — **NOT REQUIRED**
+
+---
+
+# v9.2.2 — Runtime Performance & Recommendation Refresh Optimization — `docs/Task.md`
+
+Baseline: `9.1.2+99` → released `9.2.2+100`.
+Full write-up: `docs/v9_2_2_optimization_report.md` (fixes) + `docs/v9_2_2_investigation_report.md` (root causes).
+
+## 1. Startup Performance — P0/P1 — DONE (instrumented, classified)
+
+- [x] Profiled the cold-start window from `docs/logs.md` — no Dart output precedes the first `Skipped 77 frames`
+- [x] Identified the contributors: Impeller/engine bring-up, `performTraversals()` JIT, Firebase/GMS/App Check native init (all outside Dart)
+- [x] Inspected `main.dart`, Firebase init, App Check init, `AuthGuard`, `MultiProvider`, provider constructors, dashboards, prefs, fonts
+- [x] Confirmed v9.2 deferred provider init + lazy tabs already removed the Dart-side first-frame work
+- [x] Added lightweight startup instrumentation (phase marks + frame timings) — debug/profile only, no secrets
+- [x] Did **not** add speculative Dart delays or "fixes" without evidence
+
+## 2. Recommendation Refresh Deduplication — P1 — DONE
+
+- [x] Traced every caller: client `initWithUser` / `refresh`, server `onProfileUpdatedRefreshAI` / `onResumeReviewCreatedRefreshMatches` + the callable
+- [x] Client in-flight sharing (concurrent callers → one backend call) — `lib/utilities/refresh_dedupe.dart`
+- [x] Client fingerprint skip (unchanged state → no server call) — `recommendation_fingerprint.dart`
+- [x] Server fingerprint gate stored on `recommendations_meta/summary` + `force` bypass — `functions/recommendations/refresh.js`
+- [x] Regeneration preserved for: profile/portfolio/resume change, candidate change, expiry, explicit refresh, logout/login
+- [x] Unified writer, eligibility/security logic, metadata, cache and document structure preserved
+- [x] Refresh reason + skip/cache-hit diagnostics added (debug only)
+- [x] Regression tests: `test/refresh_dedupe_test.dart` (16), `test/recommendation_fingerprint_test.dart` (13), `functions/test/recommendations_refresh_dedupe.test.js` (12)
+
+## 3. Resume Review Provider Refresh Deduplication — P2 — DONE
+
+- [x] Traced the init path (`initWithUser` → `_loadHistory`)
+- [x] Confirmed the redundant caller (`_TeacherDashboardTab._loadAll` → `refreshHistory`)
+- [x] Guarded on `firstLoad && !_historyRefreshed && !historyInitialized && !isLoadingHistory`
+- [x] Explicit refresh (pull-to-refresh / Try Again / post-review) preserved
+- [x] Failed/absent init still reads; a new review still appears
+
+## 4. Portfolio Compatibility Cleanup — P2 — DONE
+
+- [x] Inspected the schema + compatibility handling (`_extractPortfolioMap`, `hasFlattenedPortfolioShape`)
+- [x] Confirmed the canonical structure `users/{uid}.portfolio` with nested fields
+- [x] Implemented a safe, controlled, idempotent migration (`portfolio_migration.dart` + `migrateFlattenedPortfolio`)
+- [x] No valid portfolio information deleted; values re-nested verbatim
+- [x] Backward compatible during migration (tolerant reader retained)
+- [x] After migration, saves use the optimized nested/diff-write path
+- [x] Regression tests: `test/portfolio_migration_test.dart` (14)
+
+## 5. App Check Debug Configuration — P0 validation — DONE (diagnosis)
+
+- [x] Verified the project (`firebase_options.dart` == `.firebaserc` == `campusconnect-firebase-project`)
+- [x] Confirmed the debug token is printed by the SDK, not app code; no token is committed
+- [x] Confirmed debug/release provider selection is correct (release keeps Play Integrity/DeviceCheck)
+- [x] Root cause: the emulator debug token is not allow-listed for the project
+- [ ] **Console action (human):** register `2d0591e7-…` under App Check → Manage debug tokens (or pin via `adb shell setprop`)
+- [ ] Re-verify a debug session obtains a valid token with no repeated `403` / `Too many attempts`
+
+## 6. Google Play Services / Emulator Diagnostics — P3 — DONE (classified)
+
+- [x] Determined these originate from `com.google.android.gms`, not the app (stack frames verified)
+- [x] Made **no** application change to suppress emulator noise
+- [x] Documented them separately as environment-specific
+- [x] Verified Firebase Auth + core Firebase ops still work in the same session
+
+## 7. Teacher Analytics Regression Check — DONE
+
+- [x] Confirmed one load per session (`Loaded 3 reviews, 1 students, …`)
+- [x] `LoadDedupe` cache + in-flight dedup still active
+- [x] No new duplicate loads introduced by this pass
+- [x] Existing suite still green (`test/teacher_analytics_load_dedupe_test.dart`, 9)
+
+## 8. Listener Lifecycle Regression Check — DONE
+
+- [x] Opportunity / alumni-directory / portfolio / chat / notification / group-chat listeners cancelled correctly
+- [x] 4 logout/login cycles in the log with no `NOT_FOUND Target id not found`
+- [x] Re-login creates no duplicate subscriptions
+- [x] No listener architecture rewritten
+
+## 9. Logging Improvements — DONE
+
+- [x] Startup phase timings + provider init timing (`StartupProfiler`)
+- [x] Recommendation refresh reason + dedup + cache hit/miss
+- [x] Portfolio migration result; expensive Firestore op durations
+- [x] No passwords / API keys / App Check tokens / ID tokens / private resume text / private user data
+
+## 10. Testing — DONE
+
+- [x] Flutter: startup profiler, recommendation dedup, fingerprint, portfolio migration (54 new tests)
+- [x] Functions: `computeRecommendationFingerprint` determinism/coverage (12 new tests)
+- [x] `flutter analyze` → **No issues found!**
+- [x] `flutter test` → **All tests passed! (476)**
+- [x] `node --check` on every changed JS file → pass
+- [x] `npm --prefix functions test` → **50 pass / 0 fail**
+- [x] `flutter build apk --release` → built (version `9.2.2+100`)
+
+## 11–12. Manual Validation + Performance Measurement
+
+- [x] Instrumentation + measurement methodology documented (`docs/v9_2_2_optimization_report.md` §12)
+- [x] Deterministic before/after recorded (test counts, refresh-call counts, read counts)
+- [ ] On-device `flutter run --profile` Pixel 9 capture (human step — tooling is in place)
+
+## 13. Constraints — honoured
+
+- [x] No UI redesign · no new features · Firebase architecture retained · `Provider` retained
+- [x] Recommendation engine retained; regeneration deduplicated, **not disabled**
+- [x] App Check / security not weakened · lifecycle listeners retained · quotas unchanged
+- [x] No API keys client-side · no speculative perf change without evidence
+
+## 14. Documentation — DONE
+
+- [x] `docs/v9_2_2_investigation_report.md` — problems + root causes
+- [x] `docs/v9_2_2_optimization_report.md` — fixes, files changed, before/after, dedup behaviour, migration result, App Check result, emulator warnings, test results, remaining issues

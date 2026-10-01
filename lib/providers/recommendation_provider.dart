@@ -19,6 +19,12 @@ class RecommendationProvider extends ChangeNotifier {
   bool _isDisposed = false;
   StreamSubscription<List<Recommendation>>? _subscription;
 
+  /// v9.2.2 (§2): true while `initWithUser` is still running for `_userId`. A
+  /// second call for the SAME user inside that window returns immediately —
+  /// preventing a duplicate stream subscription. The server call itself is
+  /// additionally collapsed by `RecommendationService`'s `RefreshDedupe` gate.
+  bool _initInFlight = false;
+
   List<Recommendation> get recommendations => _recommendations;
   bool get isLoading => _isLoading;
   bool get isInitialized => _isInitialized;
@@ -34,7 +40,14 @@ class RecommendationProvider extends ChangeNotifier {
 
   Future<void> initWithUser(String userId, StudentProfile profile) async {
     if (_isInitialized && _userId == userId) return;
+    // v9.2.2 (§2): a second init for the SAME user while the first is still
+    // in flight must not re-subscribe the stream. `_isInitialized` only flips
+    // once the first stream snapshot arrives, so without this guard a rebuild
+    // in that window re-entered the whole method — the duplicate-refresh
+    // window described in the v9.2.2 investigation report.
+    if (_initInFlight && _userId == userId) return;
 
+    _initInFlight = true;
     _userId = userId;
     _isDisposed = false;
     _isLoading = true;
@@ -62,13 +75,22 @@ class RecommendationProvider extends ChangeNotifier {
             },
           );
 
-      await _service.refreshRecommendations(userId: userId, profile: profile);
+      // v9.2.2 (§2): the refresh is de-duplicated end-to-end inside the service
+      // (shared in-flight future + profile-fingerprint skip). `reason` records
+      // WHY for the diagnostics.
+      await _service.refreshRecommendations(
+        userId: userId,
+        profile: profile,
+        reason: 'init',
+      );
     } catch (e) {
       if (_isDisposed) return;
       _isLoading = false;
       _error = 'Failed to initialize recommendations';
       debugPrint('RecommendationProvider.initWithUser error: $e');
       notifyListeners();
+    } finally {
+      _initInFlight = false;
     }
   }
 
@@ -80,7 +102,15 @@ class RecommendationProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await _service.refreshRecommendations(userId: _userId!, profile: profile);
+      // v9.2.2 (§2): an EXPLICIT user refresh always runs (`force`) — the
+      // deduplication only suppresses implicit duplicates (rebuilds,
+      // concurrent callers), never a deliberate tap.
+      await _service.refreshRecommendations(
+        userId: _userId!,
+        profile: profile,
+        force: true,
+        reason: 'manual',
+      );
       _error = null;
     } catch (e) {
       _error = 'Failed to refresh recommendations';
@@ -105,6 +135,11 @@ class RecommendationProvider extends ChangeNotifier {
     _isLoading = false;
     _isInitialized = false;
     _error = null;
+    _initInFlight = false;
+    // v9.2.2 (§2): clear the client refresh de-duplication state so a
+    // re-login always refreshes once and no stale fingerprint survives the
+    // session boundary.
+    _service.resetRefreshState();
   }
 
   @override

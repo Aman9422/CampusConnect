@@ -1,4 +1,5 @@
 import 'package:campusconnect/models/portfolio/portfolio_model.dart';
+import 'package:campusconnect/services/firestore/portfolio_migration.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
@@ -50,36 +51,19 @@ class PortfolioService {
       return nested;
     }
 
-    final flatPortfolioKeys = data.keys
-        .where((key) => key.startsWith('portfolio.') && key.length > 10)
-        .toList();
+    // v9.2.2 (§4): flatten detection + un-flattening are now SHARED with the
+    // migration planner (`portfolio_migration.dart`) so the tolerant reader and
+    // the migrator interpret the legacy shape identically.
+    final flatPortfolioKeys = flattenedPortfolioKeys(data);
     if (flatPortfolioKeys.isEmpty) {
       return null;
     }
 
     final flat = <String, dynamic>{};
     for (final key in flatPortfolioKeys) {
-      flat[key.substring('portfolio.'.length)] = data[key];
+      flat[key.substring(portfolioKeyPrefix.length)] = data[key];
     }
-    return _unflattenPaths(flat);
-  }
-
-  /// Converts dot-path keys into a nested map, e.g.:
-  ///   `resume.downloadUrl` → `{ 'resume': { 'downloadUrl': value } }`
-  ///   `projects` (list)     → `{ 'projects': [...] }`
-  Map<String, dynamic> _unflattenPaths(Map<String, dynamic> flat) {
-    final result = <String, dynamic>{};
-    for (final entry in flat.entries) {
-      final path = entry.key.split('.');
-      var cursor = result;
-      for (var i = 0; i < path.length - 1; i++) {
-        final segment = path[i];
-        cursor = cursor.putIfAbsent(segment, () => <String, dynamic>{})
-            as Map<String, dynamic>;
-      }
-      cursor[path.last] = entry.value;
-    }
-    return result;
+    return unflattenPortfolioPaths(flat);
   }
 
   /// Fetch the portfolio for a specific user by UID.
@@ -209,23 +193,83 @@ class PortfolioService {
   ///
   /// v9.0 (BUG-3 fix): detects the flattened shape so the provider can
   /// force a full save that overwrites the flat keys with the nested map.
+  ///
+  /// v9.2.2 (§4): kept as the **fallback** signal for when the automatic
+  /// migration cannot run (offline / permission). The primary path is now
+  /// [migrateFlattenedPortfolio], which performs the migration instead of
+  /// only flagging it.
   Future<bool> hasFlattenedPortfolioShape(String uid) async {
     try {
       final doc = await _usersCollection.doc(uid).get();
       if (!doc.exists) return false;
       final data = doc.data() as Map<String, dynamic>?;
       if (data == null) return false;
-
-      // If there's already a proper nested `portfolio` map, it's not flattened.
-      if (data['portfolio'] is Map<String, dynamic>) return false;
-
-      // Check for root-level keys starting with `portfolio.` (flattened shape).
-      return data.keys.any(
-        (key) => key.startsWith('portfolio.') && key.length > 10,
-      );
+      return planPortfolioMigration(data) != null;
     } catch (e) {
       debugPrint('PortfolioService.hasFlattenedPortfolioShape error: $e');
       return false;
+    }
+  }
+
+  /// v9.2.2 (§4 — Portfolio compatibility cleanup): perform the SAFE, one-time,
+  /// idempotent migration of a legacy FLATTENED portfolio document into the
+  /// canonical nested shape.
+  ///
+  /// The legacy shape stores the portfolio as root-level keys whose names carry
+  /// dots (`portfolio.resume`, `portfolio.projects`,
+  /// `portfolio.resume.downloadUrl`, …). Reads already tolerate it (MB17) and
+  /// the engine mirrors that tolerance, but until the document is rewritten the
+  /// compatibility path runs on **every login** — the repeated runtime-log line
+  /// `detected flattened portfolio shape … next save will use full (non-diff)
+  /// write` — and the previous v9.0 behaviour required a manual user save that
+  /// also never removed the legacy keys.
+  ///
+  /// This method reconstructs the nested map from the flattened values
+  /// (verbatim — see [planPortfolioMigration]) and, in **one atomic merge
+  /// write**, writes it under `portfolio` while DELETING every legacy flat key
+  /// and stamping `metadata.portfolioMigratedAt`. No portfolio content is lost,
+  /// transformed or invented.
+  ///
+  /// Idempotent: after it runs, the document has the nested map, so
+  /// [planPortfolioMigration] returns `null` and a second run is a no-op.
+  ///
+  /// Returns [PortfolioMigrationResult.migrated] only when a write was issued,
+  /// [PortfolioMigrationResult.notApplicable] when there was nothing to do or
+  /// the caller is not the portfolio owner, and [PortfolioMigrationResult.failed]
+  /// when the write could not complete (callers keep the flag-and-full-save
+  /// fallback in that case).
+  Future<PortfolioMigrationResult> migrateFlattenedPortfolio(String uid) async {
+    try {
+      final doc = await _usersCollection.doc(uid).get();
+      if (!doc.exists) return PortfolioMigrationResult.notApplicable;
+      final data = doc.data() as Map<String, dynamic>?;
+      final plan = planPortfolioMigration(data);
+      if (plan == null) return PortfolioMigrationResult.notApplicable;
+
+      final update = <String, dynamic>{
+        // Canonical nested map — replaces the flattened representation.
+        'portfolio': plan.nestedPortfolio,
+        // Observability stamp only; carries no user data.
+        'metadata.portfolioMigratedAt': FieldValue.serverTimestamp(),
+      };
+      // Remove the legacy root-level dotted keys so the document is canonical
+      // and the compatibility path is never needed again.
+      for (final key in plan.flattenedKeysToDelete) {
+        update[key] = FieldValue.delete();
+      }
+
+      await _usersCollection
+          .doc(uid)
+          .set(update, SetOptions(merge: true))
+          .timeout(saveTimeout);
+      debugPrint(
+        'PortfolioService: migrated flattened portfolio for $uid '
+        '(${plan.flattenedKeysToDelete.length} legacy keys removed)',
+      );
+      return PortfolioMigrationResult.migrated;
+    } catch (e) {
+      debugPrint('PortfolioService.migrateFlattenedPortfolio error: $e');
+      return PortfolioMigrationResult.failed;
     }
   }
 

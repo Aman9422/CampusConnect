@@ -36,6 +36,7 @@ import 'package:campusconnect/services/firestore/engagement_service.dart'; // v7
 import 'package:campusconnect/services/firestore/chat_service.dart';
 import 'package:campusconnect/services/firestore/teacher_analytics_service.dart'; // v7.3
 import 'package:campusconnect/theme/app_theme.dart';
+import 'package:campusconnect/utilities/startup_profiler.dart'; // v9.2.2 (§1)
 import 'package:campusconnect/views/dashboards/alumni_dashboard_view.dart';
 import 'package:campusconnect/views/dashboards/student_dashboard_view.dart';
 import 'package:campusconnect/views/dashboards/teacher_dashboard_view.dart';
@@ -100,11 +101,22 @@ import 'package:provider/provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // v9.2.2 (§1): debug/profile-only startup instrumentation. Measures the
+  // phases below so a profile-mode DevTools run can attribute the cold-start
+  // seconds (the runtime log showed `Skipped 77/30/32 frames` with NO Dart
+  // output before them — i.e. the cost is in engine/Android/Firebase native
+  // init, not Dart work). A no-op in release builds.
+  StartupProfiler.instance.start();
+
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  StartupProfiler.instance.mark('firebase_init');
+
   // v9.0 (IMP-6): Activate Firebase App Check after Firebase.initializeApp.
   // This configures the attestation token providers; ENFORCEMENT is enabled
   // separately in the Firebase Console (App Check → Apps → Manage enforcement).
   await _activateAppCheck();
+  StartupProfiler.instance.mark('app_check_activate');
+
   // v8.8.2 (C, MEDIUM): removed the blocking `LocalPreferencesService.init()`
   // from the startup path. Theme/Layout providers self-initialize lazily via
   // their own `init()` (which awaits `_prefs.init()` internally), so the
@@ -112,6 +124,14 @@ void main() async {
   // (~171 skipped frames / 1.27s `Davey!` in the pid 24538 log). The prefs
   // resolve a few frames later and the UI converges to the stored theme.
   runApp(const MyApp());
+  StartupProfiler.instance.mark('run_app');
+
+  // v9.2.2 (§1): close the startup timeline + summarise the slow frames once
+  // the first frame has been scheduled (never blocks, debug/profile only).
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    StartupProfiler.instance.mark('first_frame');
+    StartupProfiler.instance.finish();
+  });
 }
 
 /// v9.0 (IMP-6): Activate Firebase App Check.

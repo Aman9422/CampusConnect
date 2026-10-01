@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:campusconnect/models/portfolio/portfolio_model.dart';
+import 'package:campusconnect/services/firestore/portfolio_migration.dart';
 import 'package:campusconnect/services/firestore/portfolio_service.dart';
 import 'package:campusconnect/services/firestore/resume_service.dart';
 import 'package:campusconnect/services/portfolio_cache_service.dart';
@@ -227,16 +228,34 @@ class PortfolioProvider extends ChangeNotifier {
         }
       }
 
-      // v9.0 (BUG-3): detect flattened portfolio shape so the next save
-      // can reconstitute the canonical nested map.
-      _forceFullSave = await _portfolioService.hasFlattenedPortfolioShape(
+      // v9.2.2 (§4 — Portfolio compatibility cleanup): instead of only
+      // FLAGGING the legacy flattened shape (which left the document
+      // flattened until the user happened to edit + save, so every login
+      // re-ran the compatibility path — the repeated runtime-log line), run a
+      // one-time, idempotent MIGRATION now: write the canonical nested
+      // `portfolio` map and DELETE the legacy root-level `portfolio.*` keys in
+      // one atomic merge. On success the flattened-shape compatibility path is
+      // no longer needed at all; on failure keep the v9.0 flag so the next
+      // save still uses the full (non-diff) write as a fallback.
+      final migration = await _portfolioService.migrateFlattenedPortfolio(
         userId,
       );
-      if (_forceFullSave) {
+      if (_isDisposed || _lastUid != userId) return;
+      if (migration == PortfolioMigrationResult.migrated) {
+        _forceFullSave = false;
         debugPrint(
-          'PortfolioProvider: detected flattened portfolio shape for $userId — '
-          'next save will use full (non-diff) write to reconstitute nested map.',
+          'PortfolioProvider: flattened portfolio migrated for $userId — '
+          'canonical nested shape restored.',
         );
+      } else if (migration == PortfolioMigrationResult.failed) {
+        _forceFullSave = true;
+        debugPrint(
+          'PortfolioProvider: flattened portfolio migration deferred for '
+          '$userId — next save will use full (non-diff) write.',
+        );
+      } else {
+        // notApplicable: already canonical (or no flattened keys).
+        _forceFullSave = false;
       }
 
       // Subscribe to the live stream — replaces the one-shot get().
@@ -439,8 +458,9 @@ class PortfolioProvider extends ChangeNotifier {
       // writes every section as `portfolio.{key}` with merge semantics,
       // overwriting the flattened root-level keys with the canonical nested
       // map. After the first successful save, clear the flag.
-      final PortfolioModel? previousForSave =
-          _forceFullSave ? null : _portfolio;
+      final PortfolioModel? previousForSave = _forceFullSave
+          ? null
+          : _portfolio;
       if (_forceFullSave) {
         debugPrint(
           'PortfolioProvider: forcing full save (non-diff) for $uid to '

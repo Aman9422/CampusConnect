@@ -117,9 +117,20 @@ class _TeacherDashboardTabState extends State<_TeacherDashboardTab> {
     final resumeReviewProvider = context.read<ResumeReviewProvider>();
     await analyticsProvider.loadAnalytics(force: force);
     await placementsProvider.refresh();
-    // Only refresh resume history on the first attempt — retries skip
-    // it since the provider already has the data cached.
-    if (firstLoad || !_historyRefreshed) {
+    // v9.2.2 (§3 — ResumeReviewProvider refresh deduplication):
+    // `ResumeReviewProvider.initWithUser` has ALREADY issued the history read
+    // by the time this runs (`_loadHistory()` → "Loaded N history items" in
+    // the runtime log). Refreshing it here unconditionally produced a SECOND
+    // identical Firestore read on every teacher-dashboard open — the exact
+    // "Loaded 0 history items" → "Refreshed 0 history items" pair the v9.2.2
+    // log shows. Only read when the provider genuinely has no history yet
+    // (an init load that failed or never ran) and is not already fetching.
+    // The pull-to-refresh handler below and `submitReview`'s post-review
+    // refresh still force a reload, so explicit refresh is preserved.
+    if (firstLoad &&
+        !_historyRefreshed &&
+        !resumeReviewProvider.historyInitialized &&
+        !resumeReviewProvider.isLoadingHistory) {
       _historyRefreshed = true;
       await resumeReviewProvider.refreshHistory();
     }
