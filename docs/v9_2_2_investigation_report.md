@@ -1,5 +1,15 @@
 # CampusConnect — v9.2.2 Investigation Report
 
+> **HISTORICAL DOCUMENT — DO NOT READ AS CURRENT STATUS.**
+> Marked as such during v9.2.4 (`docs/Task.md` §16), implementing audit finding
+> **E-17** of `docs/v9_2_3_audit_report.md` (§E-17, §K, §AD).
+> The version below — `9.1.2+99` — is the version that was *under investigation*
+> at the time of writing. It is **not** the current app version; for the v9.2.4
+> release that is `9.2.4+101` (`pubspec.yaml`). Everything in this report
+> describes the state **before** the v9.2.2 fixes it motivated; the fixes
+> themselves are in `docs/v9_2_2_optimization_report.md`. The content below is
+> deliberately left unedited — only this banner was added.
+
 **Version under investigation:** `9.1.2+99` (`pubspec.yaml`)
 **Source of evidence:** `docs/logs.md` — one full runtime session on the **Google Pixel 9, Android 16.0 (API 36) emulator**, `sdk gphone16k x86 64`, Flutter **debug** build (pid 32037), spanning cold launch → login → logout → re-login across three accounts.
 **Scope of this report:** the *investigation only* — what the log proves, what the source code proves, and the root cause of each reported symptom. The fixes are tracked separately in `docs/v9_2_2_optimization_report.md`.

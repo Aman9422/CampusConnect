@@ -42,6 +42,30 @@ const QUOTA_RESERVATION_STALE_HOURS = 24;
  */
 const QUOTA_SWEEP_FEATURES = ["resumeReview", "careerCoach", "aiAnalysis"];
 
+/**
+ * v9.2.4 (E-3): bulk-write chunk size for opportunity expiry.
+ *
+ * Firestore rejects a commit containing more than 500 operations, so the
+ * previous implementation - which accumulated EVERY expired opportunity into
+ * one `batch()` and committed once - threw as soon as the hourly sweep found
+ * more than 500 expired documents. The commit is atomic, so on failure NOTHING
+ * was expired and the run was lost until the next hour. 400 matches the chunk
+ * size already used by `onOpportunityPostedNotifyStudents`
+ * (`functions/triggers/index.js`) and `deleteDocsInBatches`
+ * (`functions/helpers/shared.js`).
+ */
+const OPPORTUNITY_EXPIRY_BATCH_SIZE = 400;
+
+/**
+ * v9.2.4 (E-3): hard cap on batches per run.
+ *
+ * The sweep is hourly and idempotent, so anything not expired this run is
+ * picked up by the next one. The cap keeps the invocation well inside the
+ * Cloud Functions v2 timeout instead of looping unboundedly if a very large
+ * backlog ever accumulates.
+ */
+const OPPORTUNITY_EXPIRY_MAX_BATCHES = 50;
+
 // ===============================================
 // EXPORTS
 // ===============================================
@@ -59,23 +83,65 @@ exports.autoExpireOpportunities = onSchedule(
     async () => {
       try {
         const now = admin.firestore.Timestamp.now();
-        const snapshot = await admin.firestore()
-            .collection("opportunities")
-            .where("isActive", "==", true)
-            .where("applicationDeadline", "<=", now)
-            .get();
+        const opportunities = admin.firestore().collection("opportunities");
 
-        if (snapshot.empty) return;
+        // v9.2.4 (E-3): the previous implementation read EVERY expired
+        // opportunity in one unbounded query and committed them in ONE batch.
+        // Firestore caps a commit at 500 operations and the commit is atomic,
+        // so more than 500 expired documents meant the entire sweep failed and
+        // NOTHING was expired until the next hour.
+        //
+        // The loop below reads at most OPPORTUNITY_EXPIRY_BATCH_SIZE
+        // still-active expired documents, marks them inactive, and repeats.
+        // It is self-advancing and needs no cursor: every processed document
+        // stops matching `isActive == true`, so the next query returns the next
+        // chunk. Termination is therefore guaranteed by the write itself, and
+        // the job stays idempotent - a re-run finds nothing left to expire.
+        let expiredCount = 0;
 
-        const batch = admin.firestore().batch();
-        for (const doc of snapshot.docs) {
-          batch.update(doc.ref, {
-            isActive: false,
-            expiredAt: now,
-            updatedAt: now,
-          });
+        for (
+          let batchIndex = 0;
+          batchIndex < OPPORTUNITY_EXPIRY_MAX_BATCHES;
+          batchIndex++
+        ) {
+          const snapshot = await opportunities
+              .where("isActive", "==", true)
+              .where("applicationDeadline", "<=", now)
+              .limit(OPPORTUNITY_EXPIRY_BATCH_SIZE)
+              .get();
+
+          if (snapshot.empty) break;
+
+          const batch = admin.firestore().batch();
+          for (const doc of snapshot.docs) {
+            batch.update(doc.ref, {
+              isActive: false,
+              expiredAt: now,
+              updatedAt: now,
+            });
+          }
+          await batch.commit();
+          expiredCount += snapshot.docs.length;
+
+          // A short chunk means the expired backlog is drained.
+          if (snapshot.docs.length < OPPORTUNITY_EXPIRY_BATCH_SIZE) break;
         }
-        await batch.commit();
+
+        if (expiredCount === 0) return;
+
+        console.log(
+            `autoExpireOpportunities: expired ${expiredCount} opportunity(ies)`
+        );
+
+        // Only reachable when every batch ran full - the backlog is larger
+        // than one invocation may drain, and the next hourly run continues.
+        if (expiredCount >=
+            OPPORTUNITY_EXPIRY_BATCH_SIZE * OPPORTUNITY_EXPIRY_MAX_BATCHES) {
+          console.warn(
+              "autoExpireOpportunities: per-run batch cap reached; remaining " +
+              "expired opportunities will be handled by the next hourly run"
+          );
+        }
       } catch (error) {
         console.error("autoExpireOpportunities error:", error);
       }

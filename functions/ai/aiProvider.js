@@ -30,6 +30,11 @@ const { callGroqAPI } = require("./groqProvider");
 const { callHuggingFaceAPI } = require("./huggingfaceProvider");
 const { normalizeAIResponse, extractJSON } = require("./normalizeResponse");
 const { sanitizeAIInput } = require("../helpers/shared");
+// v9.3: deterministic ATS scoring. The ATS number is computed HERE, not by the
+// model — see the module docs for the measured run-to-run non-determinism that
+// made the reviewed score unusable as a progress metric. The model keeps the
+// qualitative half of the review.
+const { scoreResume, describeScore } = require("./atsScore");
 
 // ============================================================
 // SYSTEM PROMPTS
@@ -94,7 +99,6 @@ const RESUME_REVIEW_SYSTEM_PROMPT = `You are an expert ATS (Applicant Tracking S
 
 The JSON must follow this EXACT structure:
 {
-  "atsScore": 72,
   "strengths": ["strength1", "strength2", "strength3"],
   "missingKeywords": ["keyword1", "keyword2", "keyword3"],
   "formatIssues": ["issue1", "issue2"],
@@ -117,7 +121,7 @@ The JSON must follow this EXACT structure:
 }
 
 Rules:
-- atsScore must be an integer 0-100 based on real ATS criteria (keyword density, formatting, section presence, action verbs, quantified achievements).
+- Do NOT return an "atsScore" field. The ATS score is computed server-side by a deterministic rubric and is supplied to you in the prompt; your job is the qualitative review that explains it. Never invent or restate a number.
 - strengths: 3-5 specific things the resume does well.
 - missingKeywords: 3-8 keywords/skills missing but important for the target role.
 - formatIssues: 1-5 formatting or structural problems found.
@@ -149,24 +153,43 @@ Return ONLY a valid JSON object with: summary, strengths, weaknesses, missingSki
 }
 
 /**
- * Build user prompt for resume review.
+ * Build the user prompt for a resume review.
+ *
+ * v9.3: [scoreBlock] carries the deterministic rubric result (see
+ * `./atsScore`). It is embedded so the model's qualitative feedback explains the
+ * number the student is actually shown, instead of inventing a competing one.
+ *
+ * @param {string} resumeText - Resume content
+ * @param {string} targetRole - Target role
+ * @param {string} experienceLevel - Experience level
+ * @param {string} [scoreBlock] - Rendered rubric result
+ * @returns {string}
  */
-function buildResumeReviewPrompt(resumeText, targetRole, experienceLevel) {
+function buildResumeReviewPrompt(
+    resumeText,
+    targetRole,
+    experienceLevel,
+    scoreBlock = "",
+) {
   // IMP-12: sanitize user content before embedding (control chars, length cap).
   const safeResume = sanitizeAIInput(resumeText, 12000);
   const safeRole = sanitizeAIInput(targetRole, 200);
   const safeLevel = sanitizeAIInput(experienceLevel, 100);
+  const safeScore = sanitizeAIInput(scoreBlock, 2000);
+  const scoreSection = safeScore ? `${safeScore}\n\n` : "";
   return `Review the following resume for ATS compatibility.
 
 TARGET ROLE: ${safeRole}
 EXPERIENCE LEVEL: ${safeLevel}
 
-RESUME:
+${scoreSection}RESUME:
 ---
 ${safeResume}
 ---
 
-Return ONLY a valid JSON object with: atsScore, strengths, missingKeywords, formatIssues, bulletImprovements, sectionAdvice, overallAdvice, and hireabilityVerdict.`;
+The ATS score above was computed by the server's deterministic rubric — treat it as authoritative and do NOT return a score of your own. Use the category breakdown to explain the number and to aim your advice at the categories that scored lowest.
+
+Return ONLY a valid JSON object with: strengths, missingKeywords, formatIssues, bulletImprovements, sectionAdvice, overallAdvice, and hireabilityVerdict.`;
 }
 
 // ============================================================
@@ -363,15 +386,34 @@ async function generateChatResponse(message) {
  * @returns {Promise<{review: object, providerUsed: string}>}
  */
 async function generateResumeReviewAI(resumeText, targetRole, experienceLevel) {
-  const userPrompt = buildResumeReviewPrompt(resumeText, targetRole, experienceLevel);
-  const { content, provider } = await callAIProvider(
-    RESUME_REVIEW_SYSTEM_PROMPT,
-    userPrompt,
-    { jsonMode: true }
+  // v9.3: score FIRST, from the resume text alone, with a pure function. The
+  // same resume therefore always yields the same number, and an improved resume
+  // always yields a different one — the property the LLM could not provide.
+  const rubric = scoreResume(resumeText, targetRole);
+  console.log(
+      `generateResumeReviewAI: deterministic ATS score ${rubric.score}/100 (` +
+      rubric.categories
+          .map((category) => `${category.id} ${category.points}/${category.max}`)
+          .join(", ") +
+      ")"
   );
 
-  // Parse and normalize the resume review response
-  const review = normalizeResumeReviewResponse(content);
+  const userPrompt = buildResumeReviewPrompt(
+      resumeText,
+      targetRole,
+      experienceLevel,
+      describeScore(rubric),
+  );
+  const { content, provider } = await callAIProvider(
+      RESUME_REVIEW_SYSTEM_PROMPT,
+      userPrompt,
+      {jsonMode: true},
+  );
+
+  // Parse and normalize the resume review response. The rubric score is passed
+  // in so the normalized payload — including the verdict it derives — is built
+  // around the authoritative number.
+  const review = normalizeResumeReviewResponse(content, rubric.score);
 
   return {
     review,
@@ -386,7 +428,7 @@ async function generateResumeReviewAI(resumeText, targetRole, experienceLevel) {
  * @param {string} rawResponse - Raw text from the AI provider
  * @returns {object} Normalized resume review object
  */
-function normalizeResumeReviewResponse(rawResponse) {
+function normalizeResumeReviewResponse(rawResponse, deterministicScore) {
   if (!rawResponse || typeof rawResponse !== "string") {
     throw new Error("Empty or invalid AI response for resume review");
   }
@@ -409,10 +451,16 @@ function normalizeResumeReviewResponse(rawResponse) {
     }
   }
 
-  // Validate and normalize each field to match Flutter's ResumeReview model
-  const atsScore = typeof parsed.atsScore === "number"
-    ? Math.max(0, Math.min(100, Math.round(parsed.atsScore)))
-    : 50;
+  // v9.3: the score is SUPPLIED by the deterministic rubric. A model-emitted
+  // `atsScore` is ignored even when present — an LLM integer moved between
+  // identical runs (measured: 60 / 55 / 55 for one resume) and so could not be
+  // used as a progress metric. The parsed value remains a last-resort fallback
+  // for any caller that does not supply a deterministic score.
+  const atsScore = typeof deterministicScore === "number"
+    ? Math.max(0, Math.min(100, Math.round(deterministicScore)))
+    : typeof parsed.atsScore === "number"
+      ? Math.max(0, Math.min(100, Math.round(parsed.atsScore)))
+      : 50;
 
   const strengths = ensureStringArray(parsed.strengths, 5);
   const missingKeywords = ensureStringArray(

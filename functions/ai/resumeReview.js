@@ -18,6 +18,9 @@ const crypto = require("crypto");
 // extractor is pure-JS and runs on the Node 20 functions runtime.
 const pdfParse = require("pdf-parse/lib/pdf-parse.js");
 const {generateResumeReviewAI} = require("./aiProvider");
+// v9.2.5: bucket-resilient resume-object reader (see the module docs for why
+// the implicit `admin.storage().bucket()` name is not safe for this project).
+const {downloadResumeBuffer} = require("./resumeStorage");
 const {logAnalyticsEvent} = require("../helpers/shared");
 // v9.0 (IMP-15): unified AI quota management — `resume_usage/{uid}` is now a
 // legacy mirror; the authoritative store is `user_ai_quotas/{uid}.resumeReview`.
@@ -78,6 +81,15 @@ exports.reviewResume = onCall(
         const { resumeText, storagePath, targetRole, experienceLevel } =
             request.data || {};
 
+        // v9.2.5: a stage breadcrumb on ENTRY. Every later failure logs its
+        // own stage, so an "INTERNAL" in the client can always be tied to a
+        // named step in the function log. Previously the first log line sat
+        // AFTER the Storage read, so a failing read left no trace whatsoever.
+        console.log(
+            `reviewResume: received request (source: ` +
+            `${storagePath ? "uploaded" : "pasted"})`
+        );
+
         // v8.5 (R3): resolve the resume text either from the uploaded PDF
         // (`storagePath`) or the pasted manual text fallback.
         let trimmedResume;
@@ -87,6 +99,10 @@ exports.reviewResume = onCall(
           reviewSource = "uploaded";
         } else {
           if (!resumeText) {
+            console.error(
+                "reviewResume: rejected — neither a storage path nor resume " +
+                "text was supplied."
+            );
             throw new admin.functions.https.HttpsError(
                 "invalid-argument",
                 "Resume text is required."
@@ -247,30 +263,44 @@ exports.reviewResume = onCall(
 async function resumeTextFromStorage(uid, storagePath) {
   const expectedPath = `resumes/${uid}/latest.pdf`;
   if (typeof storagePath !== "string" || storagePath !== expectedPath) {
+    console.error(
+        `resumeTextFromStorage: rejected path ` +
+        `${JSON.stringify(storagePath)}; only ` +
+        `${expectedPath} is allowed for this account.`
+    );
     throw new admin.functions.https.HttpsError(
         "invalid-argument",
         "The supplied resume path is not a valid resume for this account."
     );
   }
 
-  let data;
-  try {
-    const file = admin.storage().bucket().file(storagePath);
-    const [metadata] = await file.getMetadata();
-    if (metadata.size != null && metadata.size > 5 * 1024 * 1024) {
-      throw new admin.functions.https.HttpsError(
-          "invalid-argument",
-          "Resume exceeds the 5 MB limit."
-      );
-    }
-    const [buffer] = await file.download();
-    data = buffer;
-  } catch (error) {
-    if (error instanceof admin.functions.https.HttpsError) throw error;
-    if (error && (error.code === 404 || error.code === "not-found")) {
+  // v9.2.5: read the object through the bucket-resilient reader.
+  //
+  // The previous form — `admin.storage().bucket().file(storagePath)` — used
+  // the bucket Firebase Admin resolves implicitly, which is
+  // `app.options.storageBucket` and, when unset, the LEGACY
+  // `<project>.appspot.com`. The Flutter client uploads through
+  // `FirebaseStorage.instance`, which uses the bucket from `FirebaseOptions`
+  // (`<project>.firebasestorage.app` for this project). When those two names
+  // disagree, the PDF is present but the function reads the wrong bucket, and
+  // the resulting 404 was then re-thrown as a TypeError by the
+  // `instanceof admin.functions...` line below — reaching the client as a bare
+  // `internal` / `INTERNAL`. The reader probes every plausible bucket name and
+  // returns a TYPED outcome so "no file" and "wrong bucket" are
+  // distinguishable (and logged with the bucket names tried).
+  const download = await downloadResumeBuffer(storagePath);
+  if (!download.ok) {
+    if (download.reason === "not-found") {
       throw new admin.functions.https.HttpsError(
           "not-found",
-          "Resume file not found. Please upload your resume and try again."
+          "Your uploaded resume could not be found in storage. Please upload " +
+          "it again from your portfolio, then retry."
+      );
+    }
+    if (download.reason === "too-large") {
+      throw new admin.functions.https.HttpsError(
+          "invalid-argument",
+          "Resume exceeds the 5 MB limit. Please upload a smaller PDF."
       );
     }
     throw new admin.functions.https.HttpsError(
@@ -279,12 +309,9 @@ async function resumeTextFromStorage(uid, storagePath) {
     );
   }
 
-  if (!data || data.length === 0) {
-    throw new admin.functions.https.HttpsError(
-        "invalid-argument",
-        "This resume appears to be image-based and could not be read automatically. Please upload a text-based PDF."
-    );
-  }
+  // An empty object cannot be a PDF; the reader already rejected that case
+  // explicitly, so no separate empty-buffer branch is needed here.
+  const data = download.buffer;
 
   let text;
   try {
@@ -306,6 +333,15 @@ async function resumeTextFromStorage(uid, storagePath) {
   // image-based mislabel. Only a completely empty extraction is treated as
   // scanned/image-only.
   if (text.length < RESUME_MIN_LENGTH) {
+    // v9.2.5: this branch previously threw WITHOUT logging anything, so an
+    // image-based or near-empty PDF produced a completely silent failure —
+    // the "extracted N characters" log sits BELOW this check. The extracted
+    // length is the one number that tells the two cases apart.
+    console.error(
+        `resumeTextFromStorage: extracted only ${text.length} characters ` +
+        `from ${storagePath} (minimum ${RESUME_MIN_LENGTH}) — the PDF is ` +
+        `${text.length > 0 ? "too short" : "image-based or unscannable"}.`
+    );
     throw new admin.functions.https.HttpsError(
         "invalid-argument",
         text.length > 0

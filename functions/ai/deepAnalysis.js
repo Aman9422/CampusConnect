@@ -237,8 +237,18 @@ exports.generateResumeAnalysis = onCall(
           usage: usageData,
         };
       } catch (error) {
-        // Re-throw HttpsError as-is
-        if (error.code && error.httpErrorCode) {
+        // Re-throw HttpsError as-is.
+        //
+        // v9.2.4 (E-18): this previously duck-typed the error with
+        // `error.code && error.httpErrorCode`, which is not how any other
+        // module in this codebase detects an HttpsError and is fragile - any
+        // third-party error carrying both properties would escape unwrapped
+        // (re-wrapping a `not-found` as `internal`), and the check silently
+        // depends on an HttpsError's internal property names. The
+        // `instanceof` form below matches `placements.js`, `refresh.js`,
+        // `resumeReview.js`, `careerCoach.js`, `chat.js` and line ~160 of
+        // this same file.
+        if (error instanceof admin.functions.https.HttpsError) {
           throw error;
         }
 

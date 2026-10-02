@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:campusconnect/models/portfolio/portfolio_model.dart';
+import 'package:campusconnect/models/portfolio/portfolio_snapshot.dart';
 import 'package:campusconnect/services/firestore/portfolio_migration.dart';
 import 'package:campusconnect/services/firestore/portfolio_service.dart';
 import 'package:campusconnect/services/firestore/resume_service.dart';
@@ -75,6 +76,31 @@ bool shouldTriggerPortfolioRestore({
   return serverHadContent || restoredFromCache;
 }
 
+/// v9.2.7 — the rule that decides whether a Firestore portfolio snapshot may
+/// be applied to the in-memory state.
+///
+/// A snapshot served from the LOCAL CACHE ([isFromCache]) may predate the most
+/// recent server write: it is the Firestore SDK replaying the document it had
+/// cached before an upload/remove landed (or before a logout). Those replays
+/// are precisely what used to (a) revert a freshly uploaded resume to the
+/// previous file and (b) resurrect a resume the user had just removed, while
+/// the snackbar still said the operation succeeded.
+///
+/// A cache snapshot may still bootstrap EMPTY state — that is the offline-first
+/// path — but it may never overwrite a value this session already holds. A
+/// server-confirmed snapshot always applies (including one that removes the
+/// resume), because it is authoritative.
+///
+/// Pure and top-level so this rule is unit-testable without Firebase.
+@visibleForTesting
+bool shouldApplyPortfolioSnapshot({
+  required bool isFromCache,
+  required bool hasLocalData,
+}) {
+  if (isFromCache && hasLocalData) return false;
+  return true;
+}
+
 class PortfolioProvider extends ChangeNotifier {
   final PortfolioService _portfolioService;
   final ResumeService _resumeService;
@@ -104,7 +130,7 @@ class PortfolioProvider extends ChangeNotifier {
   String? _error;
   bool _isDisposed = false;
   String? _lastUid;
-  StreamSubscription<PortfolioModel>? _streamSubscription;
+  StreamSubscription<PortfolioSnapshot>? _streamSubscription;
 
   // v8.9.2 (project_info__25/26): has the live Firestore document EVER
   // reported non-empty portfolio content for this session? The stale-guards
@@ -328,9 +354,9 @@ class PortfolioProvider extends ChangeNotifier {
   /// upload and a resume present in Firestore.
   void _listenToPortfolio(String userId) {
     _streamSubscription = _portfolioService
-        .portfolioStream(userId)
+        .portfolioSnapshotStream(userId)
         .listen(
-          (fresh) async {
+          (snapshot) async {
             if (_isDisposed || _lastUid != userId) return;
 
             // 1) A local write is in flight — the in-memory result is the
@@ -340,7 +366,23 @@ class PortfolioProvider extends ChangeNotifier {
 
             final current = _portfolio;
 
-            // 2) Never let an empty stream event wipe a portfolio we already
+            // 2) v9.2.7: a snapshot served from the LOCAL CACHE may predate the
+            //    most recent server write — it is the SDK replaying the
+            //    document it cached before an upload/remove landed (or before a
+            //    logout). Those replays are what used to revert a fresh upload
+            //    and resurrect a removed resume. A cache snapshot may
+            //    bootstrap empty state, but it must never overwrite what this
+            //    session already holds.
+            if (!shouldApplyPortfolioSnapshot(
+              isFromCache: snapshot.isFromCache,
+              hasLocalData: current != null && !current.isEmpty,
+            )) {
+              return;
+            }
+
+            final fresh = snapshot.portfolio;
+
+            // 3) Never let an empty SERVER event wipe a portfolio we already
             //    hold. `PortfolioModel.empty()` means "snapshot had no
             //    portfolio key" — the signature of a stale pre-write replay or
             //    a first-time-user snapshot. A real clear goes through
@@ -371,13 +413,14 @@ class PortfolioProvider extends ChangeNotifier {
               return;
             }
 
-            // 3) Never let a stream event drop the resume while memory still
-            //    has one — covers a stale non-empty snapshot (portfolio
-            //    sections without the just-uploaded resume) racing the upload.
-            if (current?.resume?.hasResume == true &&
-                fresh.resume?.hasResume != true) {
-              return;
-            }
+            // 4) v9.2.7: the old "never drop the resume while memory still
+            //    has one" guard is REMOVED. Its purpose was to stop a stale
+            //    pre-write replay, but cache replays are now filtered in (2),
+            //    and its side effect was that a removed resume could never
+            //    leave the UI: the server-confirmed removal was discarded as
+            //    "a drop" and the guard kept re-instating the resumed state.
+            //    A server-confirmed snapshot is authoritative, including one
+            //    that removes the resume.
 
             // v8.9.2: any applied non-empty event is server truth — clears a
             // prior divergence notice.
@@ -617,7 +660,11 @@ class PortfolioProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final fresh = await _portfolioService.getPortfolio(uid);
+      // v9.2.7: read from the SERVER when it is reachable — a refresh must
+      // never adopt the stale locally cached document. When the server is
+      // unreachable the cached value is returned and flagged, and the rule
+      // below treats it exactly like a cache replay.
+      final snapshot = await _portfolioService.readPortfolioSnapshot(uid);
       if (_isDisposed) return;
 
       // 1) A local write is in flight — the in-memory result is authoritative
@@ -626,6 +673,17 @@ class PortfolioProvider extends ChangeNotifier {
       if (_isUploadingResume || _isSaving) return;
 
       final current = _portfolio;
+
+      // 1b) Never overwrite committed in-memory state with a cache-sourced
+      //     value (offline fallback / pre-write replay).
+      if (!shouldApplyPortfolioSnapshot(
+        isFromCache: snapshot.isFromCache,
+        hasLocalData: current != null && !current.isEmpty,
+      )) {
+        return;
+      }
+
+      final fresh = snapshot.portfolio;
 
       // 2) Never let an empty read wipe a portfolio we already hold
       //    (`getPortfolio` returns empty when the doc or `portfolio` key is
@@ -649,13 +707,9 @@ class PortfolioProvider extends ChangeNotifier {
         return;
       }
 
-      // 3) Never let a refresh drop the resume while memory still has one —
-      //    covers a stale non-empty snapshot (sections without the
-      //    just-uploaded resume) racing the upload.
-      if (current?.resume?.hasResume == true &&
-          fresh.resume?.hasResume != true) {
-        return;
-      }
+      // 3) v9.2.7: the resume-drop guard is REMOVED for the same reason as in
+      //    the stream listener — a server-authoritative read must be able to
+      //    clear the resume, otherwise "Remove Resume" can never stick.
 
       // v8.9.2: an applied non-empty read is server truth — clears a prior
       // divergence notice.

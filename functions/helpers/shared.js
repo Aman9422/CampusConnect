@@ -283,6 +283,168 @@ function portfolioContentChanged(before, after) {
   return JSON.stringify(beforeContent) !== JSON.stringify(afterContent);
 }
 
+// ===============================================
+// RESUME-REVIEW COUNTER CHANGE DETECTION (v9.2.4 — D-1)
+// ===============================================
+
+/**
+ * The exact key set `onResumeReviewCreatedRefreshMatches` writes back onto
+ * `users/{uid}.portfolio.resume` after it has already refreshed
+ * recommendations for that review. These are counters/stamps, not profile
+ * content: they must never be interpreted as a normal profile change.
+ */
+const RESUME_REVIEW_METADATA_KEYS = [
+  "reviewCount",
+  "lastReviewAt",
+  "updatedAt",
+  "latestATSScore",
+  "latestMissingKeywords",
+];
+
+/**
+ * v9.2.4 (D-1): true when a `users/{userId}` write was ONLY the resume-review
+ * counter/stamp merge that `onResumeReviewCreatedRefreshMatches` performs,
+ * and nothing recommendation-relevant changed.
+ *
+ * Why this exists: that trigger writes `portfolio.resume.{reviewCount,
+ * lastReviewAt, updatedAt, latestATSScore}` to the PARENT user document to
+ * keep the dashboard card in sync. The same document is watched by
+ * `onProfileUpdatedRefreshAI`, which saw a `portfolio` change
+ * (`portfolioContentChanged` ⇒ true) and therefore ran a SECOND, concurrent
+ * recommendation refresh — with a different fingerprint (it has no
+ * `options.resumeData`). Result: two engine runs + two AI enrichments per
+ * resume review, a stored fingerprint that thrashes between the two
+ * variants, and 3 extra engagement points (`profileUpdated`) on top of the
+ * 5 the resume-review trigger already awards.
+ *
+ * This guard makes the profile trigger ignore exactly that write. A
+ * legitimate portfolio/profile change is unaffected (see the negative tests).
+ *
+ * @param {object|null} before Pre-write `users/{uid}` document
+ * @param {object|null} after Post-write `users/{uid}` document
+ * @returns {boolean} true when ONLY the resume-review metadata changed
+ */
+function isResumeReviewMetadataOnlyChange(before, after) {
+  if (!before || !after) return false;
+
+  // 1) Nothing outside `portfolio` may differ.
+  for (const key of Object.keys(after)) {
+    if (key === "portfolio") continue;
+    if (!(key in before)) return false;
+    if (JSON.stringify(before[key] ?? null) !== JSON.stringify(after[key] ?? null)) {
+      return false;
+    }
+  }
+  for (const key of Object.keys(before)) {
+    if (key === "portfolio") continue;
+    if (!(key in after)) return false;
+  }
+
+  const beforePortfolio = before.portfolio ?? null;
+  const afterPortfolio = after.portfolio ?? null;
+
+  // The write must actually have touched something (a genuine no-op write is
+  // handled by the caller's own change detection).
+  if (JSON.stringify(beforePortfolio) === JSON.stringify(afterPortfolio)) {
+    return false;
+  }
+  if (
+    !beforePortfolio ||
+    !afterPortfolio ||
+    typeof beforePortfolio !== "object" ||
+    typeof afterPortfolio !== "object"
+  ) {
+    return false;
+  }
+
+  // 2) Every portfolio key other than `resume` must be byte-identical — a
+  //    skills/projects/preferences edit is a real change.
+  const beforePortfolioSansResume = {...beforePortfolio};
+  const afterPortfolioSansResume = {...afterPortfolio};
+  delete beforePortfolioSansResume.resume;
+  delete afterPortfolioSansResume.resume;
+  if (
+    JSON.stringify(beforePortfolioSansResume) !==
+    JSON.stringify(afterPortfolioSansResume)
+  ) {
+    return false;
+  }
+
+  const beforeResume = beforePortfolio.resume;
+  const afterResume = afterPortfolio.resume;
+  if (
+    !beforeResume ||
+    !afterResume ||
+    typeof beforeResume !== "object" ||
+    typeof afterResume !== "object"
+  ) {
+    return false;
+  }
+
+  // 3) Inside `portfolio.resume`, every key other than the counter/stamp set
+  //    must be byte-identical (fileName, storagePath, url, hasResume, …).
+  for (const key of Object.keys(afterResume)) {
+    if (RESUME_REVIEW_METADATA_KEYS.includes(key)) continue;
+    if (!(key in beforeResume)) return false;
+    if (
+      JSON.stringify(beforeResume[key] ?? null) !==
+      JSON.stringify(afterResume[key] ?? null)
+    ) {
+      return false;
+    }
+  }
+  for (const key of Object.keys(beforeResume)) {
+    if (RESUME_REVIEW_METADATA_KEYS.includes(key)) continue;
+    if (!(key in afterResume)) return false;
+  }
+
+  return true;
+}
+
+// ================================================
+// RESUME KEYWORD NORMALIZATION (v9.2.4 — D-1)
+// ================================================
+
+// Bounds for the persisted keyword list. The review payload is AI-generated
+// and therefore untrusted input for a document write: cap the count and the
+// length of each entry so a malformed/hostile review cannot bloat the user
+// document or the recommendation fingerprint.
+const RESUME_KEYWORD_MAX_COUNT = 50;
+const RESUME_KEYWORD_MAX_LENGTH = 60;
+
+/**
+ * v9.2.4 (D-1): normalize the AI review's `missingKeywords` before it is
+ * persisted onto `users/{uid}.portfolio.resume.latestMissingKeywords` — the
+ * field the recommendation engine and the server fingerprint read back.
+ *
+ * Guarantees: always an array of trimmed, non-empty, de-duplicated strings;
+ * each entry capped at `RESUME_KEYWORD_MAX_LENGTH` characters; at most
+ * `RESUME_KEYWORD_MAX_COUNT` entries. Non-string entries are dropped. Pure and
+ * deterministic, so the persisted value and the hashed value are identical.
+ *
+ * @param {*} value Raw `missingKeywords` from the review document
+ * @returns {Array<string>}
+ */
+function sanitizeResumeKeywords(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const normalized = [];
+  for (const raw of value) {
+    if (typeof raw !== "string") continue;
+    const trimmed = raw.replace(/\s+/g, " ").trim();
+    if (!trimmed) continue;
+    const capped = trimmed.length > RESUME_KEYWORD_MAX_LENGTH
+        ? trimmed.slice(0, RESUME_KEYWORD_MAX_LENGTH)
+        : trimmed;
+    const dedupeKey = capped.toLowerCase();
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    normalized.push(capped);
+    if (normalized.length >= RESUME_KEYWORD_MAX_COUNT) break;
+  }
+  return normalized;
+}
+
 module.exports = {
   sanitizeAIInput,
   logAnalyticsEvent,
@@ -291,6 +453,13 @@ module.exports = {
   logUserActivity,
   isPortfolioMetadataOnlyChange,
   portfolioContentChanged,
+  // v9.2.4 (D-1): resume-review counter/stamp change detection.
+  isResumeReviewMetadataOnlyChange,
+  RESUME_REVIEW_METADATA_KEYS,
+  // v9.2.4 (D-1): persisted resume-review keyword normalization.
+  sanitizeResumeKeywords,
+  RESUME_KEYWORD_MAX_COUNT,
+  RESUME_KEYWORD_MAX_LENGTH,
   // IMP-9: engagement aggregate helpers
   dayKey,
   previousDayKey,

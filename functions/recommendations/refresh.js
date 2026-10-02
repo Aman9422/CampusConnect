@@ -92,6 +92,65 @@ function portfolioForFingerprint(portfolio) {
 }
 
 /**
+ * v9.2.4 (D-1): the resume-review signal that participates in the fingerprint.
+ *
+ * Before v9.2.4 the ONLY way this signal existed was an `options.resumeData`
+ * passthrough, so the resume-review trigger (which passed the freshly written
+ * review) and every other caller (client bootstrap, profile trigger — which
+ * passed nothing) computed DIFFERENT fingerprints for the same student state.
+ * The stored fingerprint therefore thrashed between the two variants and the
+ * v9.2.2 skip gate fired only about half the time.
+ *
+ * The resume-review trigger now PERSISTS the review signals onto
+ * `portfolio.resume.latestMissingKeywords` / `latestATSScore` (the same
+ * counter merge it already performs) and refreshes WITHOUT an options
+ * passthrough. This helper derives the signal from the document so that every
+ * caller — with or without an options passthrough — produces the SAME value.
+ * That is what makes the stored fingerprint converge to one stable value.
+ *
+ * A user with no persisted review signal still yields `null`, exactly as
+ * before, so no pre-existing fingerprint is gratuitously invalidated.
+ *
+ * @param {object} userData Raw `users/{uid}` document
+ * @param {object} [options] `{resumeData}` passthrough (legacy callers)
+ * @returns {{atsScore: (number|null), missingKeywords: Array<string>}|null}
+ */
+function resumeReviewSignal(userData, options) {
+  const resumeData = options && options.resumeData ? options.resumeData : null;
+  if (resumeData) {
+    return {
+      atsScore: resumeData.atsScore ?? null,
+      missingKeywords: resumeData.missingKeywords || [],
+    };
+  }
+
+  const portfolio =
+      userData && typeof userData.portfolio === "object" &&
+      !Array.isArray(userData.portfolio)
+        ? userData.portfolio
+        : null;
+  const resume =
+      portfolio && typeof portfolio.resume === "object" &&
+      !Array.isArray(portfolio.resume)
+        ? portfolio.resume
+        : null;
+  const storedKeywords =
+      resume && Array.isArray(resume.latestMissingKeywords)
+        ? resume.latestMissingKeywords
+        : [];
+
+  // No persisted review signal ⇒ identical to the pre-v9.2.4 `null`.
+  if (storedKeywords.length === 0) return null;
+
+  return {
+    atsScore: resume && typeof resume.latestATSScore === "number"
+      ? resume.latestATSScore
+      : null,
+    missingKeywords: storedKeywords,
+  };
+}
+
+/**
  * Compute the canonical fingerprint of every input the recommendation engine
  * reads for one student. Pure and deterministic — exported so it is unit
  * testable without Firestore.
@@ -109,7 +168,6 @@ function computeRecommendationFingerprint({
   candidateIds = [],
   appliedPlacementIds = [],
 } = {}) {
-  const resumeData = options && options.resumeData ? options.resumeData : null;
   const applied = appliedPlacementIds instanceof Set
     ? [...appliedPlacementIds]
     : [...(appliedPlacementIds || [])];
@@ -123,12 +181,9 @@ function computeRecommendationFingerprint({
     graduationYear: userData.graduationYear ?? null,
     academic: userData.academic ?? null,
     portfolio: portfolioForFingerprint(userData.portfolio),
-    resumeReview: resumeData
-      ? {
-        atsScore: resumeData.atsScore ?? null,
-        missingKeywords: resumeData.missingKeywords || [],
-      }
-      : null,
+    // v9.2.4 (D-1): derived from the document when no passthrough is given,
+    // so every caller hashes the same resume-review signal.
+    resumeReview: resumeReviewSignal(userData, options),
     applied: applied.slice().sort(),
     candidates: candidateIds.slice().sort(),
   };

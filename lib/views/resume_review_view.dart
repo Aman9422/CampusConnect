@@ -4,6 +4,8 @@ import 'package:campusconnect/models/resume_review.dart';
 import 'package:campusconnect/providers/portfolio_provider.dart';
 import 'package:campusconnect/providers/resume_review_provider.dart';
 import 'package:campusconnect/providers/role_provider.dart';
+import 'package:campusconnect/services/ai/resume_review_freshness.dart';
+import 'package:campusconnect/services/firestore/resume_service.dart';
 import 'package:campusconnect/theme/app_theme.dart';
 import 'package:campusconnect/widgets/offline_banner.dart';
 import 'package:flutter/material.dart';
@@ -256,13 +258,58 @@ class _ResumeReviewViewState extends State<ResumeReviewView> {
           OfflineBanner(isOffline: !provider.isOnline),
 
           // Main content
-          Expanded(
-            child: provider.hasReview
-                ? _buildReviewResults(context, provider.currentReview!, isDark)
-                : _buildInputForm(context, provider, isDark),
-          ),
+          Expanded(child: _buildBody(context, provider, isDark)),
         ],
       ),
+    );
+  }
+
+  /// v9.3: what the screen shows — results, or the input form.
+  ///
+  /// Results are presented only while the held review still describes the
+  /// resume the student has NOW. [ResumeReviewProvider] is app-level, so
+  /// `currentReview` survives a trip to the portfolio and back; showing it
+  /// after a replace presented a stale score as if it were the new one (part
+  /// of the "it always says 68" report). A stale review is dropped from a
+  /// post-frame callback — never during build, which would mutate a provider
+  /// mid-frame — and the form is shown so the current resume can be reviewed.
+  Widget _buildBody(
+    BuildContext context,
+    ResumeReviewProvider provider,
+    bool isDark,
+  ) {
+    // Captured at build time: `watch` is only legal during build, and the
+    // post-frame callback below must not re-read the tree.
+    final currentResumeKey = _currentResumeKey(context);
+
+    if (provider.hasReview && provider.isReviewStaleFor(currentResumeKey)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        provider.dropReviewIfStale(currentResumeKey);
+      });
+      return _buildInputForm(context, provider, isDark);
+    }
+
+    return provider.hasReview
+        ? _buildReviewResults(context, provider.currentReview!, isDark)
+        : _buildInputForm(context, provider, isDark);
+  }
+
+  /// v9.3: identity of the resume the student has right now, in the same form
+  /// the provider stored when the review was submitted
+  /// ([ResumeReviewFreshness.uploadedResumeKey]). Null when no resume is
+  /// uploaded.
+  String? _currentResumeKey(BuildContext context) {
+    final portfolioProvider = context.watch<PortfolioProvider>();
+    final resume = portfolioProvider.portfolio?.resume;
+    if (resume == null || !resume.hasResume) return null;
+    final userId = portfolioProvider.currentUserId;
+    final storagePath = resume.storagePath?.isNotEmpty == true
+        ? resume.storagePath
+        : (userId != null ? 'resumes/$userId/latest.pdf' : null);
+    return ResumeReviewFreshness.uploadedResumeKey(
+      storagePath: storagePath,
+      version: resume.version,
     );
   }
 
@@ -569,14 +616,14 @@ class _ResumeReviewViewState extends State<ResumeReviewView> {
         ? resume.fileName!
         : 'resume.pdf';
     final ats = resume.latestATSScore;
-    final url = resume.downloadUrl?.isNotEmpty == true
-        ? resume.downloadUrl!
-        : null;
+    // v9.2.7 (403 fix): the URL is no longer read from Firestore here. The
+    // action below resolves a FRESH URL at tap time, because the download URL
+    // cached in the portfolio carries a token that is rotated on every
+    // replace-upload to the same storage path.
+    final userId = portfolioProvider.currentUserId;
     final storagePath = resume.storagePath?.isNotEmpty == true
         ? resume.storagePath!
-        : (portfolioProvider.currentUserId != null
-              ? 'resumes/${portfolioProvider.currentUserId}/latest.pdf'
-              : null);
+        : (userId != null ? 'resumes/$userId/latest.pdf' : null);
     final isReviewing = resumeProvider.isLoading;
 
     return Container(
@@ -687,22 +734,27 @@ class _ResumeReviewViewState extends State<ResumeReviewView> {
           ),
           const SizedBox(height: 12),
 
-          if (url != null) ...[
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () => _openResumeUrl(context, url),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppTheme.success,
-                  side: BorderSide(color: AppTheme.success),
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                ),
-                icon: const Icon(Icons.open_in_new, size: 18),
-                label: const Text('Open Uploaded Resume'),
+          // v9.2.7 (403 fix): always offered while a resume exists, and the
+          // URL is resolved FRESH from storage on tap. The previous form only
+          // appeared when a cached URL existed AND opened that cached URL,
+          // whose download token is invalidated the moment the resume is
+          // replaced — which is what produced "403 Permission denied".
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: userId == null
+                  ? null
+                  : () => _openUploadedResume(userId),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppTheme.success,
+                side: BorderSide(color: AppTheme.success),
+                padding: const EdgeInsets.symmetric(vertical: 10),
               ),
+              icon: const Icon(Icons.open_in_new, size: 18),
+              label: const Text('Open Uploaded Resume'),
             ),
-            const SizedBox(height: 12),
-          ],
+          ),
+          const SizedBox(height: 12),
 
           SizedBox(
             width: double.infinity,
@@ -735,10 +787,22 @@ class _ResumeReviewViewState extends State<ResumeReviewView> {
         ? _roleController.text
         : null;
 
+    // v9.3: bind this review to the exact resume revision it scores, so a later
+    // replace is detectable and the screen never presents a stale score.
+    final resumeVersion = context
+        .read<PortfolioProvider>()
+        .portfolio
+        ?.resume
+        ?.version;
+
     final success = await provider.submitReview(
       resumeText: null,
       storagePath: storagePath,
       targetRole: targetRole,
+      resumeKey: ResumeReviewFreshness.uploadedResumeKey(
+        storagePath: storagePath,
+        version: resumeVersion,
+      ),
     );
 
     if (success && mounted) {
@@ -753,6 +817,38 @@ class _ResumeReviewViewState extends State<ResumeReviewView> {
         }
       });
     }
+  }
+
+  /// v9.2.7: resolves a FRESH download URL for the signed-in user's resume and
+  /// opens it. Resolving at tap time (instead of using the URL cached in
+  /// Firestore) is what keeps this working after a resume replace, because a
+  /// Storage download URL's token is rotated when the object at the same path
+  /// is overwritten.
+  Future<void> _openUploadedResume(String uid) async {
+    String? url;
+    try {
+      url = await ResumeService.instance().getResumeUrl(uid);
+    } catch (e) {
+      if (!mounted) return;
+      _showOpenResumeError(
+        'Could not open your resume. Upload it again from your portfolio.',
+      );
+      return;
+    }
+    if (!mounted) return;
+    if (url == null || url.isEmpty) {
+      _showOpenResumeError(
+        'Your resume file is missing. Upload it again from your portfolio.',
+      );
+      return;
+    }
+    await _openResumeUrl(context, url);
+  }
+
+  void _showOpenResumeError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: AppTheme.error),
+    );
   }
 
   Future<void> _openResumeUrl(BuildContext context, String url) async {

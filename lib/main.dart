@@ -93,6 +93,7 @@ import 'package:campusconnect/views/portfolio/experience_manager_screen.dart';
 import 'package:campusconnect/views/portfolio/achievements_manager_screen.dart';
 import 'package:campusconnect/views/portfolio/resume_upload_screen.dart';
 import 'package:campusconnect/views/portfolio/portfolio_read_only_view.dart';
+import 'package:campusconnect/services/app_check/app_check_config.dart'; // v9.2.4 (C-2)
 import 'package:firebase_app_check/firebase_app_check.dart'; // v9.0 (IMP-6): App Check
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart'; // v9.0 (IMP-6): kDebugMode/kProfileMode/defaultTargetPlatform
@@ -155,55 +156,36 @@ void main() async {
 /// Unsupported desktop platforms (Windows/Linux/macOS) are skipped so startup
 /// does not throw; enforcement for those apps is left off in the Console.
 Future<void> _activateAppCheck() async {
-  final supportedPlatform =
-      kIsWeb ||
-      defaultTargetPlatform == TargetPlatform.android ||
-      defaultTargetPlatform == TargetPlatform.iOS;
-  if (!supportedPlatform) return;
+  // v9.2.4 (C-2): provider SELECTION now lives in a pure, unit-tested function
+  // (lib/services/app_check/app_check_config.dart) so a release build can never
+  // silently regress to a debug placeholder provider without failing a test.
+  if (!isAppCheckSupportedPlatform(
+    isWeb: kIsWeb,
+    platform: defaultTargetPlatform,
+  )) {
+    return;
+  }
+
+  final config = resolveAppCheckConfig(
+    isDebugMode: kDebugMode,
+    isProfileMode: kProfileMode,
+  );
 
   // Web App Check (reCAPTCHA v3) requires the Site Key, supplied via
   // --dart-define=WEB_RECAPTCHA_V3_SITE_KEY=... (Firebase Console → App Check →
   // Web app → reCAPTCHA v3 Site Key). If absent (e.g. a mobile-only build) Web
   // App Check is skipped so the build still runs.
-  const webSiteKey = String.fromEnvironment(
-    'WEB_RECAPTCHA_V3_SITE_KEY',
-    defaultValue: '',
-  );
-
-  if (kDebugMode || kProfileMode) {
-    // Debug/profile: use the debug providers so local dev + emulators work
-    // once the printed debug token is registered in the App Check console
-    // (App Check → Apps → Manage debug tokens). Profile is treated as debug so
-    // `flutter run --profile` (perf profiling) does not break either.
-    if (webSiteKey.isNotEmpty) {
-      await FirebaseAppCheck.instance.activate(
-        providerAndroid: AndroidDebugProvider(),
-        providerApple: AppleDebugProvider(),
-        providerWeb: ReCaptchaV3Provider(webSiteKey),
-      );
-    } else {
-      await FirebaseAppCheck.instance.activate(
-        providerAndroid: AndroidDebugProvider(),
-        providerApple: AppleDebugProvider(),
-      );
-    }
-    return;
-  }
-
+  // Debug/profile: use the debug providers so local dev + emulators work
+  // once the printed debug token is registered in the App Check console
+  // (App Check → Apps → Manage debug tokens). Profile is treated as debug so
+  // `flutter run --profile` (perf profiling) does not break either.
   // Release: production attestation providers (Android → Play Integrity,
   // iOS → DeviceCheck, Web → reCAPTCHA v3).
-  if (webSiteKey.isNotEmpty) {
-    await FirebaseAppCheck.instance.activate(
-      providerAndroid: const AndroidPlayIntegrityProvider(),
-      providerApple: const AppleDeviceCheckProvider(),
-      providerWeb: ReCaptchaV3Provider(webSiteKey),
-    );
-  } else {
-    await FirebaseAppCheck.instance.activate(
-      providerAndroid: const AndroidPlayIntegrityProvider(),
-      providerApple: const AppleDeviceCheckProvider(),
-    );
-  }
+  await FirebaseAppCheck.instance.activate(
+    providerAndroid: config.android,
+    providerApple: config.apple,
+    providerWeb: config.web,
+  );
 }
 
 class MyApp extends StatelessWidget {
@@ -432,11 +414,10 @@ class MyApp extends StatelessWidget {
               // navigating a Student to this route shows a safe denied
               // screen; `updateApplicationStatus` + Firestore rules enforce
               // the same boundary server-side.
-              placementApplicantsRoute: (context) =>
-                  _guardPlacementApplicants(
-                    context,
-                    const PlacementApplicantsView(),
-                  ),
+              placementApplicantsRoute: (context) => _guardPlacementApplicants(
+                context,
+                const PlacementApplicantsView(),
+              ),
               aiChatRoute: (context) => const AIChatView(),
               // v7.6: Password reset route
               passwordResetRoute: (context) => const PasswordResetView(),
@@ -570,11 +551,7 @@ class _PlacementApplicantsDeniedView extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                Icons.lock_outline,
-                size: 64,
-                color: AppTheme.primaryBlue,
-              ),
+              Icon(Icons.lock_outline, size: 64, color: AppTheme.primaryBlue),
               const SizedBox(height: AppTheme.space16),
               Text(
                 'Teachers & Alumni Only',
@@ -829,7 +806,9 @@ class _AuthGuardState extends State<AuthGuard> {
                     chatProvider.initWithUser(user.id); // v7.3
                     aiChatProvider.initWithUser(user.id); // v7.4
                     alumniGroupChatProvider.initWithUser(user.id); // v8.7
-                    context.read<CareerCoachProvider>().initWithUser(user.id); // v9.0
+                    context.read<CareerCoachProvider>().initWithUser(
+                      user.id,
+                    ); // v9.0
                     // v7.2: Initialize ecosystem providers after role is loaded
                     // This will be done in a separate callback below
                     profileProvider.initWithUser(

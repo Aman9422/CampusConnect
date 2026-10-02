@@ -1,5 +1,7 @@
 import 'package:campusconnect/models/portfolio/resume_metadata.dart';
 import 'package:campusconnect/providers/portfolio_provider.dart';
+import 'package:campusconnect/providers/resume_review_provider.dart';
+import 'package:campusconnect/services/firestore/resume_service.dart';
 import 'package:campusconnect/services/storage/storage_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:campusconnect/theme/app_theme.dart';
@@ -32,7 +34,9 @@ class _ResumeUploadScreenState extends State<ResumeUploadScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: isDark ? AppTheme.darkBackground : const Color(0xFFF8FAFC),
+      backgroundColor: isDark
+          ? AppTheme.darkBackground
+          : const Color(0xFFF8FAFC),
       appBar: AppBar(
         title: Text(
           'Resume Upload',
@@ -66,7 +70,7 @@ class _ResumeUploadScreenState extends State<ResumeUploadScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (hasResume) ...[
-                  _buildCurrentResume(resume!, isDark),
+                  _buildCurrentResume(resume!, isDark, userId),
                   const SizedBox(height: AppTheme.space16),
                 ],
                 if (_deleteError != null) ...[
@@ -131,17 +135,24 @@ class _ResumeUploadScreenState extends State<ResumeUploadScreen> {
   }
 
   // M6: typed [ResumeMetadata] instead of `dynamic` + casts.
-  Widget _buildCurrentResume(ResumeMetadata resume, bool isDark) {
+  //
+  // v9.2.7 (403 fix): the open action resolves a FRESH download URL through
+  // [ResumeService.getResumeUrl] instead of using `resume.downloadUrl`. The
+  // cached URL's token is rotated whenever `resumes/{uid}/latest.pdf` is
+  // overwritten (every replace-upload), so the cached value 403s in the
+  // browser even though the current file is present.
+  Widget _buildCurrentResume(
+    ResumeMetadata resume,
+    bool isDark,
+    String? userId,
+  ) {
     return PortfolioSectionCard(
       title: 'Current Resume',
       trailing: IconButton(
         icon: const Icon(Icons.open_in_new, size: 20),
         color: AppTheme.primaryBlue,
         tooltip: 'Open Resume',
-        onPressed: () {
-          final url = resume.downloadUrl;
-          if (url != null && url.isNotEmpty) _launchUrl(url);
-        },
+        onPressed: userId == null ? null : () => _openResume(userId),
       ),
       child: Column(
         children: [
@@ -335,10 +346,7 @@ class _ResumeUploadScreenState extends State<ResumeUploadScreen> {
             ? SizedBox(
                 width: 18,
                 height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: color,
-                ),
+                child: CircularProgressIndicator(strokeWidth: 2, color: color),
               )
             : Icon(icon, size: 20),
         label: Text(label),
@@ -417,6 +425,11 @@ class _ResumeUploadScreenState extends State<ResumeUploadScreen> {
       if (!mounted) return;
 
       if (success) {
+        // v9.3: a replaced resume invalidates any review held for the old
+        // document. Without this the reviewer kept presenting the previous
+        // score as if it described the new upload — the "it always says 68"
+        // report. The student now has to run a review on the current file.
+        context.read<ResumeReviewProvider>().clearReview();
         _showSnack('Resume uploaded successfully!', error: false);
       } else {
         // v8.4.10: surface failures with the same snackbar pattern as
@@ -471,6 +484,9 @@ class _ResumeUploadScreenState extends State<ResumeUploadScreen> {
 
     setState(() => _isDeleting = false);
     if (success) {
+      // v9.3: the reviewed document is gone — drop the held review so the
+      // reviewer cannot show a score for a resume that no longer exists.
+      context.read<ResumeReviewProvider>().clearReview();
       _showSnack('Resume removed.', error: false);
     } else {
       final error = provider.error;
@@ -487,13 +503,36 @@ class _ResumeUploadScreenState extends State<ResumeUploadScreen> {
     );
   }
 
+  /// v9.2.7 (403 fix): resolves the resume's CURRENT download URL and opens
+  /// it. The stored `downloadUrl` cannot be used directly — its token is
+  /// rotated on every overwrite of `resumes/{uid}/latest.pdf`, which is
+  /// exactly what a resume replace does.
+  Future<void> _openResume(String userId) async {
+    String? url;
+    try {
+      url = await ResumeService.instance().getResumeUrl(userId);
+    } catch (e) {
+      debugPrint('ResumeUploadScreen: could not resolve resume URL: $e');
+      if (mounted) {
+        _showSnack('Could not open your resume. Upload it again.', error: true);
+      }
+      return;
+    }
+    if (!mounted) return;
+    if (url == null || url.isEmpty) {
+      _showSnack('Your resume file is missing. Upload it again.', error: true);
+      return;
+    }
+    await _launchUrl(url);
+  }
+
   Future<void> _launchUrl(String url) async {
     final uri = Uri.tryParse(url);
     if (uri == null) return;
     try {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     } catch (_) {
-      _showSnack('Could not open resume', error: true);
+      if (mounted) _showSnack('Could not open resume', error: true);
     }
   }
 }
@@ -541,7 +580,11 @@ class _PortfolioResumeRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, size: 18, color: isDark ? AppTheme.gray400 : AppTheme.gray600),
+        Icon(
+          icon,
+          size: 18,
+          color: isDark ? AppTheme.gray400 : AppTheme.gray600,
+        ),
         const SizedBox(width: AppTheme.space8),
         Text(
           '$label: ',

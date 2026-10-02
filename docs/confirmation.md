@@ -1,3 +1,224 @@
+# CampusConnect — v9.2.4 Confirmation (Definition of Done)
+
+| | |
+|---|---|
+| **Release confirmed** | `9.2.4+101` (`pubspec.yaml`) |
+| **Baseline** | `9.2.2+100` |
+| **Confirmation date** | 2026-10-02 |
+| **Scope confirmed** | `docs/Task.md` — *v9.2.4 Critical Security, Correctness & Production Hardening* |
+| **Full report** | `docs/v9_2_4_hardening_report.md` |
+| **Deployment scope** | **Direct APK installation — NOT Google Play publication** |
+
+This document answers one question: **is the v9.2.4 Definition of Done met?**
+Every status below is backed by a command that was run or a test that exists in the
+tree. Nothing requiring a physical device, the Firebase Console or a real release
+keystore is claimed as done — those are listed as operator actions.
+
+---
+
+## 1. Deployment scope (re-scoped during v9.2.4)
+
+`docs/Task.md` §0 is authoritative: this is a final-year academic project and is
+**not** published on Google Play.
+
+```
+Firebase backend (Auth · Firestore · Storage · Cloud Functions)
+        |
+        v
+properly signed Flutter *release* APK
+        |
+        v
+direct installation on a phone / emulator (adb install / USB / file transfer)
+        |
+        v
+final-year project demonstration
+```
+
+Consequences that are *deliberately* not done, and are **not** v9.2.4 defects:
+
+* No Google Play publication, no testing track, no Play Console account, no $25 fee.
+* No App Bundle as a delivery artefact (it is built only to prove the signing config applies).
+* **App Check enforcement is OFF by design** — a sideloaded release APK cannot obtain a
+  valid Play Integrity token here (the provider's API link requires a Play Console account).
+  See §4.
+
+---
+
+## 2. Definition of Done
+
+| # | Criterion | Status | Evidence |
+|---|---|---|---|
+| 1 | Release builds use a real release signing configuration, never the debug key | **MET** | `android/app/build.gradle.kts` builds a `release` signing config from `key.properties` with **no** debug fallback and an explicit abort when credentials are missing. Pinned by `functions/test/hardening_source_contracts.test.js` (C-1 group). |
+| 2 | The signed release APK installs and launches on the demo device/emulator | **OPERATOR ACTION** | The APK is built and release-signed; installing it on the physical device is a human step (`adb install -r build/app/outputs/flutter-apk/app-release.apk`). Not performed here — no device attached to this environment. |
+| 3 | App Check posture documented and deliberate; no insecure bypass | **MET** | `docs/app_check_status.md`; provider selection pinned by `test/app_check_config_test.dart` + the C-2 source contract. Enforcement deliberately off, reason recorded (§4 below). No debug provider on any release path, no custom attestation backend. |
+| 4 | Resume Review no longer triggers duplicate recommendation regeneration | **MET** | `isResumeReviewMetadataOnlyChange()` guard in `functions/helpers/shared.js`, used by `functions/triggers/index.js`. `functions/test/resume_review_single_refresh.test.js`: metadata-only write → **0** refreshes; genuine change → exactly **1**; no engagement points on the metadata write. |
+| 5 | Recommendation fingerprints converge correctly | **MET** | Same suite — three convergence tests (options-agnostic derivation, new review still invalidates, `portfolio.metadata`-only flutter ignored). Second half of the fix in `functions/recommendations/engine.js` (`extractUserSignals()` reads the persisted `portfolio.resume.latestMissingKeywords`). |
+| 6 | Placement apply/update timeout contracts are aligned | **MET** | `lib/providers/placements_provider.dart` — 120 s (server: 120 s) and 60 s (server: 60 s). `test/placement_timeout_reconciliation_test.dart`. |
+| 7 | Placement timeout no longer falsely rolls back successful applications | **MET** | Pending/reconciliation state replaces the rollback; single read reconciles. Same suite. |
+| 8 | Client/server eligibility semantics are identical | **MET** | `lib/services/eligibility_engine.dart` treats `programs`/`branches` as alternatives, matching `checkMandatoryEligibility`. Table-driven `test/eligibility_parity_test.dart`. |
+| 9 | Only authorized alumni can create opportunities | **MET** | `firestore.rules` — create requires `userRole() == 'alumni'`. **Executed** against the Firestore emulator by `functions/test-rules/firestore_rules.test.js` (alumni allowed; student/teacher/anon denied; owner update/delete allowed; non-owner denied), plus the text contract `functions/test/security_rules_contract.test.js`. |
+| 10 | Opportunity schema validation is enforced | **MET** | `isValidOpportunityData()` applied on create **and** update. Malformed writes — missing field, empty `title`, wrong types, non-timestamp `postedAt`, a foreign `alumniId` — are **denied in the executed emulator suite**; the field set is reconciled against `lib/models/opportunity.dart::toFirestore`. |
+| 11 | `profileCompleted` / `isVerified` gap is addressed | **MET** | `firestore.rules` — `profileCompleted` only as a validated absent/false → true transition with the required sections present; `isVerified` client-immutable. Both tampering writes are **denied in the executed emulator suite**, the genuine completion flow is allowed, and `role` self-elevation is denied in both directions. `role` behaviour unchanged. |
+| 12 | AI chat has one writer and one schema | **MET** | Server is the sole writer of `users/{uid}/ai_interactions`; client write removed from `lib/providers/ai_chat_provider.dart` and `lib/models/ai_interaction.dart`; reader, retention sweep and history loading all use `timestamp`. `test/ai_chat_single_writer_test.dart` (+ existing `test/ai_chat_deletion_test.dart`). |
+| 13 | `autoExpireOpportunities` safely handles large batches | **MET** | `functions/schedulers/index.js` chunks at 400/batch. `functions/test/schedulers_expiry.test.js` — empty / small / multi-batch. |
+| 14 | `deepAnalysis.js` error handling is consistent | **MET** | `instanceof admin.functions.https.HttpsError` replaces the duck-typed check. `functions/test/hardening_source_contracts.test.js` (E-18 group). |
+| 15 | Regression tests cover every critical fix | **MET** | 4 new Flutter suites + 4 new Functions suites + 1 **emulator-executed rules suite** (37 assertions) (§3). No existing test removed or weakened. |
+| 16 | Flutter tests pass | **MET** | `flutter test` → **All tests passed! (540)**, exit 0. |
+| 17 | Functions tests pass | **MET** | `npm --prefix functions test` → **97 tests / 97 pass / 0 fail / 0 skipped**. Separately, `npm --prefix functions run test:rules` → **37 tests / 37 pass / 0 fail** against the Firestore emulator. |
+| 18 | `flutter analyze` passes | **MET** | `flutter analyze` → **No issues found! (ran in 13.5s)**, exit 0. |
+| 19 | Release APK builds and is signed with the release key | **MET** | `app-release.apk` (56.7 MB) and `app-release.aab` (46.8 MB) both present; `apksigner verify --print-certs` reported a signer **different from the Android debug key** in both DN and SHA-256 (§3). The App Bundle build is optional per §0. |
+| 20 | No secrets are committed | **MET** | `git ls-files` filtered for `key.properties` / `*.jks` / `*.keystore` → **no matches**. Debug App Check tokens are not committed (C-2 contract). |
+| 21 | v9.2.4 documentation/report is complete | **MET** | `docs/v9_2_4_hardening_report.md` (§1–§20), `docs/release_signing.md`, `docs/app_check_status.md`, `docs/eligibility_rules.md`, `docs/Task.md` §0 + re-scope notes, `docs/todo.md`, this confirmation. |
+| 22 | No unrelated UI, architecture or dependency changes | **MET** | No UI/UX redesign; no provider architecture change; `firebase-functions`/`firebase-admin`/`pdf-parse`/Flutter/Android toolchain versions untouched. `pubspec.yaml` changed only its version string. |
+
+**Verdict: 20 of 22 criteria met in this environment. Criterion 2 (install on the
+demo device) is the only substantive operator action; criterion 19's *final*
+key identity likewise belongs to the operator, because the build here used a
+throwaway validation keystore.**
+
+---
+
+## 3. Verification commands and observed results
+
+Run on 2026-10-02 on this machine, after the last source change.
+
+| Command | Observed |
+|---|---|
+| `flutter analyze` | `No issues found! (ran in 13.5s)` — exit `0` |
+| `flutter test` | `All tests passed!` — **540** tests, exit `0` |
+| `npm --prefix functions test` | `# tests 97` · `# pass 97` · `# fail 0` · `# skipped 0` |
+| `npm --prefix functions run test:rules` | Firestore emulator + `node --test functions/test-rules/firestore_rules.test.js` → `# tests 37` · `# pass 37` · `# fail 0` · `# skipped 0`; emulator shut down cleanly — exit `0` |
+| `node --check` (shared.js, triggers/index.js, schedulers/index.js, ai/deepAnalysis.js, recommendations/refresh.js, recommendations/engine.js) | exit `0` on every file — no syntax error |
+| `git ls-files` filtered for key material | no `key.properties`, no `*.jks`, no `*.keystore` tracked |
+| `flutter build apk --release` | `build/app/outputs/flutter-apk/app-release.apk` — **56.7 MB** |
+| `flutter build appbundle --release` *(optional)* | `build/app/outputs/bundle/release/app-release.aab` — **46.8 MB** |
+| `apksigner verify --print-certs` (APK) | `CN=CampusConnect Validation, OU=Local, O=CampusConnect, L=NA, ST=NA, C=IN`, SHA-256 `03:B7:0D:79:…:A8:DA` — **not** the debug key |
+| `apksigner verify --print-certs` (AAB) | same validation signer; **not** the debug key |
+| debug key for comparison | `CN=Android Debug, O=Android, C=US`, SHA-256 `13:65:4F:0D:…:41:A3` — different DN **and** digest |
+
+> **The APK currently in `build/` was signed with a throwaway validation keystore,
+> which was deleted immediately after the check** (the C-1 contract test fails if a
+> keystore or a real `key.properties` is present in the tree). It proves the signing
+> *mechanism*; the operator must rebuild with their own release key before the demo —
+> see `docs/release_signing.md` §6.
+
+**New test suites**
+
+| Suite | Count relevance |
+|---|---|
+| `test/app_check_config_test.dart` | C-2 provider selection |
+| `test/eligibility_parity_test.dart` | D-3 table-driven parity |
+| `test/placement_timeout_reconciliation_test.dart` | D-2 timeout + pending/reconciliation |
+| `test/ai_chat_single_writer_test.dart` | D-7 single writer + schema |
+| `functions/test/hardening_source_contracts.test.js` | C-1, C-2, E-18 source contracts |
+| `functions/test/resume_review_single_refresh.test.js` | D-1 guard + fingerprint convergence |
+| `functions/test/security_rules_contract.test.js` | D-9, D-10, D-11 — source contract on the rule text |
+| `functions/test/schedulers_expiry.test.js` | E-3 empty / small / multi-batch |
+| `functions/test-rules/firestore_rules.test.js` | D-9, D-10, D-11, SEC-1, SEC-2, D-7 — **executed against the Firestore emulator**, 37 allow/deny assertions |
+
+**Emulator-executed rules tests.** `functions/test-rules/firestore_rules.test.js`
+loads `firestore.rules` into the Firestore emulator through
+`@firebase/rules-unit-testing`, signs in as alumni / student / teacher / anonymous,
+and asserts what the rules **actually allow and deny** (37 cases: D-9 authorization,
+D-10 schema validation, SEC-1 role immutability, D-11 profile flags, SEC-2
+server-owned collections, D-7 append-only `ai_interactions`, catch-all removal, and
+the placement regressions). Run it with:
+
+```
+npm --prefix functions run test:rules
+```
+
+The script is new in `functions/package.json`, which also adds
+`@firebase/rules-unit-testing` and `firebase` as **devDependencies** — the only
+dependency-manifest change in v9.2.4, dev-only and not deployed. The emulator needs
+a JVM: `JAVA_HOME` on this machine pointed at a non-existent JDK, so the Android
+Studio JBR was used. Observed: `# tests 37` · `# pass 37` · `# fail 0`, exit `0`.
+
+---
+
+## 4. App Check — the deliberate non-enforcement decision
+
+Full detail: `docs/app_check_status.md`. Summary:
+
+| Aspect | State |
+|---|---|
+| Provider selection | correct; debug/profile → debug providers, release → Play Integrity / DeviceCheck, Web → reCAPTCHA v3 (opt-in) |
+| Release build receiving a debug provider | **impossible** — forbidden in code and asserted by tests |
+| Debug token committed | **no** |
+| Enforcement (Firestore / Functions / Storage) | **OFF — by design, documented** |
+| Insecure bypass / custom attestation backend | **none introduced** |
+
+Why off: the Play Integrity provider *does* support non-Play distribution, but
+linking the Play Integrity API requires a Play Console developer account (out of
+scope per §0), and App Check demands the `PLAY_RECOGNIZED` label by default, which
+apps not published on Play are not eligible for. A sideloaded release APK therefore
+cannot obtain a valid token, and enforcement would deny 100 % of demo traffic.
+Authentication, Firestore rules, Storage rules, callable auth/role re-checks,
+quota/rate limits and server-owned collections all stay enforced regardless.
+
+---
+
+## 5. Outstanding operator actions
+
+These need a device, the Firebase Console, or a private key — none of them is a
+code defect, and each is documented where it is performed.
+
+1. **Generate the release keystore and build the demo APK** with the operator's own
+   key (`docs/release_signing.md` §2–§6), then `apksigner verify --print-certs` and
+   confirm the digest is not the debug key.
+2. **Install and launch the release APK on the demo device/emulator**
+   (`adb install -r build/app/outputs/flutter-apk/app-release.apk`) and run the
+   manual pass in `docs/Task.md` §15 (auth, resume review, placements,
+   opportunities, AI chat, one end-to-end pass per role).
+3. **Allow-list the development App Check debug token** (App Check → Manage debug
+   tokens) so `flutter run` sessions attest cleanly. This does **not** change the
+   release posture.
+4. **Leave App Check enforcement OFF.** Only revisit if a Play Console account is
+   created, then follow `docs/app_check_status.md` §7.
+5. **Deploy the hardened rules and Functions** when ready
+   (`firebase deploy --only firestore:rules,storage,functions`) — deploying is a
+   production action and was not performed here. The Firestore rules themselves are
+   already **behaviour-verified against the emulator** (37/37); an equivalent
+   executed suite for `storage.rules` is a follow-up, not a blocker.
+
+---
+
+## 6. Corrections and marked updates made during v9.2.4
+
+Per `docs/Task.md` §16, corrections are marked rather than silently applied:
+
+* `docs/v9_2_3_audit_report.md` — §AD addendum: report date (2026-10-02), the
+  v9.2.3 = audit-only vs v9.2.4 = implementation distinction, and a reconciliation
+  of inconsistent test-count wording. No historical result was changed.
+* `docs/v9_2_2_investigation_report.md` — a **HISTORICAL DOCUMENT** banner was added
+  (audit finding E-17): its `9.1.2+99` header is a record of the version under
+  investigation, not current status. Content below the banner is unedited.
+* This file previously held the V9.2 whole-app audit report. It is preserved
+  verbatim below the archive boundary, and remains in git history.
+* **Rules verification upgraded (same release, no historical result changed).**
+  v9.2.4 originally validated `firestore.rules` by **source contract only**. It now
+  also **executes** the rules against the Firestore emulator
+  (`functions/test-rules/firestore_rules.test.js`, 37 allow/deny assertions,
+  `npm --prefix functions run test:rules`) — the follow-up the original report
+  listed as its first item of remaining work. `docs/v9_2_4_hardening_report.md`
+  §14/§15.2/§17.1/§18 and this document were updated to reflect that; nothing was
+  recorded as passing before it was actually run.
+
+---
+
+> ---
+> ## ARCHIVE — superseded document, preserved verbatim
+>
+> Everything below this line is the **V9.2** confirmation content as it stood
+> before v9.2.4 (`docs/todo.md` §0 records that workstream as complete). It is kept
+> in-tree so the tree stays self-describing rather than relying on git history.
+> It described a **Play-bound** release plan, which `docs/Task.md` §0 re-scoped
+> during v9.2.4; read it as a historical record, not current status.
+>
+> Current status lives in `docs/v9_2_4_hardening_report.md`.
+
+---
+
 # CampusConnect — V9.2 Whole-App Audit Report
 
 **Audit date:** 2026-09-27

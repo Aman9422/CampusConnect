@@ -1,4 +1,5 @@
 import 'package:campusconnect/models/portfolio/portfolio_model.dart';
+import 'package:campusconnect/models/portfolio/portfolio_snapshot.dart';
 import 'package:campusconnect/services/firestore/portfolio_migration.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
@@ -25,6 +26,45 @@ class PortfolioService {
   static const Duration saveTimeout = Duration(seconds: 20);
 
   CollectionReference get _usersCollection => _firestore.collection('users');
+
+  /// Builds the Firestore payload for a portfolio write.
+  ///
+  /// The portfolio is ALWAYS addressed as the canonical NESTED map —
+  /// `{'portfolio': {'resume': {...}, 'skills': […]}}` — and never through
+  /// dot-notation keys such as `'portfolio.resume'`.
+  ///
+  /// Rationale (v9.2.7, RESUME-WRITE fix): dot notation is a feature of
+  /// `update()` / `SetOptions(mergeFields:)` only. In a `set(…, merge: true)`
+  /// payload Firestore stores a key containing a dot as a literal root-level
+  /// field NAME. Both writers of this project did exactly that:
+  ///   * the client (`PortfolioService.savePortfolio`) wrote `portfolio.resume`,
+  ///     `portfolio.skills`, … and
+  ///   * `onResumeReviewCreatedRefreshMatches` in `functions/triggers/index.js`
+  ///     wrote `portfolio.resume.reviewCount`, `…latestATSScore`, …
+  /// which is the "flattened" document shape this file's reader has always
+  /// compensated for. It stayed harmless only while the document had no nested
+  /// map. Once [migrateFlattenedPortfolio] had written the canonical nested
+  /// `portfolio` map, the reader started preferring it — and every later dotted
+  /// write landed in flat fields the reader ignores, so a resume
+  /// upload/replace/remove reported success (the Storage object really was
+  /// written/deleted) while the stored metadata and download URL never changed.
+  ///
+  /// [updatedAt] is written as a nested `metadata.updatedAt` stamp for the same
+  /// reason, so the value reaches the field the recommendation trigger reads
+  /// instead of a literal `metadata.updatedAt` root field.
+  ///
+  /// Static (no Firestore instance required) so the payload shape is unit
+  /// testable — see `test/portfolio_write_payload_test.dart`.
+  @visibleForTesting
+  static Map<String, dynamic> buildPortfolioWritePayload({
+    required Map<String, dynamic> changedSections,
+    required Object updatedAt,
+  }) {
+    return <String, dynamic>{
+      if (changedSections.isNotEmpty) 'portfolio': changedSections,
+      'metadata': <String, dynamic>{'updatedAt': updatedAt},
+    };
+  }
 
   /// Extract the portfolio section map from a user document.
   ///
@@ -122,14 +162,45 @@ class PortfolioService {
     return PortfolioModel.fromMap(portfolioData);
   }
 
+  /// Reads the portfolio PREFERRING the server, so a user-initiated refresh can
+  /// never adopt a stale locally cached value.
+  ///
+  /// v9.2.7: [getPortfolio] uses the default source, which may serve the local
+  /// cache. That is fine for a first paint, but a refresh or a post-write
+  /// reconciliation must see server truth — otherwise a cached pre-write
+  /// snapshot can overwrite the value the user just saved (the "pull to
+  /// refresh and the removed resume is back" symptom). When the server read
+  /// fails (offline) the local cache is used and the result is flagged
+  /// [PortfolioSnapshot.isFromCache] so the caller can keep its own value.
+  Future<PortfolioSnapshot> readPortfolioSnapshot(String uid) async {
+    final docRef = _usersCollection.doc(uid);
+    try {
+      final doc = await docRef.get(const GetOptions(source: Source.server));
+      return _toSnapshot(doc);
+    } catch (e) {
+      debugPrint('PortfolioService.readPortfolioSnapshot server read: $e');
+      final doc = await docRef.get();
+      return _toSnapshot(doc);
+    }
+  }
+
   /// Persist the portfolio under `users/{uid}/portfolio`.
   ///
-  /// H4 (F5): saves are now per-section diffs. When [previous] is supplied,
-  /// only the sections whose value actually changed are written, and each is
-  /// written as a dotted path (`portfolio.skills`, `portfolio.projects`, …)
-  /// with merge semantics. The old whole-map write replaced every section on
-  /// every save, clobbering sibling/remote edits performed on another device.
-  /// When [previous] is null this writes every section (first save).
+  /// H4 (F5): saves are per-section diffs. When [previous] is supplied, only
+  /// the sections whose value actually changed are written, so sibling/remote
+  /// edits made on another device are not clobbered. When [previous] is null
+  /// every section is written (first save / repair).
+  ///
+  /// v9.2.7 (RESUME-WRITE fix): the payload is the canonical NESTED map —
+  /// `{'portfolio': {'resume': {...}, …}}` — and never dot-notation keys such
+  /// as `'portfolio.resume'`. See [buildPortfolioWritePayload] for why the
+  /// dotted form silently wrote to fields no reader looks at.
+  ///
+  /// Merge semantics still hold: `portfolio` is a map value, so Firestore
+  /// deep-merges it into the existing nested map and only the supplied
+  /// sections are touched. A changed section is written verbatim, so a cleared
+  /// resume arrives as `resume: null` and replaces the whole map (scalars and
+  /// nulls replace, maps merge).
   Future<void> savePortfolio(
     String uid,
     PortfolioModel portfolio, {
@@ -138,20 +209,25 @@ class PortfolioService {
     try {
       final incoming = portfolio.toMap();
       final prior = previous?.toMap() ?? const <String, dynamic>{};
-      final update = <String, dynamic>{};
+      final changedSections = <String, dynamic>{};
 
       incoming.forEach((key, value) {
         final changed =
             !prior.containsKey(key) || !_deepEquals(prior[key], value);
         if (changed) {
-          update['portfolio.$key'] = value;
+          changedSections[key] = value;
         }
       });
 
-      await _usersCollection.doc(uid).set({
-        ...update,
-        'metadata.updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      await _usersCollection
+          .doc(uid)
+          .set(
+            buildPortfolioWritePayload(
+              changedSections: changedSections,
+              updatedAt: FieldValue.serverTimestamp(),
+            ),
+            SetOptions(merge: true),
+          );
     } catch (e) {
       debugPrint('PortfolioService: Error saving portfolio: $e');
       rethrow;
@@ -250,10 +326,21 @@ class PortfolioService {
         // Canonical nested map — replaces the flattened representation.
         'portfolio': plan.nestedPortfolio,
         // Observability stamp only; carries no user data.
-        'metadata.portfolioMigratedAt': FieldValue.serverTimestamp(),
+        //
+        // v9.2.7: written as a NESTED `metadata` map. A dotted
+        // `'metadata.portfolioMigratedAt'` key in a merge-set payload is a
+        // literal root-level field name, not a field path, so the stamp used
+        // to land beside the real `metadata` map instead of inside it.
+        'metadata': <String, dynamic>{
+          'portfolioMigratedAt': FieldValue.serverTimestamp(),
+        },
       };
       // Remove the legacy root-level dotted keys so the document is canonical
       // and the compatibility path is never needed again.
+      //
+      // These keys are LITERAL field names that happen to contain dots (the
+      // flattened shape), so naming them verbatim is exactly right here: the
+      // delete target is the flat field, not a nested path.
       for (final key in plan.flattenedKeysToDelete) {
         update[key] = FieldValue.delete();
       }
@@ -273,19 +360,40 @@ class PortfolioService {
     }
   }
 
+  /// Parses a document snapshot into a [PortfolioSnapshot], preserving the
+  /// Firestore cache/pending-write flags.
+  ///
+  /// v8.4.9 (MB17) tolerance preserved: the same [_extractPortfolioMap] is
+  /// used for streams and one-shot reads, so a document whose portfolio is
+  /// stored as flattened root-level `portfolio.*` keys still parses to the
+  /// real portfolio instead of an empty one.
+  PortfolioSnapshot _toSnapshot(DocumentSnapshot doc) {
+    final metadata = doc.metadata;
+    final data = doc.exists ? doc.data() as Map<String, dynamic>? : null;
+    final portfolioData = _extractPortfolioMap(data);
+    return PortfolioSnapshot(
+      portfolio: portfolioData == null
+          ? PortfolioModel.empty()
+          : PortfolioModel.fromMap(portfolioData),
+      isFromCache: metadata.isFromCache,
+      hasPendingWrites: metadata.hasPendingWrites,
+    );
+  }
+
+  /// Streams portfolios WITH their cache/pending-write flags.
+  ///
+  /// v9.2.7: this is the stream the provider listens to. `isFromCache` is what
+  /// lets the listener refuse to overwrite committed in-memory state with a
+  /// replayed pre-write snapshot — the mechanism that used to resurrect a
+  /// removed resume and revert a freshly uploaded one.
+  Stream<PortfolioSnapshot> portfolioSnapshotStream(String uid) {
+    return _usersCollection.doc(uid).snapshots().map((doc) => _toSnapshot(doc));
+  }
+
   /// Stream portfolio changes in real time (owner is the only writer).
   ///
-  /// v8.4.9 (MB17): uses the same tolerant [_extractPortfolioMap] as
-  /// [getPortfolio] so a doc whose portfolio is stored as flattened
-  /// root-level `portfolio.*` keys (Firebase-console edits / legacy writers)
-  /// stream the REAL portfolio instead of an empty one.
-  Stream<PortfolioModel> portfolioStream(String uid) {
-    return _usersCollection.doc(uid).snapshots().map((doc) {
-      if (!doc.exists) return PortfolioModel.empty();
-      final data = doc.data() as Map<String, dynamic>?;
-      final portfolioData = _extractPortfolioMap(data);
-      if (portfolioData == null) return PortfolioModel.empty();
-      return PortfolioModel.fromMap(portfolioData);
-    });
-  }
+  /// Model-only convenience over [portfolioSnapshotStream] for callers that do
+  /// not need the cache flags.
+  Stream<PortfolioModel> portfolioStream(String uid) =>
+      portfolioSnapshotStream(uid).map((snapshot) => snapshot.portfolio);
 }

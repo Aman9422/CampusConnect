@@ -160,7 +160,8 @@ class PlacementsService {
   /// Each student appears in both docs, so we dedupe by [userId] and prefer
   /// the canonical doc — the one that carries `resumeUrl`.
   Future<List<Application>> getApplicationsForPlacement(
-      String placementId) async {
+    String placementId,
+  ) async {
     try {
       final snapshot = await _firestore
           .collectionGroup('applications')
@@ -172,7 +173,8 @@ class PlacementsService {
 
       for (final doc in snapshot.docs) {
         final data = doc.data();
-        final userId = data['userId'] as String? ?? data['studentId'] as String?;
+        final userId =
+            data['userId'] as String? ?? data['studentId'] as String?;
         if (userId == null) continue;
 
         final carriesResumeUrl = data.containsKey('resumeUrl');
@@ -195,14 +197,51 @@ class PlacementsService {
     }
   }
 
+  /// v9.2.4 (D-2): reconciliation read used after a callable TIMEOUT.
+  ///
+  /// A client-side timeout does NOT prove the server failed:
+  /// `logPlacementApplication` may legitimately take up to 120 s server-side
+  /// (it copies the resume to a snapshot object and mints a signed URL before
+  /// its Firestore transaction). When the client gives up early, the only
+  /// correct next step is to READ the canonical application document and see
+  /// whether the server recorded it — a blind retry would be wasteful and a
+  /// rollback would show a false failure.
+  ///
+  /// Reads `applications/{userId}_{placementId}` — the canonical document
+  /// written by the callable. Ownership is enforced by the security rules
+  /// (a student may read exactly their own application).
+  ///
+  /// Unlike the other helpers in this service, this one does NOT swallow
+  /// errors: the caller must be able to distinguish "server says not applied"
+  /// (safe to roll back) from "could not confirm" (keep the pending state).
+  ///
+  /// Returns the application map when it exists, otherwise `null`.
+  /// Throws when the read itself fails.
+  Future<Map<String, dynamic>?> getUserApplication({
+    required String userId,
+    required String placementId,
+  }) async {
+    final doc = await _firestore
+        .collection('applications')
+        .doc(applicationDocId(userId, placementId))
+        .get();
+    return doc.exists ? doc.data() : null;
+  }
+
+  /// v9.2.4 (D-2): the canonical application document id.
+  ///
+  /// MUST match `functions/placements.js`
+  /// (`const applicationId = `${uid}_${placementId}``).
+  static String applicationDocId(String userId, String placementId) =>
+      '${userId}_$placementId';
+
   /// v9.1: Unique applicant count per placement.
   ///
   /// Uses a collectionGroup query (same dedupe concern as
   /// [getApplicationsForPlacement]) and counts DISTINCT students — the two
   /// mirrors for one student count once. [placementIds] is batched into
   /// chunks of 10 (`whereIn` Firestore limit).
-  Future<Map<String, int>> getApplicantCounts(
-      List<String> placementIds) async {
+  Future<Map<String, int>> getApplicantCounts(List<String> placementIds) async {
     if (placementIds.isEmpty) return {};
 
     final uniqueByPlacement = <String, Set<String>>{};
@@ -221,7 +260,8 @@ class PlacementsService {
       for (final doc in snapshot.docs) {
         final data = doc.data();
         final placementId = data['placementId'] as String?;
-        final userId = data['userId'] as String? ?? data['studentId'] as String?;
+        final userId =
+            data['userId'] as String? ?? data['studentId'] as String?;
         if (placementId == null || userId == null) continue;
         uniqueByPlacement
             .putIfAbsent(placementId, () => <String>{})
@@ -229,7 +269,8 @@ class PlacementsService {
       }
     }
 
-    return uniqueByPlacement
-        .map((placementId, students) => MapEntry(placementId, students.length));
+    return uniqueByPlacement.map(
+      (placementId, students) => MapEntry(placementId, students.length),
+    );
   }
 }

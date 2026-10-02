@@ -8,8 +8,13 @@
  *
  *   - `firebase-admin`'s getter-only `firestore` is replaced (via the require
  *     cache) with a small in-memory fake (test/firestore_fake.js);
- *   - `admin.functions.https.HttpsError` is provided exactly as the deployed
- *     Cloud Functions runtime provides it;
+ *   - `admin.functions.https.HttpsError` is provided as the callable-error
+ *     stand-in for these tests. NOTE (v9.2.5): the deployed Cloud Functions
+ *     runtime does NOT provide `admin.functions` at all — in production the
+ *     REAL class is installed by `helpers/https_error.js`, which
+ *     `functions/index.js` runs before it requires any feature module. This
+ *     stand-in exists so the production modules can be driven here without a
+ *     firebase-functions callable runtime;
  *   - the real firebase-admin `Timestamp` value class is preserved so quota
  *     maps under test use the same timestamp type as production.
  *

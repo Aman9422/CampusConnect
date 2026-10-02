@@ -3,14 +3,21 @@
 /**
  * CampusConnect v9.2 — minimal in-memory Firestore fake for unit tests.
  *
- * Lets the AI quota helpers (`functions/ai/quota.js`) be tested WITHOUT a live
- * Firestore project or the Firestore emulator. It implements exactly the
- * surface those helpers use:
+ * Lets production Cloud Functions modules be tested WITHOUT a live Firestore
+ * project or the Firestore emulator. Implemented surface:
  *
- *   db.collection(name).doc(id)                     -> {get, set}
- *   db.collection(name).where(path, "<", cutoff)
+ *   db.collection(name).doc(id)                     -> {get, set, collection}
+ *   db.collection(name).get()                       -> {docs, empty}
+ *   db.collection(name).where(path, op, value)
+ *       [.where(...)] [.orderBy(...)] [.startAfter(...)]
  *       .limit(n).get()                             -> {docs, empty}
  *   db.runTransaction(async (tx) => ...)            -> tx.get/set/update
+ *   db.batch()                                      -> set/update/delete/commit
+ *
+ * Supported filter operators: `==`, `!=`, `<`, `<=`, `>`, `>=` (Timestamps
+ * compare by instant, numbers numerically; anything else never matches an
+ * ordered filter). Repeated `.where()` calls AND together, and a query with no
+ * `orderBy` uses Firestore's implicit document-id ordering.
  *
  * Dotted update/merge paths (e.g. "resumeReview.monthlyCount") and the
  * FieldValue.delete() sentinel are honoured so nested quota maps mutate exactly
@@ -98,6 +105,81 @@ function applyMerge(target, value) {
   }
 }
 
+// ===============================================
+// QUERY FILTER SUPPORT (v9.2.4)
+// ===============================================
+//
+// v9.2.4 (E-3/D-1) extended this fake so the new hardening suites can drive the
+// production code paths that need more than `where(path, "<", cutoff)`:
+//   - equality filters (`where("isActive", "==", true)`) and `<=`/`>`/`>=`;
+//   - repeated `.where()` filters (AND-ed) plus `.limit()`, `.orderBy()` and
+//     `.startAfter()` (document-id ordering by default, as Firestore does);
+//   - `db.batch()` with set/update/delete/commit.
+// The previous `<`-on-timestamps-only behaviour is preserved for existing
+// suites (quota sweeps) and generalised to numbers, which is a superset.
+
+/**
+ * Equality as Firestore's `==` filter behaves for the value types these tests
+ * use: Timestamps compare by instant, primitives by value, everything else by
+ * its structural JSON form.
+ */
+function valueEquals(left, right) {
+  if (left === right) return true;
+  if (left == null || right == null) return left == null && right == null;
+  if (typeof left.toMillis === "function" && typeof right.toMillis === "function") {
+    return left.toMillis() === right.toMillis();
+  }
+  if (typeof left !== "object" || typeof right !== "object") return false;
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+/**
+ * Ordered comparison of two Timestamp-or-number values. Returns null when the
+ * pair is not orderable (Firestore simply does not match such a filter).
+ */
+function compareValues(left, right) {
+  let a = left;
+  let b = right;
+  if (a != null && typeof a.toMillis === "function") a = a.toMillis();
+  if (b != null && typeof b.toMillis === "function") b = b.toMillis();
+  if (typeof a !== "number" || typeof b !== "number") return null;
+  return a - b;
+}
+
+/** Apply one `{path, op, value}` filter to a stored document. */
+function matchesFilter(data, filter) {
+  const fieldValue = getPath(data, filter.path);
+  if (filter.op === "==") return valueEquals(fieldValue, filter.value);
+  if (filter.op === "!=") return !valueEquals(fieldValue, filter.value);
+  const comparison = compareValues(fieldValue, filter.value);
+  if (comparison === null) return false;
+  if (filter.op === "<") return comparison < 0;
+  if (filter.op === "<=") return comparison <= 0;
+  if (filter.op === ">") return comparison > 0;
+  if (filter.op === ">=") return comparison >= 0;
+  return false;
+}
+
+/** `ref.set(value, opts)` applied directly to the store. */
+function applySet(store, ref, value, opts) {
+  const colName = ref.__collection;
+  if (!store[colName]) store[colName] = {};
+  if (opts && opts.merge) {
+    if (!store[colName][ref.__id]) store[colName][ref.__id] = {};
+    applyMerge(store[colName][ref.__id], value);
+  } else {
+    store[colName][ref.__id] = clone(value);
+  }
+}
+
+/** `ref.update(value)` (dotted-path merge) applied directly to the store. */
+function applyUpdate(store, ref, value) {
+  const colName = ref.__collection;
+  if (!store[colName]) store[colName] = {};
+  if (!store[colName][ref.__id]) store[colName][ref.__id] = {};
+  applyMerge(store[colName][ref.__id], value);
+}
+
 /**
  * Build a fake Firestore instance.
  *
@@ -145,6 +227,62 @@ function makeFakeDb(seed) {
 
   function collection(name) {
     if (!store[name]) store[name] = {};
+
+    // Chainable query: every `.where()` AND-s another filter.
+    function buildQuery(filters) {
+      return {
+        __limit: Infinity,
+        __orderBy: null,
+        __startAfter: null,
+        where: (path, op, value) => buildQuery([...filters, {path, op, value}]),
+        limit(n) {
+          this.__limit = n;
+          return this;
+        },
+        orderBy(path, direction) {
+          this.__orderBy = {path, direction: direction || "asc"};
+          return this;
+        },
+        startAfter(cursor) {
+          // `cursor` is a previous snapshot (implicit document-id ordering).
+          this.__startAfter = cursor && cursor.id != null ? cursor.id : cursor;
+          return this;
+        },
+        async get() {
+          let ids = Object.keys(store[name]).filter((id) =>
+            filters.every((filter) => matchesFilter(store[name][id], filter)));
+
+          if (this.__orderBy) {
+            const {path: orderPath, direction} = this.__orderBy;
+            const sign = direction === "desc" ? -1 : 1;
+            ids.sort((left, right) => {
+              const comparison = compareValues(
+                  getPath(store[name][left], orderPath),
+                  getPath(store[name][right], orderPath));
+              return comparison === null ? 0 : comparison * sign;
+            });
+          } else {
+            ids.sort(); // Firestore's implicit document-id ordering
+          }
+
+          if (this.__startAfter != null) {
+            const cursor = this.__startAfter;
+            const index = ids.indexOf(cursor);
+            ids = index === -1
+              ? ids.filter((id) => id > cursor)
+              : ids.slice(index + 1);
+          }
+
+          const docs = ids.slice(0, this.__limit).map((id) => ({
+            id,
+            ref: doc(name, id),
+            data: () => clone(store[name][id]),
+          }));
+          return {docs, empty: docs.length === 0};
+        },
+      };
+    }
+
     return {
       doc: (id) => doc(name, id),
       async get() {
@@ -155,37 +293,7 @@ function makeFakeDb(seed) {
         }));
         return {docs, empty: docs.length === 0};
       },
-      where(path, op, value) {
-        const query = {
-          __limit: Infinity,
-          limit(n) {
-            this.__limit = n;
-            return this;
-          },
-          async get() {
-            const matched = [];
-            for (const id of Object.keys(store[name])) {
-              const data = store[name][id];
-              const fieldValue = getPath(data, path);
-              if (
-                op === "<" &&
-                fieldValue &&
-                typeof fieldValue.toMillis === "function" &&
-                value &&
-                typeof value.toMillis === "function" &&
-                fieldValue.toMillis() < value.toMillis()
-              ) {
-                matched.push({id, data: () => clone(data)});
-              }
-            }
-            return {
-              docs: matched.slice(0, this.__limit),
-              empty: matched.length === 0,
-            };
-          },
-        };
-        return query;
-      },
+      where: (path, op, value) => buildQuery([{path, op, value}]),
     };
   }
 
@@ -222,6 +330,30 @@ function makeFakeDb(seed) {
         },
       };
       return fn(transaction);
+    },
+    /**
+     * v9.2.4 (E-3): batched writes. Operations are queued and applied on
+     * `commit()`, mirroring Firestore (nothing lands if a commit never runs).
+     */
+    batch() {
+      const operations = [];
+      return {
+        set(ref, value, opts) {
+          operations.push(() => applySet(store, ref, value, opts));
+        },
+        update(ref, value) {
+          operations.push(() => applyUpdate(store, ref, value));
+        },
+        delete(ref) {
+          operations.push(() => {
+            if (store[ref.__collection]) delete store[ref.__collection][ref.__id];
+          });
+        },
+        async commit() {
+          const queued = operations.splice(0, operations.length);
+          for (const operation of queued) operation();
+        },
+      };
     },
     // Test-only handle onto the raw store for assertions.
     __store: store,

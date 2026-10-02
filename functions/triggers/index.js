@@ -17,7 +17,9 @@ const {
   logUserActivity,
   maybeCreateNotification,
   isPortfolioMetadataOnlyChange,
+  isResumeReviewMetadataOnlyChange,
   portfolioContentChanged,
+  sanitizeResumeKeywords,
 } = require("../helpers/shared");
 
 // ===============================================
@@ -40,6 +42,24 @@ exports.onProfileUpdatedRefreshAI = onDocumentWritten(
 
       // v8.9 (Phase 10): skip ONLY pure portfolio metadata flutters.
       if (isPortfolioMetadataOnlyChange(before, after)) return;
+
+      // v9.2.4 (D-1): skip the resume-review counter/stamp write that
+      // `onResumeReviewCreatedRefreshMatches` performs on this same document.
+      //
+      // Before v9.2.4 that write looked like a genuine portfolio content
+      // change (`portfolio.resume.reviewCount` / `latestATSScore` moved), so
+      // this trigger ran a SECOND recommendation refresh concurrently with the
+      // resume-review trigger — with a different fingerprint (no
+      // `options.resumeData`). That doubled the engine + AI-enrichment cost per
+      // resume review, made the stored fingerprint thrash between the two
+      // variants, and awarded 3 extra `profileUpdated` engagement points on top
+      // of the 5 the resume-review trigger already awards.
+      //
+      // A resume review now results in exactly ONE effective refresh: the one
+      // the resume-review trigger performs WITH the review data. The
+      // counters/stamps still land on the document (the dashboard card keeps
+      // working); only the duplicate trigger chain is broken.
+      if (isResumeReviewMetadataOnlyChange(before, after)) return;
 
       const updatedAtChanged = () => {
         if (!before.updatedAt || !after.updatedAt) {
@@ -108,34 +128,75 @@ exports.onResumeReviewCreatedRefreshMatches = onDocumentCreated(
       try {
         const userDoc = await admin.firestore().collection("users").doc(userId).get();
         if (!userDoc.exists) return;
-        const userData = userDoc.data();
+        let userData = userDoc.data();
         const isStudent = userData.role === "student";
 
         const hasPortfolioResume = !!(userData.portfolio && userData.portfolio.resume);
 
+        // v9.2.4 (D-1): normalize the review signals ONCE here, so the value
+        // persisted on the document and the value the engine/fingerprint read
+        // back are byte-identical.
+        const atsScore = Number.isInteger(resumeData.atsScore)
+            ? resumeData.atsScore
+            : null;
+        const missingKeywords = sanitizeResumeKeywords(resumeData.missingKeywords);
+
         if (hasPortfolioResume) {
-          const atsScore = Number.isInteger(resumeData.atsScore)
-              ? resumeData.atsScore
-              : null;
-          const portfolioResumeMerge = {
-            "portfolio.resume.reviewCount": admin.firestore.FieldValue.increment(1),
-            "portfolio.resume.lastReviewAt": admin.firestore.Timestamp.now(),
-            "portfolio.resume.updatedAt": admin.firestore.Timestamp.now(),
+          // v9.2.7 (RESUME-WRITE fix): the payload is the canonical NESTED
+          // map — `{portfolio: {resume: {...}}}` — and NOT dot-notation keys.
+          //
+          // Dot notation is a feature of `update()`; in a `set(…, {merge:true})`
+          // payload a key containing a dot is stored as a LITERAL root-level
+          // field NAME. The previous payload therefore wrote flat fields named
+          // `portfolio.resume.reviewCount`, `portfolio.resume.latestATSScore`,
+          // … which sat NEXT TO the nested `portfolio` map instead of inside
+          // it, so neither the app (which reads the nested map) nor the
+          // recommendation engine/fingerprint ever saw a review counter or an
+          // ATS score. `isResumeReviewMetadataOnlyChange` in helpers/shared.js
+          // reads those same NESTED paths, so this form is also what keeps the
+          // profile trigger's "ignore the counter bump" guard correct.
+          const resumeMerge = {
+            reviewCount: admin.firestore.FieldValue.increment(1),
+            lastReviewAt: admin.firestore.Timestamp.now(),
+            updatedAt: admin.firestore.Timestamp.now(),
+            // v9.2.4 (D-1): persist the review signal on the document itself
+            // (always, even when empty, so a review with no missing keywords
+            // clears any previous list instead of leaving it stale). The
+            // recommendation engine previously received this only through an
+            // `options.resumeData` passthrough — which every other caller
+            // omitted, making the fingerprint thrash between two variants.
+            latestMissingKeywords: missingKeywords,
           };
           if (atsScore !== null) {
-            portfolioResumeMerge["portfolio.resume.latestATSScore"] = atsScore;
+            resumeMerge.latestATSScore = atsScore;
           }
           await admin.firestore().collection("users").doc(userId)
-              .set(portfolioResumeMerge, {merge: true});
+              .set({portfolio: {resume: resumeMerge}}, {merge: true});
+
+          // v9.2.4 (D-1): re-read so the refresh below hashes EXACTLY the
+          // document state that any later caller will hash (the counters and
+          // the review signal we just persisted). Previously the refresh used
+          // the pre-write snapshot, so its fingerprint disagreed with both the
+          // stored one and every subsequent caller's.
+          const refreshedUserDoc = await admin.firestore()
+              .collection("users").doc(userId).get();
+          if (refreshedUserDoc.exists) userData = refreshedUserDoc.data();
         }
 
         if (isStudent) {
-          await refreshRecommendationsForStudent(userId, userData, {resumeData});
+          // v9.2.4 (D-1): NO `{resumeData}` passthrough. The engine reads the
+          // resume signal from the document, so this refresh and every other
+          // caller (client bootstrap, profile trigger) compute the SAME
+          // fingerprint — it converges to one stable value instead of
+          // thrashing. This remains the ONE effective refresh per resume
+          // review, because `onProfileUpdatedRefreshAI` now ignores the
+          // metadata-only write made above (see `isResumeReviewMetadataOnlyChange`).
+          await refreshRecommendationsForStudent(userId, userData);
         }
 
         await logUserActivity(userId, "resumeReviewed", 5, {
           reviewId: event.params.reviewId,
-          atsScore: resumeData.atsScore || 0,
+          atsScore: atsScore || 0,
         });
         await recomputeEngagementSummary(userId, userData);
       } catch (error) {

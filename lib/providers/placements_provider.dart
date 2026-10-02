@@ -13,6 +13,24 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 
+/// v9.2.4 (D-2): thrown when a placement callable did not return within the
+/// client timeout AND the true server state could not be confirmed by the
+/// reconciliation read.
+///
+/// Deliberately distinct from a normal failure: a client deadline expiring is
+/// NOT evidence that the server failed (`logPlacementApplication` may
+/// legitimately take up to 120 s while it copies the resume and mints a signed
+/// URL). The optimistic state is therefore kept and the UI shows a pending
+/// confirmation instead of inviting a duplicate re-apply.
+class PlacementPendingConfirmationException implements Exception {
+  const PlacementPendingConfirmationException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 /// V5.1.1: Enhanced with proper lifecycle management
 /// V6.4: Added notification creation on successful application
 /// V6.5: Added rule-based eligibility checking
@@ -50,6 +68,25 @@ class PlacementsProvider with ChangeNotifier {
   String? _applyingPlacementId; // Track which placement is being applied to
   bool _isOnline = true; // V5.1: Network state
 
+  // v9.2.4 (D-2): client callable timeouts MUST match the server declarations
+  // in `functions/placements.js`, otherwise a SLOW-BUT-SUCCESSFUL call is
+  // reported to the student as a failure and the optimistic "applied" state is
+  // rolled back.
+  //   * `logPlacementApplication` -> `timeoutSeconds: 120` (it performs a
+  //     Storage copy + a signed-URL mint before its Firestore transaction).
+  //   * `updateApplicationStatus`  -> `timeoutSeconds: 60`.
+  static const Duration kApplyCallableTimeout = Duration(seconds: 120);
+  static const Duration kStatusCallableTimeout = Duration(seconds: 60);
+
+  /// v9.2.4 (D-2): placements whose apply call did not return before the
+  /// client timeout and whose true server state has not been confirmed yet.
+  ///
+  /// These are treated as APPLIED — a client timeout never proves the server
+  /// failed, so the optimistic state is kept and reconciled with a single
+  /// read (see `_reconcileTimedOutApply`) instead of being rolled back and
+  /// re-submitted.
+  final Set<String> _pendingConfirmationPlacementIds = <String>{};
+
   // V6.5: Eligibility cache
   Map<String, PlacementEligibility> _eligibilityCache = {};
 
@@ -75,6 +112,15 @@ class PlacementsProvider with ChangeNotifier {
       _appliedPlacementIds.contains(placementId);
   bool isApplying(String placementId) => _applyingPlacementId == placementId;
   DateTime? getAppliedDate(String placementId) => _appliedDates[placementId];
+
+  /// v9.2.4 (D-2): the apply call timed out and the server state has not been
+  /// confirmed yet. The UI keeps showing the placement as applied and must not
+  /// invite a re-apply (the server-side apply is idempotent, but a visible
+  /// "pending" state avoids duplicate-attempt confusion).
+  bool isPendingConfirmation(String placementId) =>
+      _pendingConfirmationPlacementIds.contains(placementId);
+  Set<String> get pendingConfirmationPlacementIds =>
+      Set.unmodifiable(_pendingConfirmationPlacementIds);
 
   // V6.5: Eligibility getters
   PlacementEligibility? getEligibility(String placementId) =>
@@ -129,6 +175,9 @@ class PlacementsProvider with ChangeNotifier {
     _applyingPlacementId = null;
     _userProfile = null;
     _eligibilityCache = {};
+    // v9.2.4 (D-2): clear any unresolved pending-confirmation state so a later
+    // login never inherits the previous session's unresolved apply.
+    _pendingConfirmationPlacementIds.clear();
     // v9.1: clear applicant counts on logout (teacher session leak guard)
     _applicantCounts = {};
     _applicantCountsLoaded = false;
@@ -433,22 +482,30 @@ class PlacementsProvider with ChangeNotifier {
         'logPlacementApplication',
       );
 
-      final result = await callable
-          .call({
-            'placementId': placementId,
-            'resumeUrl': resume,
-            // v8.4.1 (T5): Resume snapshot at apply time.
-            'resumeVersion': resumeVersion,
-            'resumeStoragePath': resumeStoragePath,
-            'atsScoreAtApplication': atsScoreAtApplication,
-            'company': company ?? 'Unknown',
-          })
-          .timeout(
-            const Duration(seconds: 30),
-            onTimeout: () {
-              throw Exception('Request timed out. Please try again.');
-            },
-          );
+      final HttpsCallableResult<dynamic> result;
+      try {
+        result = await callable
+            .call({
+              'placementId': placementId,
+              'resumeUrl': resume,
+              // v8.4.1 (T5): Resume snapshot at apply time.
+              'resumeVersion': resumeVersion,
+              'resumeStoragePath': resumeStoragePath,
+              'atsScoreAtApplication': atsScoreAtApplication,
+              'company': company ?? 'Unknown',
+            })
+            // v9.2.4 (D-2): match the server declaration (120 s) so a slow
+            // Storage copy + signed-URL mint is not reported as a failure.
+            .timeout(kApplyCallableTimeout);
+      } on TimeoutException {
+        // The client deadline elapsed. That is NOT proof the server failed —
+        // reconcile with a single read instead of rolling back or retrying.
+        return await _reconcileTimedOutApply(
+          placementId: placementId,
+          company: company,
+          role: role,
+        );
+      }
 
       // Validate response
       if (result.data is! Map<String, dynamic>) {
@@ -486,9 +543,20 @@ class PlacementsProvider with ChangeNotifier {
 
       return true;
     } catch (e) {
-      // Rollback optimistic update on error
+      // v9.2.4 (D-2): an UNRECONCILED timeout is not a failure — the apply may
+      // have succeeded server-side, so the optimistic state and the
+      // pending-confirmation flag are deliberately kept, and no failure
+      // analytics event is emitted. Re-thrown untouched for the caller.
+      if (e is PlacementPendingConfirmationException) {
+        _applyingPlacementId = null;
+        notifyListeners();
+        rethrow;
+      }
+
+      // Rollback optimistic update on a genuine error
       _appliedPlacementIds.remove(placementId);
       _appliedDates.remove(placementId);
+      _pendingConfirmationPlacementIds.remove(placementId);
       _applyingPlacementId = null;
       notifyListeners();
 
@@ -504,6 +572,87 @@ class PlacementsProvider with ChangeNotifier {
       // V5.1: Throw user-friendly error
       throw Exception(ErrorMessages.getUserFriendlyMessage(e));
     }
+  }
+
+  /// v9.2.4 (D-2): resolve a TIMED-OUT apply with a single reconciliation read.
+  ///
+  /// A blind retry or a rollback would show the student a false failure for an
+  /// application the backend already recorded. Instead:
+  ///
+  /// * server HAS the application -> confirmed: keep the applied state, clear
+  ///   the pending flag, fire the same notification/analytics a fast success
+  ///   would, and return `true` (no duplicate is created);
+  /// * server does NOT have it -> authoritative "not applied": roll back the
+  ///   optimistic state, log the failure and rethrow a real error;
+  /// * the read itself failed -> unknown: keep BOTH the applied state and the
+  ///   pending flag and tell the student it will sync — never invite a retry.
+  Future<bool> _reconcileTimedOutApply({
+    required String placementId,
+    String? company,
+    String? role,
+  }) async {
+    _pendingConfirmationPlacementIds.add(placementId);
+    _applyingPlacementId = null;
+    notifyListeners();
+
+    bool? confirmed;
+    if (userId != null) {
+      try {
+        final application = await _service.getUserApplication(
+          userId: userId!,
+          placementId: placementId,
+        );
+        confirmed = application != null;
+      } catch (e) {
+        debugPrint('PlacementsProvider apply reconciliation error: $e');
+        confirmed = null; // could not confirm — keep the pending state
+      }
+    }
+
+    if (confirmed == true) {
+      // The server had already recorded the application; the timeout was
+      // purely a client deadline. Same end state as a fast success.
+      _pendingConfirmationPlacementIds.remove(placementId);
+      notifyListeners();
+
+      if (userId != null) {
+        await _notificationsService.notifyPlacementApplied(
+          userId: userId!,
+          placementId: placementId,
+          company: company ?? 'Unknown',
+          role: role ?? 'Position',
+        );
+      }
+      await AnalyticsHelper.logPlacementApplySuccess(
+        placementId: placementId,
+        company: company ?? 'Unknown',
+      );
+      return true;
+    }
+
+    if (confirmed == false) {
+      // Authoritative "not applied" — safe to roll back.
+      _appliedPlacementIds.remove(placementId);
+      _appliedDates.remove(placementId);
+      _pendingConfirmationPlacementIds.remove(placementId);
+      notifyListeners();
+
+      await AnalyticsHelper.logPlacementApplyFailure(
+        placementId: placementId,
+        company: company ?? 'Unknown',
+        errorReason: 'timeout_unconfirmed',
+      );
+      throw Exception(
+        'Request timed out and your application was not recorded. '
+        'Please try again.',
+      );
+    }
+
+    // Unconfirmed: keep the applied + pending state and surface it.
+    throw const PlacementPendingConfirmationException(
+      'Your application is still being confirmed. It is shown as applied — '
+      'please do not apply again; it will sync automatically.',
+    );
   }
 
   /// v9.1: Unique applicant count per placement (teacher/alumni cards).
@@ -528,15 +677,19 @@ class PlacementsProvider with ChangeNotifier {
 
   /// v9.1: All applicants for a placement (teacher/alumni drill-down).
   Future<List<Application>> getApplicationsForPlacement(
-      String placementId) async {
+    String placementId,
+  ) async {
     return _service.getApplicationsForPlacement(placementId);
   }
 
   /// v9.1: Advance an application through the pipeline
   /// (`shortlisted` → `interviewed` → `placed`, or `rejected`).
   ///
-  /// Wraps the `updateApplicationStatus` onCall with a 30s timeout and
-  /// friendly error translation. Callers should refresh applicant counts or
+  /// v9.2.4 (D-2): the client timeout is raised to 60 s to match the server
+  /// declaration (`functions/placements.js` → `updateApplicationStatus` is
+  /// `timeoutSeconds: 60`). On a timeout the true server state is resolved with
+  /// a single read of the canonical application document instead of being
+  /// reported as a failure. Callers should refresh applicant counts or
   /// re-fetch the list after a success.
   Future<bool> updateApplicationStatus({
     required String placementId,
@@ -548,18 +701,25 @@ class PlacementsProvider with ChangeNotifier {
         'updateApplicationStatus',
       );
 
-      final result = await callable
-          .call({
-            'placementId': placementId,
-            'studentId': studentId,
-            'status': status,
-          })
-          .timeout(
-            const Duration(seconds: 30),
-            onTimeout: () {
-              throw Exception('Request timed out. Please try again.');
-            },
-          );
+      final HttpsCallableResult<dynamic> result;
+      try {
+        result = await callable
+            .call({
+              'placementId': placementId,
+              'studentId': studentId,
+              'status': status,
+            })
+            // v9.2.4 (D-2): match the server declaration (60 s).
+            .timeout(kStatusCallableTimeout);
+      } on TimeoutException {
+        // The client deadline elapsed. Not proof the server failed — read the
+        // canonical document once and check whether the update landed.
+        return await _reconcileTimedOutStatusUpdate(
+          placementId: placementId,
+          studentId: studentId,
+          expectedStatus: status,
+        );
+      }
 
       if (result.data is! Map<String, dynamic>) {
         throw Exception('Unexpected response from server');
@@ -574,9 +734,41 @@ class PlacementsProvider with ChangeNotifier {
 
       return true;
     } catch (e) {
+      // v9.2.4 (D-2): an unconfirmed timeout keeps the authoritative server
+      // reconciliation message instead of being flattened into a generic one.
+      if (e is PlacementPendingConfirmationException) rethrow;
       debugPrint('PlacementsProvider updateApplicationStatus error: $e');
       throw Exception(ErrorMessages.getUserFriendlyMessage(e));
     }
+  }
+
+  /// v9.2.4 (D-2): resolve a timed-out status update with a single read.
+  ///
+  /// Returns `true` when the canonical application already carries the
+  /// requested status (the write landed; the timeout was a client deadline),
+  /// and throws a pending-confirmation exception when it could not be
+  /// verified — never reporting a false failure for a write that landed.
+  Future<bool> _reconcileTimedOutStatusUpdate({
+    required String placementId,
+    required String studentId,
+    required String expectedStatus,
+  }) async {
+    try {
+      final application = await _service.getUserApplication(
+        userId: studentId,
+        placementId: placementId,
+      );
+      if (application != null && application['status'] == expectedStatus) {
+        return true;
+      }
+    } catch (e) {
+      debugPrint('PlacementsProvider status reconciliation error: $e');
+    }
+
+    throw const PlacementPendingConfirmationException(
+      'The status update could not be confirmed yet. Pull to refresh to see '
+      'the latest state.',
+    );
   }
 
   /// Get placement by ID

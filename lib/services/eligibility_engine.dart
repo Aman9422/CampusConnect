@@ -69,26 +69,37 @@ class EligibilityEngine {
       }
     }
 
-    // Rule 5: Check program/branch requirement
+    // Rule 5: Program / branch requirement.
+    //
+    // v9.2.4 (D-3) — ARCH-3 parity. The server's `checkMandatoryEligibility`
+    // (functions/recommendations/engine.js) treats `programs` and `branches` as
+    // ALTERNATIVES, not as two independent requirements:
+    //
+    //   if (programs.length > 0 && !programs.includes(u.program))      -> fail
+    //   else if (branches.length > 0 && !branches.includes(u.program)) -> fail
+    //
+    // Both lists are compared against the student's PROGRAM, and `branches` is
+    // consulted ONLY when `programs` is empty. A placement that lists both must
+    // therefore be judged on `programs` alone. The client MUST mirror this
+    // exactly — otherwise the eligibility badge contradicts the recommendation
+    // the engine emits for the very same placement and student.
+    final userProgram = profile.academic.program.toUpperCase();
+
     if (requirements.programs.isNotEmpty) {
-      final userProgram = profile.academic.program.toUpperCase();
       final matchesProgram = requirements.programs.any(
         (p) => p.toUpperCase() == userProgram,
       );
       if (matchesProgram) {
         passedChecks.add('Program $userProgram is eligible');
       } else {
+        // `branches` is deliberately NOT evaluated here (server `else if`).
         failedChecks.add(
           'Program $userProgram not eligible (requires ${requirements.programs.join(", ")})',
         );
       }
-    }
-
-    // Rule 6: Check branch requirement (if different from program)
-    if (requirements.branches.isNotEmpty) {
-      final userBranch = profile.academic.program.toUpperCase();
+    } else if (requirements.branches.isNotEmpty) {
       final matchesBranch = requirements.branches.any(
-        (b) => b.toUpperCase() == userBranch,
+        (b) => b.toUpperCase() == userProgram,
       );
       if (matchesBranch) {
         passedChecks.add('Branch eligible');

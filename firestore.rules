@@ -70,6 +70,68 @@ service cloud.firestore {
           || resource.data.role == request.resource.data.role;
     }
 
+    // v9.2.4 (D-11): the `users/{userId}` owner-write rule previously
+    // protected ONLY `role` (via `canWriteRole`). Every other field on the
+    // user document was therefore client-writable, including two flags that
+    // carry security meaning:
+    //
+    //   * `profileCompleted` is trusted as a QUERY FILTER — the alumni
+    //     directory read rule above (`resource.data.profileCompleted == true`)
+    //     and two Cloud Function queries (`onOpportunityPostedNotifyStudents`
+    //     and `recomputeEngagementScores` both select on it) rely on it, and
+    //     `onProfileUpdatedRefreshAI` returns early unless it is true. A
+    //     client could self-assert it without completing a profile and
+    //     thereby enter the alumni directory / broadcast / recommendation
+    //     paths.
+    //   * `isVerified` is not referenced by any rule today (the exposure is
+    //     display-only), but it must never become a future privilege
+    //     primitive.
+    //
+    // Both legitimate paths are preserved:
+    //   * `ProfileService.markProfileCompleted()` — the ONLY writer of
+    //     `profileCompleted: true` — runs from
+    //     `ProfileSetupView._completeSetup()` AFTER the required sections
+    //     (`personal.fullName`, `academic.college`, `academic.program`,
+    //     `academic.year`) have been saved, so requiring those sections in the
+    //     same write is satisfied by construction.
+    //   * `ProfileService.updateProfile()` / `backfillEmail()` re-write the
+    //     CURRENT value of the flag on every ordinary profile edit; that is an
+    //     UNCHANGED write and is always allowed, so legacy documents with a
+    //     flat (pre-v7.2) structure keep working.
+    //   * `isVerified` has no client writer anywhere in the codebase.
+    function canWriteProfileFlags() {
+      return profileCompletedWriteOk() && isVerifiedWriteOk();
+    }
+
+    // `profileCompleted` may only be written when it does not CHANGE, or on a
+    // genuine transition to `true` that also carries the required profile
+    // sections. A create (`resource == null`) that asserts `true` must supply
+    // them too, so a fresh document cannot be born "completed".
+    function profileCompletedWriteOk() {
+      return request.resource.data.get('profileCompleted', false) ==
+               (resource == null
+                 ? false
+                 : resource.data.get('profileCompleted', false)) ||
+             (request.resource.data.get('profileCompleted', false) == true &&
+              request.resource.data.personal.fullName is string &&
+              request.resource.data.personal.fullName.size() > 0 &&
+              request.resource.data.academic.college is string &&
+              request.resource.data.academic.college.size() > 0 &&
+              request.resource.data.academic.program is string &&
+              request.resource.data.academic.program.size() > 0 &&
+              request.resource.data.academic.year is int &&
+              request.resource.data.academic.year > 0);
+    }
+
+    // `isVerified` is server-owned: a client write may only ever keep the
+    // existing value (absent stays absent).
+    function isVerifiedWriteOk() {
+      return request.resource.data.get('isVerified', false) ==
+             (resource == null
+               ? false
+               : resource.data.get('isVerified', false));
+    }
+
     // v9.1 audit (SEC-1): schema validation for placement writes. Applies to
     // BOTH create and update — `request.resource.data` is the post-write
     // (merged-for-update) document, so the same full-schema check works for
@@ -94,6 +156,47 @@ service cloud.firestore {
              request.resource.data.salary.size() > 0;
     }
 
+    // v9.2.4 (D-10): schema validation for opportunity writes, at least as
+    // strong as `isValidPlacementData()` above. Before this, the ONLY
+    // constraint on an `opportunities` write was `alumniId ==
+    // request.auth.uid`, so any authenticated user (see D-9) could publish a
+    // malformed document — and `onOpportunityPostedNotifyStudents` reads
+    // `title`/`company` with `|| "Role"` / `|| "Company"` fallbacks, so a
+    // malformed doc still broadcast "Role at Company" to every student.
+    //
+    // The field list is taken from the REAL writer, `Opportunity.toFirestore()`
+    // (`lib/models/opportunity.dart`), not from the audit's shorthand:
+    //   title, company, description, location, jobType, postedAt, isActive,
+    //   alumniId  (+ optional salaryRange / applicationDeadline /
+    //   applicationUrl / contactEmail / alumniJobRole, plus requirements,
+    //   skills and alumniName).
+    // The audit referred to "type"; the actual Firestore field is `jobType`,
+    // and it is `jobType` that is validated here.
+    //
+    // `applicationDeadline` is OPTIONAL in the model (nullable, omitted from
+    // the payload when unset), so it is validated conditionally rather than
+    // required — a legitimate deadline-less posting keeps working.
+    // `request.resource.data` is the post-write (merged-for-update) document,
+    // so this single full-schema check covers BOTH create and update and
+    // partial updates (e.g. the `isActive` toggle) stay valid.
+    function isValidOpportunityData() {
+      return request.resource.data.alumniId == request.auth.uid &&
+             request.resource.data.title is string &&
+             request.resource.data.title.size() > 0 &&
+             request.resource.data.company is string &&
+             request.resource.data.company.size() > 0 &&
+             request.resource.data.description is string &&
+             request.resource.data.description.size() > 0 &&
+             request.resource.data.location is string &&
+             request.resource.data.location.size() > 0 &&
+             request.resource.data.jobType is string &&
+             request.resource.data.jobType.size() > 0 &&
+             request.resource.data.postedAt is timestamp &&
+             request.resource.data.isActive is bool &&
+             (!('applicationDeadline' in request.resource.data) ||
+              request.resource.data.applicationDeadline is timestamp);
+    }
+
     // ===============================================
     // USERS COLLECTION (with subcollections)
     // ===============================================
@@ -106,7 +209,15 @@ service cloud.firestore {
       // non-existent/partial doc can never deny the owner access to their own
       // profile) and so the write rule is unambiguously the only owner-write
       // grant on this path.
-      allow write: if isOwner(userId) && canWriteRole(userId);
+      //
+      // v9.2.4 (D-11): the owner write additionally passes `canWriteProfileFlags()`
+      // so `profileCompleted` can only be asserted by a genuine completion
+      // transition and `isVerified` can never be changed by a client. Neither
+      // flag has a legitimate client write outside the profile-setup flow, so
+      // no existing feature is weakened.
+      allow write: if isOwner(userId) &&
+        canWriteRole(userId) &&
+        canWriteProfileFlags();
       // v8.1: Teachers can read any user profile for analytics
       allow read: if isTeacher();
       // v8.4: Alumni read-only access to student portfolios
@@ -433,14 +544,39 @@ service cloud.firestore {
         resource.data.studentId == request.auth.uid;
     }
 
-    // Job opportunities - alumni create, all authenticated users can read
+    // Job opportunities — alumni create, all authenticated users can read.
+    //
+    // v9.2.4 (D-9): the create/update/delete guards were `isAuthenticated()`
+    // only, despite the comment above saying "alumni create". Any signed-in
+    // account (a student, or one whose `role` is unset) could therefore create
+    // an opportunity by setting `alumniId` to its own uid — and
+    // `onOpportunityPostedNotifyStudents` is an `onDocumentCreated` trigger
+    // that notifies EVERY `profileCompleted` student, so a single student
+    // write was an unbounded broadcast/spam primitive. Injected docs also
+    // entered every eligible student's recommendation candidate set and
+    // inflated the alumni's own "opportunities posted" stat.
+    //
+    // `userRole() == 'alumni'` is now required for every write, matching the
+    // comment, the placement model (`canManagePlacements`) and the legitimate
+    // writers — `OpportunityService` is only reachable from the alumni
+    // dashboard, so no working feature depends on a non-alumni write. The
+    // ownership bindings on update/delete are preserved unchanged.
+    //
+    // v9.2.4 (D-10): every write additionally passes `isValidOpportunityData()`
+    // (defined with the other schema validators above), so malformed or
+    // wrong-typed documents are rejected BEFORE they can trigger a broadcast
+    // or enter recommendation generation.
     match /opportunities/{opportunityId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() &&
-        request.resource.data.alumniId == request.auth.uid;
+        userRole() == 'alumni' &&
+        isValidOpportunityData();
       allow update: if isAuthenticated() &&
-        resource.data.alumniId == request.auth.uid;
+        userRole() == 'alumni' &&
+        resource.data.alumniId == request.auth.uid &&
+        isValidOpportunityData();
       allow delete: if isAuthenticated() &&
+        userRole() == 'alumni' &&
         resource.data.alumniId == request.auth.uid;
     }
 

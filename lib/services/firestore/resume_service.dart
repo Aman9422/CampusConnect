@@ -132,17 +132,46 @@ class ResumeService {
 
   /// Resolves the downloadable URL for the user's resume.
   ///
-  /// Prefers the cached Firestore download URL; falls back to resolving the
-  /// Storage reference when the URL is absent (e.g. legacy documents that
-  /// only stored `storagePath`). Returns null when no resume exists.
+  /// v9.2.7 (403 "Permission denied" fix): prefers a URL resolved LIVE from
+  /// `storagePath`, and only falls back to the URL cached in Firestore.
+  ///
+  /// Why the order matters: a Firebase Storage download URL carries a
+  /// `token`, and that token is ROTATED whenever the object at that path is
+  /// overwritten. Every resume upload writes the SAME path
+  /// (`resumes/{uid}/latest.pdf` — see [StorageService.resumePath]), so a
+  /// `downloadUrl` cached from an earlier upload is a dead token. Opening it
+  /// in a browser returns `403 Permission denied` even though the current
+  /// file is present and readable — which is exactly what a replace-upload
+  /// produced on-device.
+  ///
+  /// The previous order (cached URL first) was only safe while the cached URL
+  /// was guaranteed to be refreshed on every upload; that refresh itself was
+  /// broken by the dotted-key write bug in `PortfolioService.savePortfolio`,
+  /// so both halves are fixed together.
+  ///
+  /// Falls back to the cached URL when the live resolve fails for a transient
+  /// reason (offline), so a resume remains openable from its last good link.
+  /// Returns null when the user has no resume at all.
   Future<String?> getResumeUrl(String uid) async {
     final metadata = await readMetadata(uid);
     if (metadata == null) return null;
+
+    final storagePath = metadata.storagePath;
+    if (storagePath != null && storagePath.isNotEmpty) {
+      try {
+        final fresh = await _storageService.downloadUrlFromPath(storagePath);
+        if (fresh.isNotEmpty) return fresh;
+      } catch (e) {
+        debugPrint(
+          'ResumeService.getResumeUrl: live resolve failed for '
+          '$storagePath: $e',
+        );
+        // Transient failure (offline) — the cached URL may still open.
+      }
+    }
+
     if (metadata.downloadUrl != null && metadata.downloadUrl!.isNotEmpty) {
       return metadata.downloadUrl;
-    }
-    if (metadata.storagePath != null && metadata.storagePath!.isNotEmpty) {
-      return _storageService.downloadUrlFromPath(metadata.storagePath!);
     }
     return null;
   }

@@ -175,10 +175,21 @@ function extractUserSignals(userData, portfolio, options = {}) {
     ? portfolio.resume
     : {};
 
+  // v9.2.4 (D-1): the resume-review signals are now ALSO persisted on the
+  // portfolio resume map (`latestMissingKeywords`, written by
+  // `onResumeReviewCreatedRefreshMatches`). Reading them from the document
+  // when no `options.resumeData` passthrough is present makes every caller —
+  // the resume-review trigger, the profile trigger and the client-callable
+  // refresh — derive the SAME signal set for the same student state. That is
+  // what lets the recommendation fingerprint converge to one stable value
+  // instead of thrashing between the "with review data" and "without review
+  // data" variants.
   const resumeMissing =
     options.resumeData && Array.isArray(options.resumeData.missingKeywords)
       ? options.resumeData.missingKeywords
-      : [];
+      : (Array.isArray(resume.latestMissingKeywords)
+        ? resume.latestMissingKeywords
+        : []);
 
   const skills = new Set([
     ...normalizeTokens(userData.skills || []),

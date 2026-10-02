@@ -24,6 +24,16 @@ const admin = require("firebase-admin");
 // ── Admin SDK init (must happen before any module that uses `admin`) ──
 admin.initializeApp();
 
+// ── Callable error class (v9.2.5) ───────────────────────────────────────
+// MUST run BEFORE any feature module is required. firebase-admin exposes no
+// `functions` provider, so the `new admin.functions.https.HttpsError(...)`
+// convention used throughout this tree threw a TypeError at every failure
+// site — and `onCall` reports any non-HttpsError to the client as an opaque
+// `internal` / `INTERNAL`. This attaches the real class so a resume-review
+// quota rejection, a missing resume PDF and a bad argument each reach the
+// client with their own code, message and `details`.
+require("./helpers/https_error").installHttpsError();
+
 // ── AI Career Coach (v9.0) ──────────────────────────────────────────────
 const careerCoach = require("./careerCoach");
 

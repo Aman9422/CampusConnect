@@ -598,9 +598,48 @@ class _ApplyButton extends StatelessWidget {
         final appliedDate = provider.getAppliedDate(placementId);
         final isOffline = !provider.isOnline;
         final anyApplyInProgress = provider.isAnyApplyInProgress;
+        // v9.2.4 (D-2): the apply call timed out and the true server state is
+        // still being confirmed. The placement stays "Applied" (never rolled
+        // back on a timeout) but the chip says so explicitly.
+        final isPending = provider.isPendingConfirmation(placementId);
 
         // Show "Applied" chip with date
         if (hasApplied && !isApplying) {
+          if (isPending) {
+            return Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppTheme.space12,
+                vertical: AppTheme.space8,
+              ),
+              decoration: BoxDecoration(
+                color: AppTheme.warningBg,
+                borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+                border: Border.all(
+                  color: AppTheme.warning.withValues(alpha: 0.4),
+                  width: 1,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.sync_rounded,
+                    size: 16,
+                    color: AppTheme.warning,
+                  ),
+                  const SizedBox(width: AppTheme.space4),
+                  Text(
+                    'Confirming…',
+                    style: AppTheme.label.copyWith(
+                      color: AppTheme.warning,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
           return Container(
             padding: const EdgeInsets.symmetric(
               horizontal: AppTheme.space12,
@@ -1010,6 +1049,21 @@ class _ApplyDialogWidgetState extends State<_ApplyDialogWidget> {
           ),
         );
       }
+    } on PlacementPendingConfirmationException catch (e) {
+      // v9.2.4 (D-2): the client deadline elapsed and the server state could
+      // not be confirmed in one read. This is NOT a failure — the application
+      // may already be recorded, and the provider keeps it applied — so the
+      // dialog closes and an informational message is shown instead of an
+      // error that would invite a duplicate submission.
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          backgroundColor: AppTheme.warning,
+          duration: const Duration(seconds: 5),
+        ),
+      );
     } catch (e) {
       // V5.1: Use error message utility for user-friendly errors
       if (mounted) {

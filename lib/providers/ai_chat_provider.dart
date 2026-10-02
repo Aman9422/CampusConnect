@@ -22,6 +22,14 @@ class AIChatProvider extends ChangeNotifier {
   AIInteractionIntent _lastIntent = AIInteractionIntent.general;
   final List<ChatMessage> _messages = [];
 
+  /// v9.2.4 (D-7): how many stored *turns* to load from the server schema.
+  ///
+  /// `askAI` writes TWO documents per exchange (one `role: 'user'`, one
+  /// `role: 'assistant'`), so 20 turns ≈ 10 exchanges — the same history depth
+  /// the previous 8-exchange client-side read provided, now read from the
+  /// server's single writer instead of the removed client mirror.
+  static const int _historyTurnCount = 20;
+
   List<ChatMessage> get messages => List.unmodifiable(_messages);
   bool get isInitialized => _isInitialized;
   bool get isSending => _isSending;
@@ -45,6 +53,18 @@ class AIChatProvider extends ChangeNotifier {
     await _loadRecentInteractions();
   }
 
+  /// v9.2.4 (D-7): loads history from the SERVER schema only.
+  ///
+  /// `askAI` stores ONE document per chat turn (`role` = `user` | `assistant`)
+  /// with a single `timestamp` field. The newest [_historyTurnCount] *turns*
+  /// are fetched ordered by `timestamp` (descending) and then reversed into
+  /// chronological order so the transcript reads top-to-bottom.
+  ///
+  /// The previous implementation ordered by `createdAt` — a field that only
+  /// the removed client-side writer emitted — so it could not see the server's
+  /// own documents at all. Reading `timestamp` here matches the writer AND the
+  /// retention sweep (`functions/ai/chatDelete.js`), which filters on
+  /// `timestamp`.
   Future<void> _loadRecentInteractions() async {
     if (_userId == null || _isDisposed) return;
     try {
@@ -52,29 +72,21 @@ class AIChatProvider extends ChangeNotifier {
           .collection('users')
           .doc(_userId)
           .collection('ai_interactions')
-          .orderBy('createdAt', descending: true)
-          .limit(8)
+          .orderBy('timestamp', descending: true)
+          .limit(_historyTurnCount)
           .get();
 
       if (_isDisposed) return;
       _messages.clear();
-      final docs = snapshot.docs.reversed;
-      for (final doc in docs) {
+      for (final doc in snapshot.docs.reversed) {
         final interaction = AIInteraction.fromFirestore(doc);
+        if (interaction.message.isEmpty) continue;
         _messages.add(
           ChatMessage(
-            id: 'user_${interaction.id}',
-            content: interaction.prompt,
-            isUserMessage: true,
-            timestamp: interaction.createdAt,
-          ),
-        );
-        _messages.add(
-          ChatMessage(
-            id: 'ai_${interaction.id}',
-            content: interaction.response,
-            isUserMessage: false,
-            timestamp: interaction.createdAt,
+            id: interaction.id,
+            content: interaction.message,
+            isUserMessage: interaction.isUserTurn,
+            timestamp: interaction.timestamp,
           ),
         );
       }
@@ -104,7 +116,11 @@ class AIChatProvider extends ChangeNotifier {
 
       if (_isDisposed) return null;
       _messages.add(ChatMessage.ai(response.message));
-      await _saveInteraction(trimmed, response.message, _lastIntent);
+      // v9.2.4 (D-7): no client-side persistence. `askAI` has already written
+      // the user turn and this assistant turn to `users/{uid}/ai_interactions`
+      // (schema: role/message/timestamp), so writing a third document here
+      // would duplicate every exchange and re-introduce the second schema
+      // (`createdAt`) the retention sweep cannot see.
       return response;
     } catch (e) {
       if (_isDisposed) return null;
@@ -137,35 +153,14 @@ class AIChatProvider extends ChangeNotifier {
 
     _messages.add(ChatMessage.user(userText));
     _messages.add(ChatMessage.ai(aiText));
+    _lastIntent = intent;
     notifyListeners();
-    await _saveInteraction(userText, aiText, intent);
-  }
-
-  Future<void> _saveInteraction(
-    String prompt,
-    String response,
-    AIInteractionIntent intent,
-  ) async {
-    if (_userId == null) return;
-    try {
-      final interaction = AIInteraction(
-        id: '',
-        userId: _userId!,
-        prompt: prompt,
-        response: response,
-        intent: intent,
-        createdAt: DateTime.now(),
-        metadata: {'source': 'ai_chat_provider'},
-      );
-
-      await _firestore
-          .collection('users')
-          .doc(_userId)
-          .collection('ai_interactions')
-          .add(interaction.toFirestore());
-    } catch (e) {
-      debugPrint('AIChatProvider._saveInteraction error: $e');
-    }
+    // v9.2.4 (D-7): deliberately NOT persisted. These are locally-generated
+    // exchanges (client-side eligibility answers, and the local error
+    // fallback) that never reach `askAI`, so there is no server document to
+    // mirror. Keeping them visible in-session only is the cost of having a
+    // single writer; writing them here would re-create a second schema in
+    // `ai_interactions`. See docs/v9_2_4_hardening_report.md.
   }
 
   /// v8.8 (P5): Delete the user's entire AI chat history.

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:campusconnect/models/resume_review.dart';
+import 'package:campusconnect/services/ai/resume_review_freshness.dart';
 import 'package:campusconnect/services/ai/resume_review_service.dart';
 import 'package:campusconnect/services/firestore/resume_history_service.dart';
 import 'package:cloud_functions/cloud_functions.dart';
@@ -40,6 +41,15 @@ class ResumeReviewProvider with ChangeNotifier {
   /// Current review result (null if not reviewed yet)
   ResumeReview? _currentReview;
   ResumeReview? get currentReview => _currentReview;
+
+  /// v9.3: the resume revision this review was computed from.
+  ///
+  /// `resumes/{uid}/latest.pdf` is overwritten on every replace, so the storage
+  /// path alone cannot tell two resumes apart — the review is bound to
+  /// path + `ResumeMetadata.version` instead (see [ResumeReviewFreshness]).
+  /// Null when the review came from pasted text, which has no document binding.
+  String? _reviewedResumeKey;
+  String? get reviewedResumeKey => _reviewedResumeKey;
 
   /// Usage tracking
   ResumeReviewUsage _usage = const ResumeReviewUsage(
@@ -215,6 +225,7 @@ class ResumeReviewProvider with ChangeNotifier {
   void reset() {
     userId = null;
     _currentReview = null;
+    _reviewedResumeKey = null;
     _usage = const ResumeReviewUsage(monthlyCount: 0, monthlyLimit: 5);
     _isLoading = false;
     _error = null;
@@ -306,12 +317,16 @@ class ResumeReviewProvider with ChangeNotifier {
   /// (`resumes/{uid}/latest.pdf`). When provided the server downloads and
   /// extracts the text from the PDF, so [resumeText] may be empty.
   /// [targetRole] - Optional target job role
+  /// [resumeKey] - v9.3: identity of the document being reviewed
+  /// ([ResumeReviewFreshness.uploadedResumeKey]). Lets the UI distinguish a
+  /// review of the CURRENT resume from one computed before it was replaced.
   ///
   /// Returns true on success, false on failure
   Future<bool> submitReview({
     String? resumeText,
     String? storagePath,
     String? targetRole,
+    String? resumeKey,
   }) async {
     // v8.5: explicit validation for each input path (service enforces the
     // same rules server-side too).
@@ -375,6 +390,7 @@ class ResumeReviewProvider with ChangeNotifier {
 
       // Success! Update state
       _currentReview = response.review;
+      _reviewedResumeKey = resumeKey;
       _usage = response.usage;
       _error = null;
 
@@ -457,11 +473,38 @@ class ResumeReviewProvider with ChangeNotifier {
     }
   }
 
-  /// Clear current review (to start fresh)
+  /// Clear current review (to start fresh).
+  ///
+  /// v9.3: also drops the document binding so the next review starts clean
+  /// rather than inheriting the previous resume's identity.
   void clearReview() {
     _currentReview = null;
+    _reviewedResumeKey = null;
     _error = null;
     notifyListeners();
+  }
+
+  /// v9.3: true when the held review describes a resume the student no longer
+  /// has (replaced or removed), so the UI must not present it as current.
+  ///
+  /// @param currentResumeKey - [ResumeReviewFreshness.uploadedResumeKey] for the
+  ///   resume in the portfolio right now, or null when there is none.
+  bool isReviewStaleFor(String? currentResumeKey) {
+    return ResumeReviewFreshness.isStale(
+      reviewedResumeKey: _reviewedResumeKey,
+      currentResumeKey: currentResumeKey,
+    );
+  }
+
+  /// v9.3: drop the held review when it no longer matches [currentResumeKey].
+  ///
+  /// Idempotent, so it is safe to call from a post-frame callback — which is how
+  /// the review screen discards a result whose resume was replaced mid-session.
+  /// @returns true when a stale review was actually discarded.
+  bool dropReviewIfStale(String? currentResumeKey) {
+    if (!isReviewStaleFor(currentResumeKey)) return false;
+    clearReview();
+    return true;
   }
 
   /// Clear error message
