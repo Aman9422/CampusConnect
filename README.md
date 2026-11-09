@@ -1,267 +1,371 @@
-# 🎓 CampusConnect – AI-Powered Smart Campus App
+# CampusConnect
+### AI-Powered Smart Campus Ecosystem for Student and Alumni Collaboration and Career Growth
 
-CampusConnect is a **Flutter + Firebase based smart campus mobile application** designed to centralize academic resources, placement information, and intelligent assistance for college students.
+CampusConnect is a Flutter-based smart campus application designed to connect students, alumni, and teachers through a unified digital platform. It brings together academic resources, career opportunities, placement support, communication, and AI-powered career assistance.
 
-The project follows **clean architecture**, **secure backend practices**, and a **versioned MVP approach**, making it scalable for future AI and alumni-network features.
+The platform provides role-based experiences and uses Firebase services for authentication, data management, file storage, and backend operations. AI capabilities are integrated through secure backend services to support students with career guidance and resume evaluation.
 
----
+## Table of Contents
 
-## 🚀 Features (Version 1 – Stable)
+- [Project Overview](#project-overview)
+- [Key Features](#key-features)
+- [User Roles](#user-roles)
+- [AI-Powered Capabilities](#ai-powered-capabilities)
+- [Technology Stack](#technology-stack)
+- [System Architecture](#system-architecture)
+- [Project Structure](#project-structure)
+- [Getting Started](#getting-started)
+- [Testing and Verification](#testing-and-verification)
+- [Security](#security)
+- [Project Documentation](#project-documentation)
+- [Current Project Status](#current-project-status)
+- [Developer](#developer)
 
-### 🔐 Authentication
+## Project Overview
 
-* Email & password authentication using Firebase
-* Email verification enforced
-* Secure login / logout flow
-* Clean separation using AuthService abstraction
+CampusConnect aims to improve collaboration between students, alumni, and teachers by providing a centralized platform for academic and professional development.
 
-### 🏠 Home Dashboard
+The application includes features such as:
 
-* Personalized greeting
-* Quick access to core modules
-* Latest placement preview
-* Modern card-based UI
+- Academic notes and learning resources.
+- Student and alumni networking.
+- Placement and career opportunities.
+- Resume evaluation and career guidance using AI.
+- Communication and collaboration tools.
+- Role-based dashboards and analytics.
 
-### 📚 Notes Module
+The application is developed using Flutter and Firebase, with AI processing handled through backend Cloud Functions rather than exposing API credentials in the client application.
 
-* Real-time academic notes from Firestore
-* Subject and year based categorization
-* Clean list UI with badges
-* Empty and loading states handled
+## Key Features
 
-### 💼 Placements Module
+### Academic Resources
+- Upload, access, and download academic notes.
+- Organize and share learning materials.
+- Access resources through the application.
 
-* Real-time placement listings
-* Deadline tracking with status indicators
-* Application structure prepared
-* Clean, readable placement cards
+### Placement and Career Opportunities
+- Explore available placement and career opportunities.
+- Apply for eligible opportunities.
+- Track application status.
+- Prevent duplicate applications through backend validation.
 
-### 🤖 AI Chat (UI Ready)
+### Student and Alumni Networking
+- Discover alumni profiles.
+- Connect with alumni and other members.
+- Support mentorship and professional networking.
+- Share career-related opportunities.
 
-* Dedicated AI chat screen
-* Message input and conversation layout
-* Backend integration planned for next version
+### Communication
+- In-app messaging and chat functionality.
+- Notifications for relevant application activities.
+- Communication between members of the campus community.
 
-### 🎨 UI / UX
+### Student Resume Portfolio
+- Maintain a student resume portfolio.
+- Present academic and professional information.
+- Allow authorized teachers to review student portfolios.
 
-* Material 3 design system
-* Modern blue color theme
-* Responsive layouts
-* Error and empty state handling
+### Teacher Dashboard and Analytics
+- Access student-related information.
+- Review student resumes.
+- View student analytics and performance-related information.
+- Access portfolio information through authorized routes.
 
----
+## User Roles
 
-## 🛠️ Tech Stack
+CampusConnect provides role-based functionality for different members of the academic community.
 
-**Frontend**
+| Role | Main Responsibilities and Features |
+|---|---|
+| Student | Access notes, explore opportunities, apply for placements, manage resume portfolio, use AI career tools, and communicate with other members. |
+| Alumni | Maintain professional profiles, connect with students, share opportunities, and support mentorship activities. |
+| Teacher | Manage academic and career-related activities, review student portfolios, and access student analytics. |
+| Admin | Access administrative functionality and manage platform-level operations. |
 
-* Flutter (Dart)
-* Material 3
+Access to application features is controlled through role-based authorization.
 
-**Backend**
+## AI-Powered Capabilities
 
-* Firebase Authentication
-* Cloud Firestore
-* Firebase Core
+CampusConnect integrates AI functionality through Firebase Cloud Functions.
 
-**Architecture**
+### AI Assistant
+Provides an AI-powered conversational interface to help users with relevant academic and career-related queries.
 
-* Service-based abstraction
-* Clean separation of UI and backend logic
-* Versioned development approach
+### Resume Review
+The resume review functionality evaluates uploaded resumes and provides structured feedback, including:
 
----
+- ATS-style score estimation.
+- Resume strengths.
+- Missing or relevant keywords.
+- Formatting observations.
+- Suggestions for improving resume bullet points.
+- Recommendations for resume sections.
 
-## 📂 Project Structure (High Level)
+The generated score is an AI-based estimate and should not be interpreted as an actual score from a specific applicant tracking system.
 
-* `lib/`
+### AI Career Coach
+Provides AI-generated career guidance and recommendations based on available student information and career-related context.
 
-  * `services/` → Auth & Firestore services
-  * `models/` → Data models (Note, Placement)
-  * `views/` → UI screens
-  * `constants/` → Routes & constants
-* `test/` → Authentication tests
-* `firebase_options.dart` → Firebase configuration
+### AI Provider Integration
 
----
+The backend uses a provider integration strategy:
 
-## ▶️ How to Run the Project (Execution Steps)
+- Groq as the primary AI provider.
+- Hugging Face as the fallback provider.
+- Model configuration includes `openai/gpt-oss-20b`.
 
-### 1️⃣ Prerequisites
+AI requests are processed through backend Cloud Functions. Provider API keys are stored in backend configuration and are not embedded in the Flutter application.
 
-Make sure you have:
+## Technology Stack
 
-* Flutter SDK installed
-* Android Studio / VS Code
-* A Firebase account
+| Category | Technologies |
+|---|---|
+| Frontend | Flutter, Dart |
+| State Management | Provider |
+| Authentication | Firebase Authentication |
+| Database | Cloud Firestore |
+| File Storage | Firebase Storage |
+| Backend | Firebase Cloud Functions |
+| Backend Runtime | Node.js 22 |
+| Backend SDK | Firebase Admin SDK |
+| AI Integration | Groq, Hugging Face |
+| Resume Processing | PDF parsing |
+| Notifications | Firebase Cloud Messaging |
+| Security | Firebase Security Rules, Firebase App Check configuration |
+| Data Visualization | FL Chart |
+| Version Control | Git and GitHub |
 
-Check Flutter:
+## System Architecture
 
-```bash
-flutter doctor
+The application follows a client-server architecture with Firebase services handling authentication, data storage, and backend operations.
+
+```text
+                 CampusConnect Application
+                    Flutter / Dart
+                          |
+             ---------------------------
+             |            |            |
+        Authentication  Firestore   Firebase Storage
+             |            |            |
+             ---------------------------
+                          |
+                 Firebase Cloud Functions
+                          |
+              --------------------------
+              |            |           |
+          AI Services   Validation   Backend Logic
+              |
+        ---------------------
+        |                   |
+       Groq             Hugging Face
+     (Primary)           (Fallback)
 ```
 
----
+The Flutter application communicates with Firebase services, while sensitive backend operations and AI provider requests are handled through Cloud Functions.
 
-### 2️⃣ Clone the Repository
+## Project Structure
 
-```bash
-git clone https://github.com/<your-username>/campusconnect.git
-cd campusconnect
+The following is a high-level overview of the repository organization.
+
+```text
+CampusConnect/
+|
+|-- android/
+|-- ios/
+|-- assets/
+|-- lib/
+|   |-- models/
+|   |-- providers/
+|   |-- services/
+|   |-- views/
+|   |-- widgets/
+|   |
+|   |-- main.dart
+|
+|-- functions/
+|   |-- index.js
+|   |-- package.json
+|   |-- test/
+|
+|-- docs/
+|   |-- Task.md
+|   |-- confirmation.md
+|   |-- eligibility_rules.md
+|   |-- v9_2_4_hardening_report.md
+|
+|-- test/
+|-- firebase.json
+|-- firestore.rules
+|-- firestore.indexes.json
+|-- storage.rules
+|-- pubspec.yaml
+|-- README.md
 ```
 
----
+## Getting Started
 
-### 3️⃣ Install Dependencies
+Follow these steps to set up the project locally.
+
+### Prerequisites
+
+Install the following tools:
+
+- Flutter SDK
+- Dart SDK
+- Android Studio or Visual Studio Code
+- Node.js 22
+- Firebase CLI
+- Git
+
+A configured Firebase project is also required.
+
+### 1. Clone the Repository
+
+```bash
+git clone https://github.com/Aman9422/CampusConnect.git
+```
+
+Navigate to the project directory:
+
+```bash
+cd CampusConnect
+```
+
+### 2. Install Flutter Dependencies
 
 ```bash
 flutter pub get
 ```
 
----
+### 3. Configure Firebase
 
-### 4️⃣ Firebase Setup
+Configure Firebase for your own Firebase project using FlutterFire CLI:
 
-1. Create a Firebase project
-2. Enable **Email/Password Authentication**
-3. Enable **Cloud Firestore** (Production mode)
-4. Add Android / iOS app in Firebase
-5. Download config files:
-
-   * `google-services.json` (Android)
-   * `GoogleService-Info.plist` (iOS)
-6. Place them in the correct platform folders
-
----
-
-### 5️⃣ Firestore Security Rules (Required)
-
-```js
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-
-    match /notes/{noteId} {
-      allow read: if request.auth != null;
-      allow write: if false;
-    }
-
-    match /placements/{placementId} {
-      allow read: if request.auth != null;
-      allow write: if false;
-
-      match /applications/{userId} {
-        allow read, write: if request.auth != null
-                           && request.auth.uid == userId;
-      }
-    }
-  }
-}
+```bash
+dart pub global activate flutterfire_cli
+flutterfire configure
 ```
 
----
+Ensure the Firebase configuration files and project settings match your Firebase project.
 
-### 6️⃣ Add Sample Firestore Data
+### 4. Configure Backend Dependencies
 
-Create collections:
+Navigate to the Cloud Functions directory:
 
-* `notes`
-* `placements`
+```bash
+cd functions
+npm install
+```
 
-Add sample documents so the UI can display real-time data.
+Configure the required AI provider credentials securely using Firebase Functions secrets or the configuration mechanism specified by the backend implementation.
 
----
+Do not commit API keys or other sensitive credentials to the repository.
 
-### 7️⃣ Run the App
+### 5. Deploy Firebase Configuration
+
+From the project root, deploy the required Firebase resources:
+
+```bash
+firebase deploy --only firestore:rules,firestore:indexes,storage
+```
+
+Deploy Cloud Functions:
+
+```bash
+firebase deploy --only functions
+```
+
+### 6. Run the Application
+
+Return to the project root:
+
+```bash
+cd ..
+```
+
+Check connected devices:
+
+```bash
+flutter devices
+```
+
+Run the application:
 
 ```bash
 flutter run
 ```
 
+## Testing and Verification
+
+CampusConnect has undergone functional, backend, security-rule, and physical-device verification.
+
+The documented v9.2.4 hardening report records the following automated test results:
+
+| Test Area | Result |
+|---|---:|
+| Flutter Tests | 540 passed |
+| Cloud Functions Tests | 97 passed |
+| Firestore Security Rule Tests | 37 passed |
+| Firebase Storage Rule Tests | 18 passed |
+| Total Security Rule Assertions | 55 passed |
+| Flutter Static Analysis | No issues reported |
+
+In addition to automated testing, the application has been run and verified on physical devices. The implemented features have been tested and are working as expected.
+
+## Security
+
+Security is an important part of the CampusConnect architecture.
+
+The project incorporates:
+
+- Firebase Authentication for user authentication.
+- Role-based access control for application functionality.
+- Firestore Security Rules for database access restrictions.
+- Firebase Storage Security Rules for file access restrictions.
+- Backend validation through Cloud Functions.
+- Server-side handling of AI provider credentials.
+- Firebase App Check configuration.
+
+App Check enforcement settings should be reviewed according to the deployment environment and distribution requirements. Do not assume that configuration alone means enforcement is enabled.
+
+## Project Documentation
+
+Additional technical information is available in the repository:
+
+| Document | Description |
+|---|---|
+| `CHANGELOG.md` | Project version history and feature updates. |
+| `docs/Task.md` | Development requirements and implementation tasks. |
+| `docs/confirmation.md` | Project verification and release confirmation. |
+| `docs/v9_2_4_hardening_report.md` | Security hardening and testing report. |
+| `docs/eligibility_rules.md` | Eligibility and access-related rules. |
+| `docs/app_check_status.md` | Firebase App Check configuration status. |
+
+## Current Project Status
+
+CampusConnect is a developed and tested application.
+
+- Core application functionality implemented.
+- Student, alumni, and teacher experiences implemented.
+- AI-powered career and resume features integrated.
+- Firebase backend and security rules configured.
+- Automated testing completed with documented results.
+- Application successfully tested on physical devices.
+- Implemented features verified to be working properly.
+
+Google Play Store publication is a separate distribution step and is not implied by physical-device verification.
+
+## Developer
+
+Aman Yadav
+
+B.Tech – Computer Science and Engineering  
+J D College of Engineering and Management, Nagpur
+
+GitHub: [Aman9422](https://github.com/Aman9422)
+
+Project Repository: [CampusConnect](https://github.com/Aman9422/CampusConnect)
+
 ---
 
-## ✅ Version 1 Status
-
-* ✅ Authentication complete
-* ✅ Firestore integration complete
-* ✅ Notes & placements working
-* ✅ Secure backend rules
-* ✅ Stable release tagged as `v1.0.0`
-
----
-
-## 🔮 Roadmap
-
-### Version 2
-
-* Placement apply functionality
-* Note file downloads
-* UI/UX polish
-* Advanced filters and search
-
-### Version 3
-
-* AI Chat backend (Cloud Functions)
-* Alumni role & networking
-* Resume upload & analysis
-* Smart notifications
-
-### ✨ Version 5.0 (Current - January 2026)
-
-#### 🎯 Major Improvements
-- **Provider State Management** - Centralized, predictable state for placements and AI
-- **Optimistic UI Updates** - Instant feedback (<100ms) when applying for placements
-- **90% Firestore Read Reduction** - One-time fetch vs constant streams
-- **Idempotent Cloud Functions** - Safe duplicate prevention via transactions
-- **Skeleton Loaders** - Polished loading states instead of spinners
-- **Applied Date Display** - "Applied • Jan 18" with full timestamp tracking
-
-#### 📂 New Architecture
-```
-lib/
-├── providers/              # NEW - State management layer
-│   ├── placements_provider.dart
-│   └── ai_usage_provider.dart
-├── widgets/                # NEW - Reusable components
-│   ├── skeleton_loader.dart
-│   └── empty_state.dart
-└── models/
-    └── application.dart    # NEW - Normalized application model
-```
-
-#### 🔒 Security Enhancements
-- UID from Firebase Auth (request.auth.uid) - cannot be spoofed
-- HTTPS Callable Cloud Functions with automatic auth
-- Transaction-based duplicate checking
-- Idempotent apply operations
-
-#### 📊 Performance Metrics
-| Metric | v4.0.1 | v5.0.0 | Improvement |
-|--------|--------|--------|-------------|
-| Apply Response | 1-2s | <100ms | 10-20x faster |
-| Firestore Reads | ~50/session | ~5/session | 90% reduction |
-| Duplicate Applies | Possible | Prevented | 100% safe |
-
-See [CHANGELOG.md](CHANGELOG.md) for detailed release notes.
-
----
-
-## 📌 Versioning
-
-* **v1.0.0** – Stable MVP (initial release)
-* **v4.0.1** – AI Assistant + HTTPS Callable
-* **v5.0.0** – Provider state management + UX polish (current)
-* Future versions developed in feature branches
-
-
-## 👨‍💻 Author
-
-**Aman Yadav**
-B.Tech (CSE), 3rd Year
-J D College Of Engineering & Management
-
-
-## ⭐ Support
-
-If you find this project useful, consider giving it a ⭐ on GitHub.
-
+*CampusConnect — Connecting students, alumni, and educators through technology, collaboration, and AI-powered career development.*
